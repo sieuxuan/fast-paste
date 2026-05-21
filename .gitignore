@@ -1,0 +1,16 @@
+node_modules/
+src-tauri/target/
+*.exe
+settings.json
+debug_ips.txt
+.idea/
+.agent/
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/app/release/
+android/local.properties
+*.apk
+*.aab

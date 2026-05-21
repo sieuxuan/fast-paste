@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FastPaste</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f8f9fb;
+      --surface: #ffffff;
+      --surface-hover: #f1f4f8;
+      --text: #3b4252;
+      --text-secondary: #7b8794;
+      --heading: #1e2530;
+      --accent: #3b82f6;
+      --accent-light: #eff6ff;
+      --success: #22c55e;
+      --border: #e8ecf1;
+      --radius: 10px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-lg: 0 4px 12px rgba(0,0,0,0.08);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+
+    /* ── Header ── */
+    .header {
+      -webkit-app-region: drag;
+      background: var(--surface);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo {
+      width: 26px; height: 26px;
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      color: #fff;
+    }
+    .title {
+      font-weight: 700;
+      color: var(--heading);
+      font-size: 15px;
+      letter-spacing: -0.3px;
+    }
+    .hotkey-badge {
+      font-size: 11px;
+      color: var(--text-secondary);
+      background: var(--bg);
+      padding: 3px 8px;
+      border-radius: 5px;
+      -webkit-app-region: no-drag;
+    }
+    .hotkey-badge span { color: var(--accent); font-weight: 600; }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 20px;
+      gap: 4px;
+    }
+    .tab {
+      flex: 1;
+      text-align: center;
+      padding: 11px 0;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s ease;
+      border-radius: 6px 6px 0 0;
+    }
+    .tab:hover { color: var(--heading); background: var(--surface-hover); }
+    .tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* ── Content ── */
+    .content {
+      padding: 16px 20px;
+      flex: 1;
+      overflow-y: auto;
+      display: none;
+    }
+    .content.active { display: block; }
+    .content::-webkit-scrollbar { width: 5px; }
+    .content::-webkit-scrollbar-track { background: transparent; }
+    .content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+    .content::-webkit-scrollbar-thumb:hover { background: #ccc; }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 14px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+    }
+    .card-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--accent);
+      margin-bottom: 14px;
+      font-weight: 600;
+    }
+
+    /* ── History ── */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+    .empty-icon { font-size: 32px; margin-bottom: 10px; opacity: 0.4; }
+
+    .date-group { margin-bottom: 16px; }
+    .date-header {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    .history-item {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--bg);
+      margin-bottom: 6px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+    }
+    .history-item:hover {
+      border-color: var(--accent);
+      background: var(--accent-light);
+      box-shadow: var(--shadow);
+    }
+    .history-item:active { transform: scale(0.99); }
+    .history-meta {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .source-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      letter-spacing: 0.3px;
+    }
+    .source-pc { background: #dbeafe; color: #2563eb; }
+    .source-android { background: #dcfce7; color: #16a34a; }
+    .history-text {
+      font-size: 13px;
+      color: var(--heading);
+      word-break: break-word;
+      line-height: 1.45;
+    }
+
+    /* ── Settings ── */
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      font-size: 13px;
+    }
+    .setting-row:last-child { margin-bottom: 0; }
+    .setting-label { color: var(--heading); font-weight: 500; }
+
+    input[type="text"] {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--heading);
+      padding: 7px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      width: 160px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+
+    /* Toggle Switch */
+    .toggle { position: relative; width: 40px; height: 22px; cursor: pointer; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: var(--border); border-radius: 22px;
+      transition: all 0.25s ease;
+    }
+    .toggle-slider::before {
+      content: "";
+      position: absolute; top: 2px; left: 2px;
+      width: 18px; height: 18px;
+      background: #fff; border-radius: 50%;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+      transition: all 0.25s ease;
+    }
+    .toggle input:checked + .toggle-slider { background: var(--accent); }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(18px); }
+
+    button {
+      font-family: 'Inter', sans-serif;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 7px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+    button:hover { background: #2563eb; box-shadow: 0 2px 6px rgba(37,99,235,0.25); }
+    button:active { transform: scale(0.97); }
+
+    /* ── Device & IP ── */
+    .device-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      font-size: 13px;
+    }
+    .device-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 6px rgba(34,197,94,0.4);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .ip-mono {
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: var(--bg);
+      padding: 4px 8px;
+      border-radius: 4px;
+      margin: 2px 0;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">⚡</div>
+      <div class="title">FastPaste</div>
+    </div>
+    <div id="hotkey-display" class="hotkey-badge">
+      <span>Ctrl+Alt+Z</span> để ẩn/hiện
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('history')">📋 Lịch Sử</div>
+    <div class="tab" onclick="switchTab('settings')">⚙️ Cài Đặt</div>
+  </div>
+
+  <!-- HISTORY TAB -->
+  <div id="tab-history" class="content active">
+    <div id="history-container">
+      <div class="empty-state">
+        <div class="empty-icon">📋</div>
+        <div>Chưa có dữ liệu clipboard</div>
+        <div style="font-size:11px; margin-top:4px; color:var(--text-secondary)">Copy nội dung trên PC hoặc kết nối điện thoại</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS TAB -->
+  <div id="tab-settings" class="content">
+    <div class="card">
+      <div class="card-title">⌨️ Phím Tắt</div>
+      <div class="setting-row">
+        <span class="setting-label">Hotkey ẩn/hiện</span>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input type="text" id="hotkey-input" value="CommandOrControl+Alt+Z">
+          <button onclick="saveHotkey()">Lưu</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🚀 Khởi Động</div>
+      <div class="setting-row">
+        <span class="setting-label">Tự chạy cùng Windows</span>
+        <label class="toggle">
+          <input type="checkbox" id="autostart-checkbox" onchange="saveAutoStart()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📱 Thiết Bị Kết Nối</div>
+      <div id="devices" style="font-size: 13px; color: var(--text-secondary);">
+        Chưa có thiết bị nào
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🌐 Địa Chỉ Mạng</div>
+      <div id="ips" style="font-size: 13px;">Đang tải...</div>
+    </div>
+  </div>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('tab-' + tabId).classList.add('active');
+    }
+
+    const invoke = window.__TAURI__.core.invoke;
+    const listen = window.__TAURI__.event.listen;
+
+    function saveHotkey() {
+      const val = document.getElementById('hotkey-input').value;
+      invoke('save_hotkey', { hotkey: val });
+      const display = val.replace('CommandOrControl', 'Ctrl');
+      document.getElementById('hotkey-display').innerHTML = `<span>${display}</span> để ẩn/hiện`;
+    }
+
+    function saveAutoStart() {
+      invoke('save_autostart', { autostart: document.getElementById('autostart-checkbox').checked });
+    }
+
+    function copyItemByIndex(index) {
+      if (window.currentHistory && window.currentHistory[index]) {
+        invoke('copy_text', { text: window.currentHistory[index].text });
+      }
+    }
+
+    function formatDate(isoString) {
+      const date = new Date(isoString);
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      if (date.toDateString() === today.toDateString()) return "Hôm nay";
+      if (date.toDateString() === yesterday.toDateString()) return "Hôm qua";
+      return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    }
+
+    listen('update_state', (event) => {
+      const data = event.payload;
+
+      if (data.settings) {
+        document.getElementById('hotkey-input').value = data.settings.hotkey;
+        document.getElementById('autostart-checkbox').checked = data.settings.auto_start;
+        const displayKey = data.settings.hotkey.replace('CommandOrControl', 'Ctrl');
+        document.getElementById('hotkey-display').innerHTML = `<span>${displayKey}</span> để ẩn/hiện`;
+      }
+
+      if (data.ips) {
+        document.getElementById('ips').innerHTML = data.ips
+          .map(ip => `<div class="ip-mono">${ip}:4567</div>`)
+          .join('');
+      }
+
+      if (data.clients !== undefined) {
+        const dev = document.getElementById('devices');
+        if (data.clients.length === 0) {
+          dev.innerHTML = '<div style="color:var(--text-secondary)">Chưa có thiết bị nào</div>';
+        } else {
+          dev.innerHTML = data.clients.map(c =>
+            `<div class="device-item"><div class="device-dot"></div>${c}</div>`
+          ).join('');
+        }
+      }
+
+      if (data.history) {
+        const container = document.getElementById('history-container');
+        if (data.history.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-icon">📋</div>
+              <div>Chưa có dữ liệu clipboard</div>
+              <div style="font-size:11px; margin-top:4px; color:var(--text-secondary)">Copy nội dung trên PC hoặc kết nối điện thoại</div>
+            </div>`;
+          return;
+        }
+
+        window.currentHistory = data.history;
+        const groups = {};
+        data.history.forEach((item, index) => {
+          const dateStr = formatDate(item.timestamp);
+          if (!groups[dateStr]) groups[dateStr] = [];
+          groups[dateStr].push({ ...item, globalIndex: index });
+        });
+
+        container.innerHTML = Object.keys(groups).map(dateStr => `
+          <div class="date-group">
+            <div class="date-header">${dateStr}</div>
+            ${groups[dateStr].map(item => {
+              const safeText = item.text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+              const display = safeText.length > 120 ? safeText.substring(0, 120) + "…" : safeText;
+              const sourceClass = item.source === 'PC' ? 'source-pc' : 'source-android';
+              const sourceLabel = item.source === 'PC' ? '💻 PC' : '📱 Android';
+              return `
+              <div class="history-item" onclick="copyItemByIndex(${item.globalIndex})" title="Click để copy">
+                <div class="history-meta">
+                  <span class="source-badge ${sourceClass}">${sourceLabel}</span>
+                  ${new Date(item.timestamp).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'})}
+                </div>
+                <div class="history-text">${display}</div>
+              </div>`;
+            }).join('')}
+          </div>
+        `).join('');
+      }
+    });
+
+    invoke('request_state');
+  </script>
+</body>
+</html>
