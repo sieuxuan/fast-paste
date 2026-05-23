@@ -58,10 +58,20 @@ fn save_hotkey(hotkey: String, state: State<'_, AppState>, app: AppHandle) {
     broadcast_state(&app);
 }
 
+use tauri_plugin_autostart::ManagerExt;
+
 #[tauri::command]
 fn save_autostart(autostart: bool, state: State<'_, AppState>, app: AppHandle) {
     let mut data = state.0.lock().unwrap();
     data.settings.auto_start = autostart;
+    
+    let autostart_manager = app.autolaunch();
+    if autostart {
+        let _ = autostart_manager.enable();
+    } else {
+        let _ = autostart_manager.disable();
+    }
+
     save_state(&data);
     drop(data);
     broadcast_state(&app);
@@ -128,13 +138,29 @@ fn broadcast_state(app: &AppHandle) {
 fn get_local_ips() -> Vec<String> {
     let mut ips = vec![];
     if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
-        for (_name, ip) in interfaces {
+        for (name, ip) in interfaces {
             if ip.is_ipv4() && !ip.is_loopback() {
                 let s = ip.to_string();
+                let name_lower = name.to_lowercase();
+                
                 // Skip link-local (169.254.x.x) — not routable
-                if !s.starts_with("169.254.") {
-                    ips.push(s);
+                if s.starts_with("169.254.") {
+                    continue;
                 }
+                
+                // Skip common virtual adapters
+                if name_lower.contains("vmware") 
+                    || name_lower.contains("virtual") 
+                    || name_lower.contains("vbox")
+                    || name_lower.contains("wsl")
+                    || name_lower.contains("hyper-v")
+                    || name_lower.contains("vethernet")
+                    || name_lower.contains("fortinet")
+                    || name_lower.contains("loopback") {
+                    continue;
+                }
+
+                ips.push(s);
             }
         }
     }
@@ -304,7 +330,7 @@ pub fn run() {
                     let app_rx = app_ws.clone();
                     let ip_clone = ip.clone();
                     tauri::async_runtime::spawn(async move {
-                        while let Some(Ok(msg)) = futures_util::StreamExt::next(&mut read).await {
+                        while let Ok(Some(Ok(msg))) = tokio::time::timeout(Duration::from_secs(45), futures_util::StreamExt::next(&mut read)).await {
                             if let Ok(text) = msg.to_text() {
                                 if !text.is_empty() {
                                     let _ = app_rx.clipboard().write_text(text.to_string());
