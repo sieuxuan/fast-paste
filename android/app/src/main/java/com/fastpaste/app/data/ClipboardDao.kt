@@ -17,6 +17,15 @@ interface ClipboardDao {
     @Query("SELECT * FROM clipboard_history ORDER BY timestamp DESC LIMIT :limit")
     fun getRecent(limit: Int): Flow<List<ClipboardEntry>>
 
+    @Query("SELECT * FROM clipboard_history ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentOnce(limit: Int): List<ClipboardEntry>
+
+    @Query("SELECT * FROM clipboard_history ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestOnce(): ClipboardEntry?
+
+    @Query("SELECT COUNT(*) FROM clipboard_history WHERE content = :content")
+    suspend fun countByContent(content: String): Int
+
     @Query("DELETE FROM clipboard_history WHERE id = :id")
     suspend fun deleteById(id: Long)
 

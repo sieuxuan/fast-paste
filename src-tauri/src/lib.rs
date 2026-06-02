@@ -24,6 +24,21 @@ struct HistoryItem {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+struct SyncEntry {
+    text: String,
+    timestamp: i64,
+    source: String,
+}
+
+#[derive(Deserialize)]
+struct WsProtocolMessage {
+    app: Option<String>,
+    #[serde(rename = "type")]
+    kind: String,
+    entries: Option<Vec<SyncEntry>>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 struct AppStateData {
     settings: AppSettings,
     history: Vec<HistoryItem>,
@@ -176,6 +191,53 @@ fn make_history_item(text: &str, source: &str) -> HistoryItem {
     }
 }
 
+fn make_history_item_at(text: &str, source: &str, timestamp_millis: i64) -> HistoryItem {
+    let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp_millis)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc3339();
+    HistoryItem {
+        id: format!("{}", timestamp_millis),
+        text: text.to_string(),
+        timestamp,
+        source: source.to_string(),
+    }
+}
+
+fn timestamp_to_millis(timestamp: &str) -> i64 {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map(|value| value.timestamp_millis())
+        .unwrap_or(0)
+}
+
+fn make_history_sync_payload(data: &mut AppStateData, current_clipboard: Option<String>) -> Option<String> {
+    if let Some(text) = current_clipboard {
+        if !text.is_empty() && !data.history.iter().any(|item| item.text == text) {
+            data.history.insert(0, make_history_item(&text, "PC"));
+            if data.history.len() > 100 {
+                data.history.truncate(100);
+            }
+            save_state(data);
+        }
+    }
+
+    let entries: Vec<SyncEntry> = data
+        .history
+        .iter()
+        .map(|item| SyncEntry {
+            text: item.text.clone(),
+            timestamp: timestamp_to_millis(&item.timestamp),
+            source: item.source.clone(),
+        })
+        .collect();
+
+    Some(serde_json::json!({
+        "app": "fastpaste",
+        "type": "history_sync",
+        "entries": entries,
+    })
+    .to_string())
+}
+
 // ── Application Entry ──
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -314,11 +376,26 @@ pub fn run() {
                     };
                     let (mut write, mut read) = futures_util::StreamExt::split(ws_stream);
 
-                    // Sender: forward broadcast messages to this client
+                    // Sender: exchange full history first, then forward future clipboard changes.
                     let mut rx = ws_tx_ws.subscribe();
+                    let app_initial_sync = app_ws.clone();
+                    let data_initial_sync = data_ws.clone();
                     tauri::async_runtime::spawn(async move {
+                        use futures_util::SinkExt;
+                        let current_clipboard = app_initial_sync.clipboard().read_text().ok();
+                        let payload = {
+                            let mut data = data_initial_sync.lock().unwrap();
+                            make_history_sync_payload(&mut data, current_clipboard)
+                        };
+                        if let Some(payload) = payload {
+                            if !payload.is_empty() {
+                                let _ = write
+                                    .send(tokio_tungstenite::tungstenite::Message::Text(payload.into()))
+                                    .await;
+                            }
+                        }
+
                         while let Ok(msg) = rx.recv().await {
-                            use futures_util::SinkExt;
                             let _ = write
                                 .send(tokio_tungstenite::tungstenite::Message::Text(msg.into()))
                                 .await;
@@ -333,6 +410,59 @@ pub fn run() {
                         while let Ok(Some(Ok(msg))) = tokio::time::timeout(Duration::from_secs(45), futures_util::StreamExt::next(&mut read)).await {
                             if let Ok(text) = msg.to_text() {
                                 if !text.is_empty() {
+                                    if let Ok(protocol) = serde_json::from_str::<WsProtocolMessage>(text) {
+                                        if protocol.app.as_deref() == Some("fastpaste") && protocol.kind == "history_sync" {
+                                            let entries = protocol.entries.unwrap_or_default();
+                                            let mut newest_incoming: Option<SyncEntry> = None;
+                                            let latest_local_timestamp = {
+                                                let mut d = data_rx.lock().unwrap();
+                                                let latest = d
+                                                    .history
+                                                    .first()
+                                                    .map(|item| timestamp_to_millis(&item.timestamp))
+                                                    .unwrap_or(0);
+
+                                                for entry in entries {
+                                                    if entry.text.is_empty() {
+                                                        continue;
+                                                    }
+                                                    if newest_incoming
+                                                        .as_ref()
+                                                        .map(|current| entry.timestamp > current.timestamp)
+                                                        .unwrap_or(true)
+                                                    {
+                                                        newest_incoming = Some(entry.clone());
+                                                    }
+                                                    if !d.history.iter().any(|item| item.text == entry.text) {
+                                                        d.history.push(make_history_item_at(
+                                                            &entry.text,
+                                                            &entry.source,
+                                                            entry.timestamp,
+                                                        ));
+                                                    }
+                                                }
+
+                                                d.history.sort_by(|a, b| {
+                                                    timestamp_to_millis(&b.timestamp)
+                                                        .cmp(&timestamp_to_millis(&a.timestamp))
+                                                });
+                                                if d.history.len() > 100 {
+                                                    d.history.truncate(100);
+                                                }
+                                                save_state(&d);
+                                                latest
+                                            };
+
+                                            if let Some(entry) = newest_incoming {
+                                                if entry.timestamp > latest_local_timestamp {
+                                                    let _ = app_rx.clipboard().write_text(entry.text);
+                                                }
+                                            }
+                                            broadcast_state(&app_rx);
+                                            continue;
+                                        }
+                                    }
+
                                     let _ = app_rx.clipboard().write_text(text.to_string());
                                     let mut d = data_rx.lock().unwrap();
                                     d.history.insert(0, make_history_item(text, "ANDROID"));

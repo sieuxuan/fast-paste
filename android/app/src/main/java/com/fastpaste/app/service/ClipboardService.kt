@@ -20,6 +20,8 @@ import com.fastpaste.app.websocket.WebSocketClient
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import org.json.JSONArray
+import org.json.JSONObject
 
 class ClipboardService : Service() {
 
@@ -78,17 +80,8 @@ class ClipboardService : Service() {
 
             // Receive clipboard from desktop
             scope.launch {
-                client.messages.collect { text ->
-                    if (text.isNotEmpty() && text != lastSyncedText) {
-                        lastSyncedText = text
-                        withContext(Dispatchers.Main) {
-                            clipboardManager.setPrimaryClip(
-                                ClipData.newPlainText("Fast Paste", text)
-                            )
-                        }
-                        saveToHistory(text, "REMOTE")
-                        Log.d(TAG, "Received: ${text.take(60)}")
-                    }
+                client.messages.collect { message ->
+                    handleIncomingMessage(message)
                 }
             }
 
@@ -98,18 +91,8 @@ class ClipboardService : Service() {
                     connectionState.value = state
                     val status = when (state) {
                         ConnectionState.CONNECTED -> {
-                            // Auto-sync local clipboard when reconnected
-                            try {
-                                val currentText = clipboardManager.primaryClip?.getItemAt(0)?.text?.toString()
-                                if (currentText != null && currentText.isNotEmpty() && currentText != lastSyncedText) {
-                                    lastSyncedText = currentText
-                                    client.send(currentText)
-                                    saveToHistory(currentText, "LOCAL")
-                                    Log.d(TAG, "Auto-synced clipboard after reconnect")
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Auto-sync failed: ${e.message}")
-                            }
+                            sendHistorySync(client)
+                            Log.d(TAG, "Connected; exchanging clipboard history")
                             "Connected to $host"
                         }
                         ConnectionState.CONNECTING -> "Connecting to $host..."
@@ -121,6 +104,123 @@ class ClipboardService : Service() {
         }
 
         clipboardManager.addPrimaryClipChangedListener(clipListener)
+    }
+
+    private suspend fun handleIncomingMessage(message: String) {
+        val handledAsSync = try {
+            val json = JSONObject(message)
+            if (json.optString("app") == "fastpaste" && json.optString("type") == "history_sync") {
+                mergeHistorySync(json.optJSONArray("entries") ?: JSONArray())
+                true
+            } else {
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
+
+        if (!handledAsSync) {
+            receiveClipboardText(message)
+        }
+    }
+
+    private suspend fun receiveClipboardText(text: String) {
+        if (text.isNotEmpty() && text != lastSyncedText) {
+            lastSyncedText = text
+            withContext(Dispatchers.Main) {
+                clipboardManager.setPrimaryClip(
+                    ClipData.newPlainText("Fast Paste", text)
+                )
+            }
+            saveToHistory(text, "REMOTE")
+            Log.d(TAG, "Received: ${text.take(60)}")
+        }
+    }
+
+    private fun sendHistorySync(client: WebSocketClient) {
+        scope.launch {
+            try {
+                val entries = (application as FastPasteApp)
+                    .database
+                    .clipboardDao()
+                    .getRecentOnce(200)
+                val dao = (application as FastPasteApp).database.clipboardDao()
+                val seen = mutableSetOf<String>()
+                val history = JSONArray()
+                entries.forEach { entry ->
+                    seen.add(entry.content)
+                    history.put(JSONObject()
+                        .put("text", entry.content)
+                        .put("timestamp", entry.timestamp)
+                        .put("source", if (entry.source == "REMOTE") "PC" else "ANDROID")
+                    )
+                }
+
+                val currentText = clipboardManager.primaryClip
+                    ?.takeIf { it.itemCount > 0 }
+                    ?.getItemAt(0)
+                    ?.text
+                    ?.toString()
+                if (!currentText.isNullOrBlank() && !seen.contains(currentText)) {
+                    val timestamp = System.currentTimeMillis()
+                    if (dao.countByContent(currentText) == 0) {
+                        dao.insert(ClipboardEntry(content = currentText, source = "LOCAL", timestamp = timestamp))
+                    }
+                    history.put(JSONObject()
+                        .put("text", currentText)
+                        .put("timestamp", timestamp)
+                        .put("source", "ANDROID")
+                    )
+                }
+
+                val payload = JSONObject()
+                    .put("app", "fastpaste")
+                    .put("type", "history_sync")
+                    .put("entries", history)
+                client.send(payload.toString())
+            } catch (e: Exception) {
+                Log.e(TAG, "History sync send failed: ${e.message}")
+            }
+        }
+    }
+
+    private suspend fun mergeHistorySync(entries: JSONArray) {
+        val db = (application as FastPasteApp).database
+        val dao = db.clipboardDao()
+        val latestLocalTimestamp = dao.getLatestOnce()?.timestamp ?: 0L
+        var newestIncomingText: String? = null
+        var newestIncomingTimestamp = 0L
+        var inserted = 0
+
+        for (i in 0 until entries.length()) {
+            val item = entries.optJSONObject(i) ?: continue
+            val text = item.optString("text")
+            if (text.isBlank()) continue
+
+            val timestamp = item.optLong("timestamp", System.currentTimeMillis())
+            val source = if (item.optString("source") == "ANDROID") "LOCAL" else "REMOTE"
+            if (timestamp > newestIncomingTimestamp) {
+                newestIncomingTimestamp = timestamp
+                newestIncomingText = text
+            }
+
+            if (dao.countByContent(text) == 0) {
+                dao.insert(ClipboardEntry(content = text, source = source, timestamp = timestamp))
+                inserted++
+            }
+        }
+
+        val textToApply = newestIncomingText
+        if (newestIncomingTimestamp > latestLocalTimestamp && !textToApply.isNullOrBlank()) {
+            lastSyncedText = textToApply
+            withContext(Dispatchers.Main) {
+                clipboardManager.setPrimaryClip(
+                    ClipData.newPlainText("Fast Paste", textToApply)
+                )
+            }
+        }
+
+        Log.d(TAG, "Merged history sync: $inserted new items")
     }
 
     private fun saveToHistory(text: String, source: String) {
