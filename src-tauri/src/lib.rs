@@ -121,14 +121,20 @@ fn toggle_window(app: &AppHandle) {
     }
 }
 
+fn get_settings_path() -> std::path::PathBuf {
+    std::env::current_exe()
+        .map(|p| p.parent().unwrap().join("settings.json"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("settings.json"))
+}
+
 fn save_state(data: &AppStateData) {
     if let Ok(json) = serde_json::to_string(data) {
-        let _ = std::fs::write("settings.json", json);
+        let _ = std::fs::write(get_settings_path(), json);
     }
 }
 
 fn load_state() -> AppStateData {
-    if let Ok(json) = std::fs::read_to_string("settings.json") {
+    if let Ok(json) = std::fs::read_to_string(get_settings_path()) {
         if let Ok(data) = serde_json::from_str(&json) {
             return data;
         }

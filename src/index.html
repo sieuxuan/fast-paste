@@ -442,8 +442,8 @@
           <div class="date-group">
             <div class="date-header">${dateStr}</div>
             ${groups[dateStr].map(item => {
-              const safeText = item.text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-              const display = safeText.length > 120 ? safeText.substring(0, 120) + "…" : safeText;
+              const truncatedText = item.text.length > 120 ? item.text.substring(0, 120) + "…" : item.text;
+              const display = truncatedText.replace(/</g, "&lt;").replace(/>/g, "&gt;");
               const sourceClass = item.source === 'PC' ? 'source-pc' : 'source-android';
               const sourceLabel = item.source === 'PC' ? '💻 PC' : '📱 Android';
               return `
