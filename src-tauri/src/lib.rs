@@ -1,11 +1,14 @@
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
-use serde::{Deserialize, Serialize};
-use tokio::net::{UdpSocket, TcpListener};
-use tokio::time::sleep;
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_opener::OpenerExt;
+use tokio::net::{TcpListener, UdpSocket};
+use tokio::time::sleep;
+
+const AUTOSTART_HIDDEN_ARG: &str = "--fastpaste-hidden";
 
 // ── Data Models ──
 
@@ -51,45 +54,75 @@ struct AppState(Arc<Mutex<AppStateData>>);
 // ── IPC Commands ──
 
 #[tauri::command]
-fn save_hotkey(hotkey: String, state: State<'_, AppState>, app: AppHandle) {
-    let mut data = state.0.lock().unwrap();
+fn save_hotkey(hotkey: String, state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
+    let new_shortcut = hotkey
+        .parse::<Shortcut>()
+        .map_err(|_| "Hotkey không hợp lệ. Ví dụ: CommandOrControl+Alt+Z".to_string())?;
 
-    if let Ok(old) = data.settings.hotkey.parse::<Shortcut>() {
+    let mut data = state.0.lock().unwrap();
+    let old_hotkey = data.settings.hotkey.clone();
+
+    if old_hotkey == hotkey {
+        return Ok(());
+    }
+
+    let old_shortcut = old_hotkey.parse::<Shortcut>().ok();
+    if let Some(old) = old_shortcut {
         let _ = app.global_shortcut().unregister(old);
     }
 
-    data.settings.hotkey = hotkey.clone();
-
-    if let Ok(new) = hotkey.parse::<Shortcut>() {
-        let _ = app.global_shortcut().on_shortcut(new, |app, _, event| {
+    if let Err(error) = app
+        .global_shortcut()
+        .on_shortcut(new_shortcut, |app, _, event| {
             if event.state == ShortcutState::Pressed {
                 toggle_window(app);
             }
-        });
+        })
+    {
+        if let Ok(old) = old_hotkey.parse::<Shortcut>() {
+            let _ = app.global_shortcut().on_shortcut(old, |app, _, event| {
+                if event.state == ShortcutState::Pressed {
+                    toggle_window(app);
+                }
+            });
+        }
+        return Err(format!("Không thể đăng ký hotkey: {error}"));
     }
 
+    data.settings.hotkey = hotkey;
     save_state(&data);
     drop(data);
     broadcast_state(&app);
+    Ok(())
 }
 
 use tauri_plugin_autostart::ManagerExt;
 
 #[tauri::command]
-fn save_autostart(autostart: bool, state: State<'_, AppState>, app: AppHandle) {
+fn save_autostart(
+    autostart: bool,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
     let mut data = state.0.lock().unwrap();
     data.settings.auto_start = autostart;
-    
+
     let autostart_manager = app.autolaunch();
     if autostart {
-        let _ = autostart_manager.enable();
-    } else {
         let _ = autostart_manager.disable();
+        autostart_manager
+            .enable()
+            .map_err(|error| format!("Không thể bật tự khởi động: {error}"))?;
+    } else {
+        autostart_manager
+            .disable()
+            .map_err(|error| format!("Không thể tắt tự khởi động: {error}"))?;
     }
 
     save_state(&data);
     drop(data);
     broadcast_state(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -108,6 +141,17 @@ fn request_state(app: AppHandle) {
     broadcast_state(&app);
 }
 
+#[tauri::command]
+fn open_update_url(app: AppHandle, url: String) -> Result<(), String> {
+    if !url.starts_with("https://github.com/sieuxuan/fast-paste/") {
+        return Err("Link cập nhật không hợp lệ.".to_string());
+    }
+
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|error| format!("Không thể mở link cập nhật: {error}"))
+}
+
 // ── Helpers ──
 
 fn toggle_window(app: &AppHandle) {
@@ -115,10 +159,20 @@ fn toggle_window(app: &AppHandle) {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
-            let _ = window.show();
-            let _ = window.set_focus();
+            show_window(app);
         }
     }
+}
+
+fn show_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn should_start_hidden() -> bool {
+    std::env::args().any(|arg| arg == AUTOSTART_HIDDEN_ARG)
 }
 
 fn get_settings_path() -> std::path::PathBuf {
@@ -128,14 +182,20 @@ fn get_settings_path() -> std::path::PathBuf {
 }
 
 fn save_state(data: &AppStateData) {
-    if let Ok(json) = serde_json::to_string(data) {
+    let mut persisted = data.clone();
+    persisted.clients.clear();
+    persisted.ips.clear();
+
+    if let Ok(json) = serde_json::to_string(&persisted) {
         let _ = std::fs::write(get_settings_path(), json);
     }
 }
 
 fn load_state() -> AppStateData {
     if let Ok(json) = std::fs::read_to_string(get_settings_path()) {
-        if let Ok(data) = serde_json::from_str(&json) {
+        if let Ok(mut data) = serde_json::from_str::<AppStateData>(&json) {
+            data.clients.clear();
+            data.ips.clear();
             return data;
         }
     }
@@ -163,21 +223,22 @@ fn get_local_ips() -> Vec<String> {
             if ip.is_ipv4() && !ip.is_loopback() {
                 let s = ip.to_string();
                 let name_lower = name.to_lowercase();
-                
+
                 // Skip link-local (169.254.x.x) — not routable
                 if s.starts_with("169.254.") {
                     continue;
                 }
-                
+
                 // Skip common virtual adapters
-                if name_lower.contains("vmware") 
-                    || name_lower.contains("virtual") 
+                if name_lower.contains("vmware")
+                    || name_lower.contains("virtual")
                     || name_lower.contains("vbox")
                     || name_lower.contains("wsl")
                     || name_lower.contains("hyper-v")
                     || name_lower.contains("vethernet")
                     || name_lower.contains("fortinet")
-                    || name_lower.contains("loopback") {
+                    || name_lower.contains("loopback")
+                {
                     continue;
                 }
 
@@ -215,7 +276,10 @@ fn timestamp_to_millis(timestamp: &str) -> i64 {
         .unwrap_or(0)
 }
 
-fn make_history_sync_payload(data: &mut AppStateData, current_clipboard: Option<String>) -> Option<String> {
+fn make_history_sync_payload(
+    data: &mut AppStateData,
+    current_clipboard: Option<String>,
+) -> Option<String> {
     if let Some(text) = current_clipboard {
         if !text.is_empty() && !data.history.iter().any(|item| item.text == text) {
             data.history.insert(0, make_history_item(&text, "PC"));
@@ -236,12 +300,14 @@ fn make_history_sync_payload(data: &mut AppStateData, current_clipboard: Option<
         })
         .collect();
 
-    Some(serde_json::json!({
-        "app": "fastpaste",
-        "type": "history_sync",
-        "entries": entries,
-    })
-    .to_string())
+    Some(
+        serde_json::json!({
+            "app": "fastpaste",
+            "type": "history_sync",
+            "entries": entries,
+        })
+        .to_string(),
+    )
 }
 
 // ── Application Entry ──
@@ -254,19 +320,21 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![]),
+            Some(vec![AUTOSTART_HIDDEN_ARG]),
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
             let app_handle = app.handle().clone();
             let app_handle_clip = app.handle().clone();
+            let start_hidden = should_start_hidden();
 
             // ── System Tray with Exit menu ──
             use tauri::menu::{MenuBuilder, MenuItemBuilder};
-            use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState};
+            use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder};
 
             let quit_handle = app.handle().clone();
             let show_item = MenuItemBuilder::with_id("show", "Mở FastPaste").build(app)?;
@@ -282,12 +350,10 @@ pub fn run() {
                 .tooltip("FastPaste")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .on_menu_event(move |_app, event| {
-                    match event.id().as_ref() {
-                        "show" => toggle_window(&quit_handle),
-                        "quit" => std::process::exit(0),
-                        _ => {}
-                    }
+                .on_menu_event(move |_app, event| match event.id().as_ref() {
+                    "show" => show_window(&quit_handle),
+                    "quit" => std::process::exit(0),
+                    _ => {}
                 })
                 .on_tray_icon_event(move |_tray, event| {
                     if let tauri::tray::TrayIconEvent::Click {
@@ -303,6 +369,13 @@ pub fn run() {
 
             // ── Close-to-tray ──
             if let Some(window) = app.get_webview_window("main") {
+                if start_hidden {
+                    let _ = window.hide();
+                } else {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+
                 let w = window.clone();
                 let _ = window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -320,10 +393,18 @@ pub fn run() {
             app.manage(AppState(data_arc.clone()));
             app.manage(ws_tx.clone());
 
+            let should_refresh_autostart = {
+                let data = data_arc.lock().unwrap();
+                data.settings.auto_start
+            };
+            if should_refresh_autostart {
+                let autostart_manager = app.autolaunch();
+                let _ = autostart_manager.disable();
+                let _ = autostart_manager.enable();
+            }
+
             // ── UDP Broadcast (discovery) ──
-            let hostname = gethostname::gethostname()
-                .to_string_lossy()
-                .into_owned();
+            let hostname = gethostname::gethostname().to_string_lossy().into_owned();
             tauri::async_runtime::spawn(async move {
                 let mut sockets = vec![];
                 for ip in &local_ips {
@@ -348,7 +429,8 @@ pub fn run() {
                             let ip_str = addr.ip().to_string();
                             let parts: Vec<&str> = ip_str.split('.').collect();
                             if parts.len() == 4 {
-                                let subnet = format!("{}.{}.{}.255:4568", parts[0], parts[1], parts[2]);
+                                let subnet =
+                                    format!("{}.{}.{}.255:4568", parts[0], parts[1], parts[2]);
                                 let _ = sock.send_to(msg.as_bytes(), subnet.as_str()).await;
                             }
                         }
@@ -396,7 +478,9 @@ pub fn run() {
                         if let Some(payload) = payload {
                             if !payload.is_empty() {
                                 let _ = write
-                                    .send(tokio_tungstenite::tungstenite::Message::Text(payload.into()))
+                                    .send(tokio_tungstenite::tungstenite::Message::Text(
+                                        payload.into(),
+                                    ))
                                     .await;
                             }
                         }
@@ -413,11 +497,20 @@ pub fn run() {
                     let app_rx = app_ws.clone();
                     let ip_clone = ip.clone();
                     tauri::async_runtime::spawn(async move {
-                        while let Ok(Some(Ok(msg))) = tokio::time::timeout(Duration::from_secs(45), futures_util::StreamExt::next(&mut read)).await {
+                        while let Ok(Some(Ok(msg))) = tokio::time::timeout(
+                            Duration::from_secs(45),
+                            futures_util::StreamExt::next(&mut read),
+                        )
+                        .await
+                        {
                             if let Ok(text) = msg.to_text() {
                                 if !text.is_empty() {
-                                    if let Ok(protocol) = serde_json::from_str::<WsProtocolMessage>(text) {
-                                        if protocol.app.as_deref() == Some("fastpaste") && protocol.kind == "history_sync" {
+                                    if let Ok(protocol) =
+                                        serde_json::from_str::<WsProtocolMessage>(text)
+                                    {
+                                        if protocol.app.as_deref() == Some("fastpaste")
+                                            && protocol.kind == "history_sync"
+                                        {
                                             let entries = protocol.entries.unwrap_or_default();
                                             let mut newest_incoming: Option<SyncEntry> = None;
                                             let latest_local_timestamp = {
@@ -425,7 +518,9 @@ pub fn run() {
                                                 let latest = d
                                                     .history
                                                     .first()
-                                                    .map(|item| timestamp_to_millis(&item.timestamp))
+                                                    .map(|item| {
+                                                        timestamp_to_millis(&item.timestamp)
+                                                    })
                                                     .unwrap_or(0);
 
                                                 for entry in entries {
@@ -434,12 +529,18 @@ pub fn run() {
                                                     }
                                                     if newest_incoming
                                                         .as_ref()
-                                                        .map(|current| entry.timestamp > current.timestamp)
+                                                        .map(|current| {
+                                                            entry.timestamp > current.timestamp
+                                                        })
                                                         .unwrap_or(true)
                                                     {
                                                         newest_incoming = Some(entry.clone());
                                                     }
-                                                    if !d.history.iter().any(|item| item.text == entry.text) {
+                                                    if !d
+                                                        .history
+                                                        .iter()
+                                                        .any(|item| item.text == entry.text)
+                                                    {
                                                         d.history.push(make_history_item_at(
                                                             &entry.text,
                                                             &entry.source,
@@ -461,7 +562,8 @@ pub fn run() {
 
                                             if let Some(entry) = newest_incoming {
                                                 if entry.timestamp > latest_local_timestamp {
-                                                    let _ = app_rx.clipboard().write_text(entry.text);
+                                                    let _ =
+                                                        app_rx.clipboard().write_text(entry.text);
                                                 }
                                             }
                                             broadcast_state(&app_rx);
@@ -500,11 +602,7 @@ pub fn run() {
                         if !text.is_empty() && text != last_text {
                             last_text = text.clone();
                             let mut d = data_clip.lock().unwrap();
-                            let is_new = d
-                                .history
-                                .first()
-                                .map(|h| h.text != text)
-                                .unwrap_or(true);
+                            let is_new = d.history.first().map(|h| h.text != text).unwrap_or(true);
                             if is_new {
                                 d.history.insert(0, make_history_item(&text, "PC"));
                                 if d.history.len() > 100 {
@@ -524,11 +622,13 @@ pub fn run() {
             // ── Register initial hotkey ──
             let d = data_arc.lock().unwrap();
             if let Ok(shortcut) = d.settings.hotkey.parse::<Shortcut>() {
-                let _ = app.global_shortcut().on_shortcut(shortcut, |app, _, event| {
-                    if event.state == ShortcutState::Pressed {
-                        toggle_window(app);
-                    }
-                });
+                let _ = app
+                    .global_shortcut()
+                    .on_shortcut(shortcut, |app, _, event| {
+                        if event.state == ShortcutState::Pressed {
+                            toggle_window(app);
+                        }
+                    });
             }
             drop(d);
 
@@ -538,7 +638,8 @@ pub fn run() {
             save_hotkey,
             save_autostart,
             copy_text,
-            request_state
+            request_state,
+            open_update_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

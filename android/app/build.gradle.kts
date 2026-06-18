@@ -13,13 +13,27 @@ android {
         applicationId = "com.fastpaste.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 210
+        versionName = "2.1.0"
+    }
+
+    signingConfigs {
+        create("githubRelease") {
+            storeFile = file("fastpaste-release.keystore")
+            storePassword = "fastpaste"
+            keyAlias = "fastpaste"
+            keyPassword = "fastpaste"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("githubRelease")
+        }
+
         release {
             isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("githubRelease")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -38,6 +52,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

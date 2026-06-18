@@ -64,7 +64,9 @@ class MainActivity : ComponentActivity() {
                         onConnectManual = viewModel::connectManual,
                         onDeleteItem = viewModel::deleteHistoryItem,
                         onClearHistory = viewModel::clearHistory,
-                        onRefreshDiscovery = viewModel::restartDiscovery
+                        onRefreshDiscovery = viewModel::restartDiscovery,
+                        onCheckUpdate = viewModel::checkForUpdates,
+                        onOpenUpdate = viewModel::openUpdatePage
                     )
                 }
             }

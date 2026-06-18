@@ -22,6 +22,8 @@ class ServiceDiscovery(context: Context) {
     private val appContext = context.applicationContext
     private val _servers = MutableStateFlow<List<DiscoveredServer>>(emptyList())
     val servers: StateFlow<List<DiscoveredServer>> = _servers
+    private val _isScanning = MutableStateFlow(false)
+    val isScanning: StateFlow<Boolean> = _isScanning
 
     private var listenJob: Job? = null
     private var multicastLock: WifiManager.MulticastLock? = null
@@ -29,6 +31,8 @@ class ServiceDiscovery(context: Context) {
 
     fun startDiscovery() {
         if (listenJob?.isActive == true) return
+        _servers.value = emptyList()
+        _isScanning.value = true
 
         // Acquire multicast lock — required for receiving broadcast on many Android devices
         try {
@@ -53,8 +57,8 @@ class ServiceDiscovery(context: Context) {
                 val buffer = ByteArray(1024)
                 Log.d(TAG, "Listening for UDP broadcasts on port 4568")
 
-                // Auto-stop discovery after 10 seconds to save battery
-                withTimeoutOrNull(10000L) {
+                // Auto-stop discovery after a short scan window to save battery
+                withTimeoutOrNull(SCAN_TIMEOUT_MS) {
                     while (isActive) {
                         val packet = DatagramPacket(buffer, buffer.size)
                         socket.receive(packet)
@@ -70,8 +74,7 @@ class ServiceDiscovery(context: Context) {
                                 val server = DiscoveredServer(hostname, host, port)
                                 Log.d(TAG, "Discovered via UDP: $server")
 
-                                val currentList = _servers.value.filter { it.host != host }
-                                _servers.value = currentList + server
+                                updateServer(server)
                             }
                         }
                     }
@@ -83,6 +86,7 @@ class ServiceDiscovery(context: Context) {
                 }
             } finally {
                 socket?.close()
+                _isScanning.value = false
                 Log.d(TAG, "UDP socket closed")
                 
                 // Release lock when timeout is reached
@@ -97,6 +101,7 @@ class ServiceDiscovery(context: Context) {
     fun stopDiscovery() {
         listenJob?.cancel()
         listenJob = null
+        _isScanning.value = false
 
         // Release multicast lock
         try {
@@ -108,7 +113,20 @@ class ServiceDiscovery(context: Context) {
         }
     }
 
+    private fun updateServer(server: DiscoveredServer) {
+        val cutoff = System.currentTimeMillis() - SERVER_TTL_MS
+        val currentList = _servers.value
+            .filter { it.lastSeen >= cutoff }
+            .filter { it.host != server.host }
+            .filterNot { it.name == server.name && it.port == server.port }
+
+        _servers.value = (currentList + server)
+            .sortedByDescending { it.lastSeen }
+    }
+
     companion object {
         private const val TAG = "ServiceDiscovery"
+        private const val SCAN_TIMEOUT_MS = 15_000L
+        private const val SERVER_TTL_MS = 30_000L
     }
 }

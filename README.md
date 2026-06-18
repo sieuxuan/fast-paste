@@ -11,6 +11,18 @@
 - 🖥️ **System tray** — runs silently in the background, close-to-tray
 - ⚡ **Ultra-lightweight** — ~6 MB RAM idle, ~10 MB binary (vs. ~150 MB Electron)
 
+## Download
+
+Latest builds are published on GitHub Releases:
+
+- Windows portable: `FastPaste-Portable.exe`
+- Windows installer: `FastPaste_*_x64-setup.exe`
+- Android APK: `FastPaste-Android.apk`
+
+Download page: https://github.com/sieuxuan/fast-paste/releases/latest
+
+The desktop and Android apps check `update.json` on the `master` branch to detect new versions.
+
 ## Architecture
 
 ```
@@ -53,6 +65,19 @@ npm run build
 
 The portable executable will be at `src-tauri/target/release/FastPaste.exe`.
 
+## Release A New Version
+
+1. Update versions in `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `android/app/build.gradle.kts`, and `update.json`.
+2. Commit and push to `master`.
+3. Create and push a tag:
+
+```bash
+git tag v2.1.0
+git push origin v2.1.0
+```
+
+GitHub Actions will build and publish Windows + Android artifacts to the tagged release.
+
 ## Network Protocol
 
 | Protocol  | Port | Purpose                          |
@@ -62,7 +87,11 @@ The portable executable will be at `src-tauri/target/release/FastPaste.exe`.
 
 ## Android App
 
-The companion Android app is in the `android/` directory. Build with Android Studio or `./gradlew assembleDebug`.
+The companion Android app is in the `android/` directory. Build with Android Studio or Gradle:
+
+```bash
+gradle -p android assembleDebug
+```
 
 ## License
 

@@ -1,0 +1,15 @@
+{
+  "version": "2.1.0",
+  "releaseUrl": "https://github.com/sieuxuan/fast-paste/releases/tag/v2.1.0",
+  "notes": "Adds hidden autostart, cleaner desktop UI, improved Android connection UX, and update checks.",
+  "desktop": {
+    "version": "2.1.0",
+    "downloadUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.1.0/FastPaste-Portable.exe",
+    "installerUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.1.0/FastPaste_2.1.0_x64-setup.exe"
+  },
+  "android": {
+    "versionName": "2.1.0",
+    "versionCode": 210,
+    "apkUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.1.0/FastPaste-Android.apk"
+  }
+}
