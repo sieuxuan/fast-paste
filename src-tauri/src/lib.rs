@@ -466,6 +466,42 @@ async fn clear_history(app: AppHandle, state: State<'_, AppState>) -> Result<(),
 }
 
 #[tauri::command]
+fn add_history_item(
+    text: String,
+    folder: String,
+    copy_after_save: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Err("Nội dung không được để trống.".to_string());
+    }
+    {
+        let mut data = state.0.lock().unwrap();
+        data.history.retain(|existing| existing.text != text);
+        let mut item = make_history_item(&text, "PC");
+        item.folder = clean_folder_name(&folder);
+        data.history.insert(0, item);
+        trim_history(&mut data.history);
+        refresh_cloud_state(&mut data.cloud);
+        if data.cloud.configured && data.cloud.signed_in {
+            data.cloud.status =
+                "Đã thêm mục mới. Google Drive sẽ cập nhật sau vài giây.".to_string();
+        }
+        save_state(&data);
+    }
+    broadcast_state(&app);
+    if copy_after_save {
+        let _ = app.clipboard().write_text(text.clone());
+        if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
+            let _ = tx.send(text);
+        }
+    }
+    queue_cloud_sync(&app);
+    Ok(())
+}
+
+#[tauri::command]
 fn request_state(app: AppHandle) {
     broadcast_state(&app);
 }
@@ -1525,6 +1561,7 @@ pub fn run() {
             toggle_history_pin,
             delete_history_item,
             clear_history,
+            add_history_item,
             request_state,
             open_update_url,
             google_sign_in,
