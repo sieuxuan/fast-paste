@@ -1,4 +1,7 @@
+mod cloud;
+
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -9,6 +12,10 @@ use tokio::net::{TcpListener, UdpSocket};
 use tokio::time::sleep;
 
 const AUTOSTART_HIDDEN_ARG: &str = "--fastpaste-hidden";
+const MAX_HISTORY_ITEMS: usize = 500;
+const CLIPBOARD_POLL_INTERVAL_MS: u64 = 250;
+const CLOUD_SYNC_DEBOUNCE_MS: u64 = 3_000;
+const MAX_DELETED_MARKERS: usize = 1_000;
 
 // ── Data Models ──
 
@@ -33,6 +40,15 @@ struct SyncEntry {
     source: String,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct DeletedMarker {
+    #[serde(default)]
+    text_hash: String,
+    #[serde(default, skip_serializing)]
+    text: Option<String>,
+    deleted_at: i64,
+}
+
 #[derive(Deserialize)]
 struct WsProtocolMessage {
     app: Option<String>,
@@ -47,6 +63,12 @@ struct AppStateData {
     history: Vec<HistoryItem>,
     ips: Vec<String>,
     clients: Vec<String>,
+    #[serde(default)]
+    deleted_markers: Vec<DeletedMarker>,
+    #[serde(default)]
+    clear_history_at: Option<i64>,
+    #[serde(default)]
+    cloud: cloud::CloudUiState,
 }
 
 struct AppState(Arc<Mutex<AppStateData>>);
@@ -137,6 +159,59 @@ fn copy_text(text: String, app: AppHandle) {
 }
 
 #[tauri::command]
+async fn delete_history_item(
+    id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    {
+        let mut data = state.0.lock().unwrap();
+        let Some(index) = data.history.iter().position(|item| item.id == id) else {
+            return Ok(());
+        };
+        let item = data.history.remove(index);
+        mark_deleted_text(&mut data, item.text);
+        refresh_cloud_state(&mut data.cloud);
+        if data.cloud.configured && data.cloud.signed_in {
+            data.cloud.status = "Đã xóa mục. Google Drive sẽ cập nhật sau vài giây.".to_string();
+        }
+
+        save_state(&data);
+    }
+
+    broadcast_state(&app);
+    queue_cloud_sync(&app);
+    Ok(())
+}
+
+#[tauri::command]
+async fn clear_history(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let data_arc = state.0.clone();
+    {
+        let mut data = data_arc.lock().unwrap();
+        if data.history.is_empty() {
+            return Ok(());
+        }
+        data.clear_history_at = Some(chrono::Utc::now().timestamp_millis());
+        let texts: Vec<String> = data.history.iter().map(|item| item.text.clone()).collect();
+        for text in texts {
+            mark_deleted_text(&mut data, text);
+        }
+        data.history.clear();
+        save_state(&data);
+    }
+
+    broadcast_state(&app);
+    replace_cloud_history(
+        app,
+        data_arc,
+        vec![],
+        "Đã xóa lịch sử và cập nhật Google Drive.",
+    )
+    .await
+}
+
+#[tauri::command]
 fn request_state(app: AppHandle) {
     broadcast_state(&app);
 }
@@ -150,6 +225,81 @@ fn open_update_url(app: AppHandle, url: String) -> Result<(), String> {
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|error| format!("Không thể mở link cập nhật: {error}"))
+}
+
+#[tauri::command]
+async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let data_arc = state.0.clone();
+
+    {
+        let mut data = data_arc.lock().unwrap();
+        refresh_cloud_state(&mut data.cloud);
+        if !data.cloud.configured {
+            data.cloud.status = "Google sync chưa được bật trong bản build này.".to_string();
+            save_state(&data);
+            drop(data);
+            broadcast_state(&app);
+            return Err("Google sync chưa được bật trong bản build này.".to_string());
+        }
+
+        data.cloud.syncing = true;
+        data.cloud.status = "Đang mở Google login...".to_string();
+        save_state(&data);
+    }
+    broadcast_state(&app);
+
+    match cloud::sign_in(&app).await {
+        Ok(email) => {
+            {
+                let mut data = data_arc.lock().unwrap();
+                data.cloud.configured = cloud::is_configured();
+                data.cloud.signed_in = true;
+                data.cloud.account_email = email;
+                data.cloud.syncing = false;
+                data.cloud.status = "Đã đăng nhập Google, đang đồng bộ...".to_string();
+                save_state(&data);
+            }
+            broadcast_state(&app);
+            sync_google_drive(app, data_arc).await
+        }
+        Err(error) => {
+            let mut data = data_arc.lock().unwrap();
+            data.cloud.syncing = false;
+            data.cloud.signed_in = cloud::is_signed_in();
+            data.cloud.account_email = cloud::signed_in_email();
+            data.cloud.status = format!("Google login lỗi: {error}");
+            save_state(&data);
+            drop(data);
+            broadcast_state(&app);
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
+async fn google_sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    {
+        let mut data = state.0.lock().unwrap();
+        data.cloud.syncing = false;
+        data.cloud.status = "Đang thử đồng bộ lại Google Drive...".to_string();
+        save_state(&data);
+    }
+    broadcast_state(&app);
+    sync_google_drive(app, state.0.clone()).await
+}
+
+#[tauri::command]
+fn google_sign_out(app: AppHandle, state: State<'_, AppState>) {
+    cloud::sign_out();
+    let mut data = state.0.lock().unwrap();
+    data.cloud.signed_in = false;
+    data.cloud.account_email = None;
+    data.cloud.syncing = false;
+    data.cloud.configured = cloud::is_configured();
+    data.cloud.status = "Đã đăng xuất Google Drive.".to_string();
+    save_state(&data);
+    drop(data);
+    broadcast_state(&app);
 }
 
 // ── Helpers ──
@@ -185,6 +335,7 @@ fn save_state(data: &AppStateData) {
     let mut persisted = data.clone();
     persisted.clients.clear();
     persisted.ips.clear();
+    persisted.cloud.syncing = false;
 
     if let Ok(json) = serde_json::to_string(&persisted) {
         let _ = std::fs::write(get_settings_path(), json);
@@ -196,6 +347,9 @@ fn load_state() -> AppStateData {
         if let Ok(mut data) = serde_json::from_str::<AppStateData>(&json) {
             data.clients.clear();
             data.ips.clear();
+            data.cloud.syncing = false;
+            normalize_deleted_markers(&mut data);
+            refresh_cloud_state(&mut data.cloud);
             return data;
         }
     }
@@ -207,6 +361,31 @@ fn load_state() -> AppStateData {
         history: vec![],
         ips: vec![],
         clients: vec![],
+        deleted_markers: vec![],
+        clear_history_at: None,
+        cloud: cloud::CloudUiState::default(),
+    }
+}
+
+fn refresh_cloud_state(cloud_state: &mut cloud::CloudUiState) {
+    cloud_state.configured = cloud::is_configured();
+    cloud_state.signed_in = cloud::is_signed_in();
+    cloud_state.account_email = cloud::signed_in_email();
+
+    if !cloud_state.configured {
+        cloud_state.status = "Google sync chưa được bật trong bản build này.".to_string();
+    } else if cloud_state.signed_in {
+        if cloud_state.status.trim().is_empty()
+            || cloud_state.status.contains("chưa được bật")
+            || cloud_state.status.contains("Chưa cấu hình")
+        {
+            cloud_state.status = "Tự đồng bộ Google Drive đang bật.".to_string();
+        }
+    } else if cloud_state.status.trim().is_empty()
+        || cloud_state.status.contains("chưa được bật")
+        || cloud_state.status.contains("Chưa cấu hình")
+    {
+        cloud_state.status = "Đăng nhập Google để bật tự đồng bộ.".to_string();
     }
 }
 
@@ -214,6 +393,12 @@ fn broadcast_state(app: &AppHandle) {
     let state = app.state::<AppState>();
     let data = state.0.lock().unwrap().clone();
     let _ = app.emit("update_state", data);
+}
+
+fn queue_cloud_sync(app: &AppHandle) {
+    if let Some(tx) = app.try_state::<tokio::sync::mpsc::UnboundedSender<()>>() {
+        let _ = tx.send(());
+    }
 }
 
 fn get_local_ips() -> Vec<String> {
@@ -270,6 +455,76 @@ fn make_history_item_at(text: &str, source: &str, timestamp_millis: i64) -> Hist
     }
 }
 
+fn trim_history(history: &mut Vec<HistoryItem>) {
+    history
+        .sort_by(|a, b| timestamp_to_millis(&b.timestamp).cmp(&timestamp_to_millis(&a.timestamp)));
+    if history.len() > MAX_HISTORY_ITEMS {
+        history.truncate(MAX_HISTORY_ITEMS);
+    }
+}
+
+fn mark_deleted_text(data: &mut AppStateData, text: String) {
+    let deleted_at = chrono::Utc::now().timestamp_millis();
+    let text_hash = hash_text(&text);
+    if let Some(existing) = data
+        .deleted_markers
+        .iter_mut()
+        .find(|marker| marker.text_hash == text_hash)
+    {
+        existing.deleted_at = deleted_at;
+    } else {
+        data.deleted_markers.push(DeletedMarker {
+            text_hash,
+            text: None,
+            deleted_at,
+        });
+    }
+
+    data.deleted_markers
+        .sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+    if data.deleted_markers.len() > MAX_DELETED_MARKERS {
+        data.deleted_markers.truncate(MAX_DELETED_MARKERS);
+    }
+}
+
+fn normalize_deleted_markers(data: &mut AppStateData) {
+    for marker in &mut data.deleted_markers {
+        if marker.text_hash.is_empty() {
+            if let Some(text) = marker.text.take() {
+                marker.text_hash = hash_text(&text);
+            }
+        }
+    }
+    data.deleted_markers
+        .retain(|marker| !marker.text_hash.is_empty());
+}
+
+fn is_deleted_by_local_marker(data: &AppStateData, text: &str, timestamp: i64) -> bool {
+    if data
+        .clear_history_at
+        .map(|clear_at| timestamp <= clear_at)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    let text_hash = hash_text(text);
+    data.deleted_markers
+        .iter()
+        .any(|marker| marker.text_hash == text_hash && timestamp <= marker.deleted_at)
+}
+
+fn has_deleted_text_marker(data: &AppStateData, text: &str) -> bool {
+    let text_hash = hash_text(text);
+    data.deleted_markers
+        .iter()
+        .any(|marker| marker.text_hash == text_hash)
+}
+
+fn hash_text(text: &str) -> String {
+    format!("{:x}", Sha256::digest(text.as_bytes()))
+}
+
 fn timestamp_to_millis(timestamp: &str) -> i64 {
     chrono::DateTime::parse_from_rfc3339(timestamp)
         .map(|value| value.timestamp_millis())
@@ -281,11 +536,12 @@ fn make_history_sync_payload(
     current_clipboard: Option<String>,
 ) -> Option<String> {
     if let Some(text) = current_clipboard {
-        if !text.is_empty() && !data.history.iter().any(|item| item.text == text) {
+        if !text.is_empty()
+            && !has_deleted_text_marker(data, &text)
+            && !data.history.iter().any(|item| item.text == text)
+        {
             data.history.insert(0, make_history_item(&text, "PC"));
-            if data.history.len() > 100 {
-                data.history.truncate(100);
-            }
+            trim_history(&mut data.history);
             save_state(data);
         }
     }
@@ -308,6 +564,181 @@ fn make_history_sync_payload(
         })
         .to_string(),
     )
+}
+
+fn history_to_cloud_entries(history: &[HistoryItem]) -> Vec<cloud::CloudEntry> {
+    history
+        .iter()
+        .map(|item| cloud::CloudEntry {
+            text: item.text.clone(),
+            timestamp: timestamp_to_millis(&item.timestamp),
+            source: item.source.clone(),
+        })
+        .collect()
+}
+
+fn merge_cloud_entries_into_history(
+    data: &mut AppStateData,
+    entries: Vec<cloud::CloudEntry>,
+) -> usize {
+    let mut inserted = 0;
+
+    for entry in entries {
+        if entry.text.trim().is_empty() {
+            continue;
+        }
+        if is_deleted_by_local_marker(data, &entry.text, entry.timestamp) {
+            continue;
+        }
+
+        if let Some(existing) = data.history.iter_mut().find(|item| item.text == entry.text) {
+            if entry.timestamp > timestamp_to_millis(&existing.timestamp) {
+                existing.timestamp =
+                    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(entry.timestamp)
+                        .unwrap_or_else(chrono::Utc::now)
+                        .to_rfc3339();
+                existing.source = entry.source;
+            }
+        } else {
+            data.history.push(make_history_item_at(
+                &entry.text,
+                &entry.source,
+                entry.timestamp,
+            ));
+            inserted += 1;
+        }
+    }
+
+    trim_history(&mut data.history);
+    inserted
+}
+
+async fn sync_google_drive(
+    app: AppHandle,
+    data_arc: Arc<Mutex<AppStateData>>,
+) -> Result<(), String> {
+    let (entries, deleted_markers, clear_history_at) = {
+        let mut data = data_arc.lock().unwrap();
+        refresh_cloud_state(&mut data.cloud);
+
+        if !data.cloud.configured {
+            data.cloud.status = "Google sync chưa được bật trong bản build này.".to_string();
+            save_state(&data);
+            drop(data);
+            broadcast_state(&app);
+            return Err("Google sync chưa được bật trong bản build này.".to_string());
+        }
+
+        if data.cloud.syncing {
+            return Ok(());
+        }
+
+        if !data.cloud.signed_in {
+            data.cloud.status = "Cần đăng nhập Google trước khi đồng bộ.".to_string();
+            save_state(&data);
+            drop(data);
+            broadcast_state(&app);
+            return Err("Chưa đăng nhập Google.".to_string());
+        }
+
+        data.cloud.syncing = true;
+        data.cloud.status = "Đang đồng bộ Google Drive...".to_string();
+        save_state(&data);
+        (
+            history_to_cloud_entries(&data.history),
+            data.deleted_markers
+                .iter()
+                .map(|marker| cloud::CloudDeleteMarker {
+                    text_hash: marker.text_hash.clone(),
+                    deleted_at: marker.deleted_at,
+                })
+                .collect::<Vec<_>>(),
+            data.clear_history_at,
+        )
+    };
+    broadcast_state(&app);
+
+    match cloud::sync_pruned(entries, deleted_markers, clear_history_at).await {
+        Ok(result) => {
+            let inserted = {
+                let mut data = data_arc.lock().unwrap();
+                let inserted = merge_cloud_entries_into_history(&mut data, result.entries);
+                data.cloud.syncing = false;
+                data.cloud.configured = cloud::is_configured();
+                data.cloud.signed_in = true;
+                data.cloud.account_email = cloud::signed_in_email();
+                data.cloud.last_sync_at = Some(chrono::Utc::now().timestamp_millis());
+                data.cloud.status = format!(
+                    "Tự đồng bộ Google Drive: {} mục, tải về {} mục mới.",
+                    result.merged_count, inserted
+                );
+                save_state(&data);
+                inserted
+            };
+            broadcast_state(&app);
+
+            let _ = inserted;
+            Ok(())
+        }
+        Err(error) => {
+            let mut data = data_arc.lock().unwrap();
+            data.cloud.syncing = false;
+            data.cloud.signed_in = cloud::is_signed_in();
+            data.cloud.account_email = cloud::signed_in_email();
+            data.cloud.status = format!("Đồng bộ Google lỗi: {error}");
+            save_state(&data);
+            drop(data);
+            broadcast_state(&app);
+            Err(error)
+        }
+    }
+}
+
+async fn replace_cloud_history(
+    app: AppHandle,
+    data_arc: Arc<Mutex<AppStateData>>,
+    entries: Vec<cloud::CloudEntry>,
+    success_status: &str,
+) -> Result<(), String> {
+    let should_replace = {
+        let mut data = data_arc.lock().unwrap();
+        refresh_cloud_state(&mut data.cloud);
+        if !data.cloud.configured || !data.cloud.signed_in {
+            return Ok(());
+        }
+
+        data.cloud.syncing = true;
+        data.cloud.status = "Đang cập nhật Google Drive...".to_string();
+        save_state(&data);
+        true
+    };
+
+    if !should_replace {
+        return Ok(());
+    }
+
+    broadcast_state(&app);
+    match cloud::replace(entries).await {
+        Ok(count) => {
+            let mut data = data_arc.lock().unwrap();
+            data.cloud.syncing = false;
+            data.cloud.last_sync_at = Some(chrono::Utc::now().timestamp_millis());
+            data.cloud.status = format!("{success_status} Còn {count} mục.");
+            save_state(&data);
+            drop(data);
+            broadcast_state(&app);
+            Ok(())
+        }
+        Err(error) => {
+            let mut data = data_arc.lock().unwrap();
+            data.cloud.syncing = false;
+            data.cloud.status = format!("Cập nhật Google Drive lỗi: {error}");
+            save_state(&data);
+            drop(data);
+            broadcast_state(&app);
+            Err(error)
+        }
+    }
 }
 
 // ── Application Entry ──
@@ -392,6 +823,51 @@ pub fn run() {
             drop(data);
             app.manage(AppState(data_arc.clone()));
             app.manage(ws_tx.clone());
+
+            let (cloud_sync_tx, mut cloud_sync_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+            app.manage(cloud_sync_tx.clone());
+
+            let app_cloud = app.handle().clone();
+            let data_cloud = data_arc.clone();
+            tauri::async_runtime::spawn(async move {
+                while cloud_sync_rx.recv().await.is_some() {
+                    loop {
+                        sleep(Duration::from_millis(CLOUD_SYNC_DEBOUNCE_MS)).await;
+                        let mut received_more = false;
+                        while cloud_sync_rx.try_recv().is_ok() {
+                            received_more = true;
+                        }
+                        if !received_more {
+                            break;
+                        }
+                    }
+
+                    loop {
+                        let (cloud_ready, syncing) = {
+                            let data = data_cloud.lock().unwrap();
+                            (
+                                data.cloud.configured && data.cloud.signed_in,
+                                data.cloud.syncing,
+                            )
+                        };
+
+                        if !cloud_ready {
+                            break;
+                        }
+
+                        if !syncing {
+                            let _ = sync_google_drive(app_cloud.clone(), data_cloud.clone()).await;
+                            break;
+                        }
+
+                        sleep(Duration::from_secs(1)).await;
+                    }
+                }
+            });
+
+            if cloud::is_configured() && cloud::is_signed_in() {
+                let _ = cloud_sync_tx.send(());
+            }
 
             let should_refresh_autostart = {
                 let data = data_arc.lock().unwrap();
@@ -527,6 +1003,13 @@ pub fn run() {
                                                     if entry.text.is_empty() {
                                                         continue;
                                                     }
+                                                    if is_deleted_by_local_marker(
+                                                        &d,
+                                                        &entry.text,
+                                                        entry.timestamp,
+                                                    ) {
+                                                        continue;
+                                                    }
                                                     if newest_incoming
                                                         .as_ref()
                                                         .map(|current| {
@@ -553,9 +1036,7 @@ pub fn run() {
                                                     timestamp_to_millis(&b.timestamp)
                                                         .cmp(&timestamp_to_millis(&a.timestamp))
                                                 });
-                                                if d.history.len() > 100 {
-                                                    d.history.truncate(100);
-                                                }
+                                                trim_history(&mut d.history);
                                                 save_state(&d);
                                                 latest
                                             };
@@ -567,6 +1048,7 @@ pub fn run() {
                                                 }
                                             }
                                             broadcast_state(&app_rx);
+                                            queue_cloud_sync(&app_rx);
                                             continue;
                                         }
                                     }
@@ -574,12 +1056,11 @@ pub fn run() {
                                     let _ = app_rx.clipboard().write_text(text.to_string());
                                     let mut d = data_rx.lock().unwrap();
                                     d.history.insert(0, make_history_item(text, "ANDROID"));
-                                    if d.history.len() > 100 {
-                                        d.history.truncate(100);
-                                    }
+                                    trim_history(&mut d.history);
                                     save_state(&d);
                                     drop(d);
                                     broadcast_state(&app_rx);
+                                    queue_cloud_sync(&app_rx);
                                 }
                             }
                         }
@@ -600,22 +1081,24 @@ pub fn run() {
                 loop {
                     if let Ok(text) = app_handle_clip.clipboard().read_text() {
                         if !text.is_empty() && text != last_text {
+                            let is_startup_snapshot = last_text.is_empty();
                             last_text = text.clone();
                             let mut d = data_clip.lock().unwrap();
                             let is_new = d.history.first().map(|h| h.text != text).unwrap_or(true);
-                            if is_new {
+                            let is_deleted_startup_clipboard =
+                                is_startup_snapshot && has_deleted_text_marker(&d, &text);
+                            if is_new && !is_deleted_startup_clipboard {
                                 d.history.insert(0, make_history_item(&text, "PC"));
-                                if d.history.len() > 100 {
-                                    d.history.truncate(100);
-                                }
+                                trim_history(&mut d.history);
                                 save_state(&d);
                                 drop(d);
                                 broadcast_state(&app_handle_clip);
                                 let _ = ws_tx.send(text);
+                                queue_cloud_sync(&app_handle_clip);
                             }
                         }
                     }
-                    sleep(Duration::from_millis(800)).await;
+                    sleep(Duration::from_millis(CLIPBOARD_POLL_INTERVAL_MS)).await;
                 }
             });
 
@@ -638,8 +1121,13 @@ pub fn run() {
             save_hotkey,
             save_autostart,
             copy_text,
+            delete_history_item,
+            clear_history,
             request_state,
-            open_update_url
+            open_update_url,
+            google_sign_in,
+            google_sync_now,
+            google_sign_out
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

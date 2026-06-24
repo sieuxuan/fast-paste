@@ -19,7 +19,7 @@ class WebSocketClient(private val scope: CoroutineScope) {
         .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS) // Keep-alive
         .writeTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-        .pingInterval(30, java.util.concurrent.TimeUnit.SECONDS) // Detect dead connections
+        .pingInterval(10, java.util.concurrent.TimeUnit.SECONDS) // Detect dead connections
         .build()
 
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -99,7 +99,7 @@ class WebSocketClient(private val scope: CoroutineScope) {
         }
 
         reconnectJob = scope.launch {
-            val delayMs = minOf(1000L * (1 shl minOf(reconnectAttempt, 5)), 30_000L)
+            val delayMs = minOf(350L * (1 shl minOf(reconnectAttempt, 5)), 8_000L)
             Log.d(TAG, "Reconnecting in ${delayMs}ms (attempt $reconnectAttempt)")
             delay(delayMs)
             reconnectAttempt++

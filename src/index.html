@@ -225,7 +225,7 @@
 
     .toolbar {
       display: grid;
-      grid-template-columns: 1fr minmax(180px, 280px);
+      grid-template-columns: 1fr minmax(180px, 280px) auto;
       align-items: center;
       gap: 12px;
       margin-bottom: 12px;
@@ -317,7 +317,6 @@
       background: var(--surface);
       color: inherit;
       text-align: left;
-      cursor: pointer;
       transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
     }
 
@@ -333,6 +332,22 @@
 
     .history-main {
       min-width: 0;
+    }
+
+    .history-copy {
+      width: 100%;
+      min-width: 0;
+      display: block;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .history-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
 
     .history-meta {
@@ -379,6 +394,26 @@
       font-size: 12px;
       font-weight: 700;
       white-space: nowrap;
+    }
+
+    .icon-button {
+      width: 32px;
+      height: 32px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-soft);
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .icon-button:hover {
+      border-color: #fecaca;
+      background: var(--red-soft);
+      color: var(--red);
     }
 
     .settings-grid {
@@ -503,6 +538,28 @@
     .secondary-button:hover {
       border-color: var(--primary);
       color: var(--primary);
+    }
+
+    .danger-button {
+      height: 36px;
+      padding: 0 12px;
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      background: var(--red-soft);
+      color: var(--red);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .danger-button:hover {
+      border-color: var(--red);
+    }
+
+    .danger-button:disabled {
+      opacity: 0.45;
+      cursor: default;
     }
 
     .button-row {
@@ -662,7 +719,6 @@
 
       <div class="top-actions">
         <div id="connection-pill" class="pill"><span class="status-dot"></span><span>Đang chạy</span></div>
-        <div id="hotkey-display" class="pill hotkey-pill"></div>
       </div>
     </header>
 
@@ -679,6 +735,7 @@
             <span id="history-count">0 mục</span>
           </div>
           <input id="history-search" class="search" type="search" placeholder="Tìm trong lịch sử">
+          <button id="clear-history" class="danger-button" type="button">Xóa tất cả</button>
         </div>
         <div id="history-container"></div>
       </section>
@@ -727,6 +784,25 @@
           <div class="setting-stack">
             <div class="card">
               <div class="card-header">
+                <div class="card-title">Google Drive sync</div>
+                <span id="cloud-badge" class="small-pill">Drive</span>
+              </div>
+              <div class="card-body">
+                <div class="label">
+                  <strong id="cloud-title">Chưa đăng nhập</strong>
+                  <span id="cloud-status">Đăng nhập Google để bật tự đồng bộ.</span>
+                </div>
+                <div id="cloud-account" class="preview-line"></div>
+                <div class="button-row">
+                  <button id="google-sign-in" class="primary-button" type="button">Đăng nhập Google</button>
+                  <button id="google-sync" class="secondary-button" type="button">Đồng bộ ngay</button>
+                  <button id="google-sign-out" class="secondary-button" type="button">Đăng xuất</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
                 <div class="card-title">Địa chỉ mạng</div>
               </div>
               <div class="card-body">
@@ -740,7 +816,7 @@
               </div>
               <div class="card-body">
                 <div class="label">
-                  <strong id="version-title">FastPaste 2.1.0</strong>
+                  <strong id="version-title">FastPaste 2.2.0</strong>
                   <span id="update-status">Chưa kiểm tra cập nhật.</span>
                 </div>
                 <div class="button-row">
@@ -758,7 +834,7 @@
   <script>
     const invoke = window.__TAURI__.core.invoke;
     const listen = window.__TAURI__.event.listen;
-    const APP_VERSION = '2.1.0';
+    const APP_VERSION = '2.2.0';
     const UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/sieuxuan/fast-paste/master/update.json';
 
     const state = {
@@ -772,9 +848,9 @@
     const els = {
       subtitle: document.getElementById('app-subtitle'),
       connection: document.getElementById('connection-pill'),
-      hotkeyDisplay: document.getElementById('hotkey-display'),
       historyCount: document.getElementById('history-count'),
       historySearch: document.getElementById('history-search'),
+      clearHistory: document.getElementById('clear-history'),
       historyContainer: document.getElementById('history-container'),
       hotkeyInput: document.getElementById('hotkey-input'),
       hotkeyPreview: document.getElementById('hotkey-preview'),
@@ -788,7 +864,14 @@
       versionTitle: document.getElementById('version-title'),
       updateStatus: document.getElementById('update-status'),
       checkUpdate: document.getElementById('check-update'),
-      openUpdate: document.getElementById('open-update')
+      openUpdate: document.getElementById('open-update'),
+      cloudBadge: document.getElementById('cloud-badge'),
+      cloudTitle: document.getElementById('cloud-title'),
+      cloudStatus: document.getElementById('cloud-status'),
+      cloudAccount: document.getElementById('cloud-account'),
+      googleSignIn: document.getElementById('google-sign-in'),
+      googleSync: document.getElementById('google-sync'),
+      googleSignOut: document.getElementById('google-sign-out')
     };
 
     function escapeHtml(value) {
@@ -912,6 +995,17 @@
       return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
     }
 
+    function formatDateTime(timestamp) {
+      const date = new Date(timestamp);
+      if (Number.isNaN(date.getTime())) return 'không rõ';
+      return date.toLocaleString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
     function sourceMeta(source) {
       return source === 'PC'
         ? { className: 'pc', label: 'PC' }
@@ -927,6 +1021,7 @@
 
       state.currentHistory = allItems;
       els.historyCount.textContent = `${allItems.length} mục`;
+      els.clearHistory.disabled = allItems.length === 0;
 
       if (!allItems.length) {
         els.historyContainer.innerHTML = `
@@ -967,20 +1062,51 @@
               const text = String(item.text || '');
               const displayText = text.length > 260 ? `${text.slice(0, 260)}...` : text;
               return `
-                <button class="history-item" type="button" data-index="${item.originalIndex}" title="Copy">
-                  <span class="history-main">
-                    <span class="history-meta">
-                      <span class="badge ${meta.className}">${meta.label}</span>
-                      <span>${formatTime(item.timestamp)}</span>
+                <div class="history-item">
+                  <button class="history-copy" type="button" data-index="${item.originalIndex}" title="Copy">
+                    <span class="history-main">
+                      <span class="history-meta">
+                        <span class="badge ${meta.className}">${meta.label}</span>
+                        <span>${formatTime(item.timestamp)}</span>
+                      </span>
+                      <span class="history-text">${escapeHtml(displayText)}</span>
                     </span>
-                    <span class="history-text">${escapeHtml(displayText)}</span>
+                  </button>
+                  <span class="history-actions">
+                    <span class="copy-hint">Copy</span>
+                    <button class="icon-button" type="button" data-delete-index="${item.originalIndex}" title="Xóa">×</button>
                   </span>
-                  <span class="copy-hint">Copy</span>
-                </button>`;
+                </div>`;
             }).join('')}
           </div>
         </div>
       `).join('');
+    }
+
+    async function deleteHistoryItem(index) {
+      const entry = state.currentHistory[index];
+      if (!entry) return;
+
+      try {
+        await invoke('delete_history_item', { id: entry.id });
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function clearHistory() {
+      const allItems = state.data?.history || [];
+      if (!allItems.length) return;
+      if (!confirm('Xóa toàn bộ lịch sử clipboard?')) return;
+
+      els.clearHistory.disabled = true;
+      try {
+        await invoke('clear_history');
+      } catch (error) {
+        console.error(error);
+      } finally {
+        els.clearHistory.disabled = false;
+      }
     }
 
     function renderSettings() {
@@ -992,7 +1118,6 @@
       if (document.activeElement !== els.hotkeyInput) {
         els.hotkeyInput.value = hotkeyInputText(hotkey);
       }
-      els.hotkeyDisplay.innerHTML = displayHotkey(hotkey);
       els.hotkeyPreview.innerHTML = `Hiển thị: ${displayHotkey(els.hotkeyInput.value)}`;
 
       els.autostartCheckbox.checked = Boolean(settings.auto_start);
@@ -1004,6 +1129,8 @@
       els.connection.innerHTML = '<span class="status-dot"></span><span>Đang chạy</span>';
       els.subtitle.textContent = 'Clipboard sync đang chạy nền';
 
+      renderCloudSettings();
+
       els.ips.innerHTML = ips.length
         ? ips.map(ip => `
           <div class="list-item">
@@ -1011,6 +1138,42 @@
             <span class="small-pill">LAN</span>
           </div>`).join('')
         : '<div class="list-item muted">Chưa tìm thấy địa chỉ mạng</div>';
+    }
+
+    function renderCloudSettings() {
+      const cloud = state.data?.cloud || {};
+      const configured = Boolean(cloud.configured);
+      const signedIn = Boolean(cloud.signed_in);
+      const syncing = Boolean(cloud.syncing);
+      const account = cloud.account_email || '';
+      const statusText = cloud.status || '';
+      const hasError = statusText.toLowerCase().includes('lỗi') || statusText.toLowerCase().includes('cần đăng nhập');
+
+      els.cloudBadge.textContent = syncing ? 'Syncing' : signedIn ? 'Auto' : configured ? 'Ready' : 'Off';
+      els.cloudTitle.textContent = signedIn
+        ? (account || 'Đã đăng nhập Google')
+        : configured
+          ? 'Đăng nhập để bật tự đồng bộ'
+          : 'Google sync chưa bật';
+      els.cloudStatus.textContent = statusText || (
+        configured
+          ? 'Đăng nhập Google để bật tự đồng bộ.'
+          : 'Bản cài đặt này chưa bật Google sync.'
+      );
+      els.cloudAccount.textContent = signedIn
+        ? `Lần đồng bộ: ${cloud.last_sync_at ? formatDateTime(cloud.last_sync_at) : 'chưa có'}`
+        : configured
+          ? 'FastPaste sẽ tự sync khi mở app và khi có clipboard mới.'
+          : 'Cần dùng bản release đã cấu hình Google sync.';
+
+      els.googleSignIn.hidden = signedIn;
+      els.googleSignOut.hidden = !signedIn;
+      els.googleSync.hidden = !signedIn;
+      els.googleSync.textContent = (hasError || syncing) ? 'Thử lại' : 'Đồng bộ ngay';
+
+      els.googleSignIn.disabled = !configured || syncing;
+      els.googleSync.disabled = !configured || !signedIn;
+      els.googleSignOut.disabled = syncing;
     }
 
     function render() {
@@ -1031,7 +1194,6 @@
       try {
         await invoke('save_hotkey', { hotkey: canonical });
         els.hotkeyInput.value = hotkeyInputText(canonical);
-        els.hotkeyDisplay.innerHTML = displayHotkey(canonical);
         els.hotkeyPreview.innerHTML = `Hiển thị: ${displayHotkey(canonical)}`;
         setStatus(els.hotkeyStatus, 'Đã lưu hotkey.', 'ok');
       } catch (error) {
@@ -1101,6 +1263,35 @@
       }
     }
 
+    async function googleSignIn() {
+      els.googleSignIn.disabled = true;
+      els.cloudStatus.textContent = 'Đang mở Google login...';
+      try {
+        await invoke('google_sign_in');
+      } catch (error) {
+        els.cloudStatus.textContent = String(error);
+      }
+    }
+
+    async function googleSyncNow() {
+      els.googleSync.disabled = true;
+      els.cloudStatus.textContent = 'Đang đồng bộ Google Drive...';
+      try {
+        await invoke('google_sync_now');
+      } catch (error) {
+        els.cloudStatus.textContent = String(error);
+      }
+    }
+
+    async function googleSignOut() {
+      els.googleSignOut.disabled = true;
+      try {
+        await invoke('google_sign_out');
+      } catch (error) {
+        els.cloudStatus.textContent = String(error);
+      }
+    }
+
     function bindEvents() {
       document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
@@ -1112,7 +1303,13 @@
       });
 
       els.historyContainer.addEventListener('click', event => {
-        const item = event.target.closest('.history-item');
+        const deleteButton = event.target.closest('[data-delete-index]');
+        if (deleteButton) {
+          deleteHistoryItem(Number(deleteButton.dataset.deleteIndex));
+          return;
+        }
+
+        const item = event.target.closest('[data-index]');
         if (!item) return;
 
         const index = Number(item.dataset.index);
@@ -1131,8 +1328,12 @@
 
       els.saveHotkey.addEventListener('click', saveHotkey);
       els.autostartCheckbox.addEventListener('change', saveAutoStart);
+      els.clearHistory.addEventListener('click', clearHistory);
       els.checkUpdate.addEventListener('click', () => checkForUpdates(false));
       els.openUpdate.addEventListener('click', openUpdate);
+      els.googleSignIn.addEventListener('click', googleSignIn);
+      els.googleSync.addEventListener('click', googleSyncNow);
+      els.googleSignOut.addEventListener('click', googleSignOut);
     }
 
     bindEvents();

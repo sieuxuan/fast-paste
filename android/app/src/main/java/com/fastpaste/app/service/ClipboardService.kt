@@ -15,6 +15,7 @@ import com.fastpaste.app.FastPasteApp
 import com.fastpaste.app.MainActivity
 import com.fastpaste.app.R
 import com.fastpaste.app.data.ClipboardEntry
+import com.fastpaste.app.sync.DeletedHistoryStore
 import com.fastpaste.app.websocket.ConnectionState
 import com.fastpaste.app.websocket.WebSocketClient
 import kotlinx.coroutines.*
@@ -29,6 +30,7 @@ class ClipboardService : Service() {
     private lateinit var clipboardManager: ClipboardManager
     private var wsClient: WebSocketClient? = null
     private var lastSyncedText = ""
+    private val deletedHistoryStore by lazy { DeletedHistoryStore(applicationContext) }
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         val clip = clipboardManager.primaryClip
@@ -143,11 +145,14 @@ class ClipboardService : Service() {
                 val entries = (application as FastPasteApp)
                     .database
                     .clipboardDao()
-                    .getRecentOnce(200)
+                    .getRecentOnce(MAX_HISTORY_ITEMS)
                 val dao = (application as FastPasteApp).database.clipboardDao()
                 val seen = mutableSetOf<String>()
                 val history = JSONArray()
                 entries.forEach { entry ->
+                    if (deletedHistoryStore.isDeleted(entry.content, entry.timestamp)) {
+                        return@forEach
+                    }
                     seen.add(entry.content)
                     history.put(JSONObject()
                         .put("text", entry.content)
@@ -161,7 +166,11 @@ class ClipboardService : Service() {
                     ?.getItemAt(0)
                     ?.text
                     ?.toString()
-                if (!currentText.isNullOrBlank() && !seen.contains(currentText)) {
+                if (
+                    !currentText.isNullOrBlank() &&
+                    !seen.contains(currentText) &&
+                    !deletedHistoryStore.hasMarker(currentText)
+                ) {
                     val timestamp = System.currentTimeMillis()
                     if (dao.countByContent(currentText) == 0) {
                         dao.insert(ClipboardEntry(content = currentText, source = "LOCAL", timestamp = timestamp))
@@ -198,6 +207,8 @@ class ClipboardService : Service() {
             if (text.isBlank()) continue
 
             val timestamp = item.optLong("timestamp", System.currentTimeMillis())
+            if (deletedHistoryStore.isDeleted(text, timestamp)) continue
+
             val source = if (item.optString("source") == "ANDROID") "LOCAL" else "REMOTE"
             if (timestamp > newestIncomingTimestamp) {
                 newestIncomingTimestamp = timestamp
@@ -269,6 +280,7 @@ class ClipboardService : Service() {
     companion object {
         private const val TAG = "ClipboardService"
         private const val NOTIFICATION_ID = 1
+        private const val MAX_HISTORY_ITEMS = 500
         const val ACTION_START = "com.fastpaste.START"
         const val ACTION_STOP = "com.fastpaste.STOP"
         const val ACTION_SEND_TEXT = "com.fastpaste.SEND_TEXT"

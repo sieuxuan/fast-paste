@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -29,7 +31,9 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
@@ -41,6 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -50,7 +55,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -88,8 +97,22 @@ fun HomeScreen(
     onClearHistory: () -> Unit,
     onRefreshDiscovery: () -> Unit = {},
     onCheckUpdate: () -> Unit = {},
-    onOpenUpdate: () -> Unit = {}
+    onOpenUpdate: () -> Unit = {},
+    onGoogleSync: () -> Unit = {}
 ) {
+    var menuOpen by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    val visibleHistory = remember(state.clipboardHistory, searchQuery) {
+        val query = searchQuery.trim()
+        if (query.isEmpty()) {
+            state.clipboardHistory
+        } else {
+            state.clipboardHistory.filter { entry ->
+                entry.content.contains(query, ignoreCase = true)
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -113,7 +136,7 @@ fun HomeScreen(
                         Column {
                             Text("FastPaste", fontWeight = FontWeight.Bold)
                             Text(
-                                text = state.connectionMessage,
+                                text = "${state.clipboardHistory.size} mục clipboard",
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.bodySmall,
@@ -122,12 +145,34 @@ fun HomeScreen(
                         }
                     }
                 },
+                actions = {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Menu")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
             )
         }
     ) { padding ->
+        if (menuOpen) {
+            ModalBottomSheet(onDismissRequest = { menuOpen = false }) {
+                SettingsSheet(
+                    state = state,
+                    onConnectServer = onConnectServer,
+                    onDisconnect = onDisconnect,
+                    onManualIpChange = onManualIpChange,
+                    onManualPortChange = onManualPortChange,
+                    onConnectManual = onConnectManual,
+                    onRefreshDiscovery = onRefreshDiscovery,
+                    onCheckUpdate = onCheckUpdate,
+                    onOpenUpdate = onOpenUpdate,
+                    onGoogleSync = onGoogleSync
+                )
+            }
+        }
+
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -136,36 +181,29 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                ConnectionPanel(
-                    state = state,
-                    onConnectServer = onConnectServer,
-                    onDisconnect = onDisconnect,
-                    onManualIpChange = onManualIpChange,
-                    onManualPortChange = onManualPortChange,
-                    onConnectManual = onConnectManual,
-                    onRefreshDiscovery = onRefreshDiscovery
-                )
-            }
-
-            item {
-                UpdatePanel(
-                    state = state,
-                    onCheckUpdate = onCheckUpdate,
-                    onOpenUpdate = onOpenUpdate
-                )
-            }
-
-            item {
                 HistoryHeader(
-                    count = state.clipboardHistory.size,
+                    count = visibleHistory.size,
                     onClearHistory = onClearHistory
                 )
             }
 
+            item {
+                HistorySearch(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it }
+                )
+            }
+
+            item {
+                StatusStrip(state = state, onOpenMenu = { menuOpen = true })
+            }
+
             if (state.clipboardHistory.isEmpty()) {
                 item { EmptyHistory() }
+            } else if (visibleHistory.isEmpty()) {
+                item { EmptySearch() }
             } else {
-                historyGroups(state.clipboardHistory).forEach { (dateLabel, entries) ->
+                historyGroups(visibleHistory).forEach { (dateLabel, entries) ->
                     item {
                         Text(
                             text = dateLabel,
@@ -186,6 +224,108 @@ fun HomeScreen(
             }
 
             item { Spacer(Modifier.height(18.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSheet(
+    state: UiState,
+    onConnectServer: (String, Int) -> Unit,
+    onDisconnect: () -> Unit,
+    onManualIpChange: (String) -> Unit,
+    onManualPortChange: (String) -> Unit,
+    onConnectManual: () -> Unit,
+    onRefreshDiscovery: () -> Unit,
+    onCheckUpdate: () -> Unit,
+    onOpenUpdate: () -> Unit,
+    onGoogleSync: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            "Menu",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+
+        ConnectionPanel(
+            state = state,
+            onConnectServer = onConnectServer,
+            onDisconnect = onDisconnect,
+            onManualIpChange = onManualIpChange,
+            onManualPortChange = onManualPortChange,
+            onConnectManual = onConnectManual,
+            onRefreshDiscovery = onRefreshDiscovery
+        )
+
+        CloudSyncPanel(
+            state = state,
+            onGoogleSync = onGoogleSync
+        )
+
+        UpdatePanel(
+            state = state,
+            onCheckUpdate = onCheckUpdate,
+            onOpenUpdate = onOpenUpdate
+        )
+
+        Spacer(Modifier.height(20.dp))
+    }
+}
+
+@Composable
+private fun CloudSyncPanel(
+    state: UiState,
+    onGoogleSync: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Sync,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Google Drive", fontWeight = FontWeight.Bold)
+                    Text(
+                        state.cloudMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                    )
+                }
+            }
+
+            if (state.cloudSyncing) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
+            Button(
+                onClick = onGoogleSync,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !state.cloudSyncing
+            ) {
+                Text(if (state.cloudSignedIn) "Đồng bộ ngay" else "Đăng nhập Google")
+            }
         }
     }
 }
@@ -458,6 +598,92 @@ private fun HistoryHeader(count: Int, onClearHistory: () -> Unit) {
 }
 
 @Composable
+private fun HistorySearch(
+    query: String,
+    onQueryChange: (String) -> Unit
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = Modifier.fillMaxWidth(),
+        leadingIcon = {
+            Icon(Icons.Default.Search, contentDescription = null)
+        },
+        placeholder = { Text("Tìm trong lịch sử clipboard") },
+        singleLine = true,
+        shape = RoundedCornerShape(10.dp)
+    )
+}
+
+@Composable
+private fun StatusStrip(
+    state: UiState,
+    onOpenMenu: () -> Unit
+) {
+    val connection = connectionUi(state.connectionState)
+    val cloudText = when {
+        state.cloudSyncing -> "Google đang sync"
+        state.cloudSignedIn -> "Google auto"
+        else -> "Google chưa login"
+    }
+    val cloudColor = if (state.cloudSignedIn || state.cloudSyncing) GreenConnected else RedDisconnected
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CompactChip(
+            text = connection.title,
+            color = connection.color,
+            modifier = Modifier.weight(1f),
+            onClick = onOpenMenu
+        )
+        CompactChip(
+            text = cloudText,
+            color = cloudColor,
+            modifier = Modifier.weight(1f),
+            onClick = onOpenMenu
+        )
+    }
+}
+
+@Composable
+private fun CompactChip(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(50),
+        color = color.copy(alpha = 0.1f)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(color)
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
+                text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontSize = 12.sp,
+                color = color,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
 private fun EmptyHistory() {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -478,6 +704,34 @@ private fun EmptyHistory() {
             Text("Chưa có dữ liệu copy", fontWeight = FontWeight.SemiBold)
             Text(
                 "Copy trên điện thoại hoặc PC để bắt đầu đồng bộ.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptySearch() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                Icons.Default.Search,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f),
+                modifier = Modifier.size(34.dp)
+            )
+            Spacer(Modifier.height(8.dp))
+            Text("Không tìm thấy nội dung", fontWeight = FontWeight.SemiBold)
+            Text(
+                "Thử từ khóa ngắn hơn hoặc kiểm tra lại dấu tiếng Việt.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )

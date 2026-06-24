@@ -13,8 +13,8 @@ android {
         applicationId = "com.fastpaste.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 210
-        versionName = "2.1.0"
+        versionCode = 220
+        versionName = "2.2.0"
     }
 
     signingConfigs {
@@ -75,6 +75,7 @@ dependencies {
     ksp(libs.room.compiler)
 
     implementation(libs.okhttp)
+    implementation(libs.play.services.auth)
 
     debugImplementation(libs.compose.ui.tooling)
 }

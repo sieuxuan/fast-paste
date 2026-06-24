@@ -26,6 +26,9 @@ jobs:
         run: npm ci
 
       - name: Build Tauri app
+        env:
+          FASTPASTE_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FASTPASTE_GOOGLE_DESKTOP_CLIENT_ID }}
+          FASTPASTE_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FASTPASTE_GOOGLE_DESKTOP_CLIENT_SECRET }}
         run: npm run build
 
       - name: Collect Windows artifacts
