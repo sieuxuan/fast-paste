@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
                         onManualPortChange = viewModel::updateManualPort,
                         onConnectManual = viewModel::connectManual,
                         onDeleteItem = viewModel::deleteHistoryItem,
+                        onTogglePin = viewModel::toggleHistoryPin,
                         onClearHistory = viewModel::clearHistory,
                         onRefreshDiscovery = viewModel::restartDiscovery,
                         onCheckUpdate = viewModel::checkForUpdates,

@@ -31,9 +31,11 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
@@ -94,6 +96,7 @@ fun HomeScreen(
     onManualPortChange: (String) -> Unit,
     onConnectManual: () -> Unit,
     onDeleteItem: (Long) -> Unit,
+    onTogglePin: (Long) -> Unit,
     onClearHistory: () -> Unit,
     onRefreshDiscovery: () -> Unit = {},
     onCheckUpdate: () -> Unit = {},
@@ -104,13 +107,17 @@ fun HomeScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val visibleHistory = remember(state.clipboardHistory, searchQuery) {
         val query = searchQuery.trim()
-        if (query.isEmpty()) {
+        val filtered = if (query.isEmpty()) {
             state.clipboardHistory
         } else {
             state.clipboardHistory.filter { entry ->
                 entry.content.contains(query, ignoreCase = true)
             }
         }
+        filtered.sortedWith(
+            compareByDescending<ClipboardEntry> { it.pinned }
+                .thenByDescending { it.timestamp }
+        )
     }
 
     Scaffold(
@@ -217,6 +224,7 @@ fun HomeScreen(
                     items(entries, key = { it.id }) { entry ->
                         HistoryItem(
                             entry = entry,
+                            onTogglePin = { onTogglePin(entry.id) },
                             onDelete = { onDeleteItem(entry.id) }
                         )
                     }
@@ -740,7 +748,11 @@ private fun EmptySearch() {
 }
 
 @Composable
-private fun HistoryItem(entry: ClipboardEntry, onDelete: () -> Unit) {
+private fun HistoryItem(
+    entry: ClipboardEntry,
+    onTogglePin: () -> Unit,
+    onDelete: () -> Unit
+) {
     val context = LocalContext.current
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val isLocal = entry.source == "LOCAL"
@@ -776,6 +788,39 @@ private fun HistoryItem(entry: ClipboardEntry, onDelete: () -> Unit) {
                         text = if (isLocal) "Điện thoại" else "PC",
                         color = if (isLocal) LocalBadge else RemoteBadge
                     )
+                    if (entry.pinned) {
+                        SourceBadge(
+                            text = "Ghim",
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    if (entry.folder.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Folder,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(12.dp),
+                                    tint = MaterialTheme.colorScheme.tertiary
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = entry.folder,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.tertiary,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
                     Text(
                         timeFormat.format(Date(entry.timestamp)),
                         fontSize = 11.sp,
@@ -783,13 +828,27 @@ private fun HistoryItem(entry: ClipboardEntry, onDelete: () -> Unit) {
                     )
                 }
             }
-            IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
-                Icon(
-                    Icons.Default.Close,
-                    contentDescription = "Xoá",
-                    modifier = Modifier.size(17.dp),
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
-                )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(onClick = onTogglePin, modifier = Modifier.size(30.dp)) {
+                    Icon(
+                        Icons.Default.Star,
+                        contentDescription = if (entry.pinned) "Bỏ ghim" else "Ghim",
+                        modifier = Modifier.size(18.dp),
+                        tint = if (entry.pinned) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                        }
+                    )
+                }
+                IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Xoá",
+                        modifier = Modifier.size(17.dp),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                    )
+                }
             }
         }
     }

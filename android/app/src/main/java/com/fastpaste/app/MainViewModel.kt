@@ -197,6 +197,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun toggleHistoryPin(id: Long) {
+        viewModelScope.launch {
+            val entry = dao.getById(id) ?: return@launch
+            dao.updatePinned(id, !entry.pinned)
+        }
+    }
+
     fun clearHistory() {
         viewModelScope.launch {
             deletedHistoryStore.markCleared(dao.getAllOnce())

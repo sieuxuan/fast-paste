@@ -29,8 +29,17 @@ interface ClipboardDao {
     @Query("SELECT * FROM clipboard_history WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): ClipboardEntry?
 
+    @Query("SELECT * FROM clipboard_history WHERE content = :content LIMIT 1")
+    suspend fun getByContent(content: String): ClipboardEntry?
+
     @Query("SELECT COUNT(*) FROM clipboard_history WHERE content = :content")
     suspend fun countByContent(content: String): Int
+
+    @Query("UPDATE clipboard_history SET pinned = :pinned WHERE id = :id")
+    suspend fun updatePinned(id: Long, pinned: Boolean)
+
+    @Query("UPDATE clipboard_history SET pinned = :pinned, folder = :folder WHERE content = :content")
+    suspend fun updateMetadataByContent(content: String, pinned: Boolean, folder: String)
 
     @Query("DELETE FROM clipboard_history WHERE id = :id")
     suspend fun deleteById(id: Long)

@@ -158,6 +158,8 @@ class ClipboardService : Service() {
                         .put("text", entry.content)
                         .put("timestamp", entry.timestamp)
                         .put("source", if (entry.source == "REMOTE") "PC" else "ANDROID")
+                        .put("pinned", entry.pinned)
+                        .put("folder", entry.folder)
                     )
                 }
 
@@ -179,6 +181,8 @@ class ClipboardService : Service() {
                         .put("text", currentText)
                         .put("timestamp", timestamp)
                         .put("source", "ANDROID")
+                        .put("pinned", false)
+                        .put("folder", "")
                     )
                 }
 
@@ -210,14 +214,31 @@ class ClipboardService : Service() {
             if (deletedHistoryStore.isDeleted(text, timestamp)) continue
 
             val source = if (item.optString("source") == "ANDROID") "LOCAL" else "REMOTE"
+            val pinned = item.optBoolean("pinned", false)
+            val folder = cleanFolderName(item.optString("folder", ""))
             if (timestamp > newestIncomingTimestamp) {
                 newestIncomingTimestamp = timestamp
                 newestIncomingText = text
             }
 
-            if (dao.countByContent(text) == 0) {
-                dao.insert(ClipboardEntry(content = text, source = source, timestamp = timestamp))
+            val existing = dao.getByContent(text)
+            if (existing == null) {
+                dao.insert(
+                    ClipboardEntry(
+                        content = text,
+                        source = source,
+                        timestamp = timestamp,
+                        pinned = pinned,
+                        folder = folder
+                    )
+                )
                 inserted++
+            } else {
+                dao.updateMetadataByContent(
+                    content = text,
+                    pinned = existing.pinned || pinned,
+                    folder = existing.folder.ifBlank { folder }
+                )
             }
         }
 
@@ -243,6 +264,10 @@ class ClipboardService : Service() {
                 Log.e(TAG, "Save history failed: ${e.message}")
             }
         }
+    }
+
+    private fun cleanFolderName(folder: String): String {
+        return folder.trim().replace(Regex("\\s+"), " ").take(48)
     }
 
     private fun buildNotification(text: String): Notification {

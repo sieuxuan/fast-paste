@@ -20,6 +20,8 @@
       --green-soft: #e6f6f3;
       --orange: #f97316;
       --orange-soft: #fff4e8;
+      --yellow: #ca8a04;
+      --yellow-soft: #fef9c3;
       --red: #dc2626;
       --red-soft: #fef2f2;
       --radius: 8px;
@@ -37,14 +39,16 @@
       overflow: hidden;
       background: var(--bg);
       color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
+      font-family: "Segoe UI Variable", "Segoe UI", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 15px;
+      line-height: 1.45;
       user-select: none;
       -webkit-font-smoothing: antialiased;
     }
 
     button,
-    input {
+    input,
+    textarea {
       font: inherit;
     }
 
@@ -55,13 +59,13 @@
     .app {
       height: 100vh;
       display: grid;
-      grid-template-rows: auto auto 1fr;
+      grid-template-rows: auto 1fr;
       background: var(--bg);
     }
 
     .topbar {
+      display: none;
       -webkit-app-region: drag;
-      display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
@@ -166,10 +170,46 @@
 
     .tabs {
       display: flex;
+      align-items: center;
+      justify-content: space-between;
       gap: 4px;
       padding: 8px 18px 0;
       background: var(--surface);
       border-bottom: 1px solid var(--line);
+      -webkit-app-region: drag;
+    }
+
+    .nav-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 160px;
+      color: #111827;
+      font-weight: 800;
+      flex: 0 0 auto;
+    }
+
+    .nav-brand .mark {
+      width: 28px;
+      height: 28px;
+      font-size: 11px;
+    }
+
+    .tab-list {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      -webkit-app-region: no-drag;
+    }
+
+    .nav-status {
+      -webkit-app-region: no-drag;
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      min-width: 160px;
+      flex: 0 0 auto;
     }
 
     .tab {
@@ -184,7 +224,7 @@
       color: var(--muted);
       border-bottom: 2px solid transparent;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 700;
       transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
     }
@@ -202,7 +242,7 @@
     .content {
       min-height: 0;
       overflow: auto;
-      padding: 16px 18px 18px;
+      padding: 22px 26px 24px;
     }
 
     .content::-webkit-scrollbar {
@@ -225,10 +265,40 @@
 
     .toolbar {
       display: grid;
-      grid-template-columns: 1fr minmax(180px, 280px) auto;
+      grid-template-columns: minmax(220px, 1fr) minmax(260px, 360px) auto;
       align-items: center;
-      gap: 12px;
-      margin-bottom: 12px;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .folder-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin: 0 0 12px;
+    }
+
+    .filter-chip {
+      min-height: 30px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .filter-chip:hover,
+    .filter-chip.active {
+      border-color: var(--primary);
+      background: var(--primary-soft);
+      color: var(--primary);
     }
 
     .section-title {
@@ -240,7 +310,7 @@
 
     .section-title h1 {
       color: #111827;
-      font-size: 16px;
+      font-size: 20px;
       line-height: 1.2;
       font-weight: 800;
     }
@@ -254,12 +324,13 @@
     .search {
       width: 100%;
       height: 36px;
-      padding: 0 12px;
+      padding: 0 13px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--surface);
       color: var(--text);
       outline: none;
+      font-size: 14px;
     }
 
     .search:focus,
@@ -311,7 +382,7 @@
       grid-template-columns: 1fr auto;
       align-items: start;
       gap: 12px;
-      padding: 12px;
+      padding: 14px 15px;
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: var(--surface);
@@ -324,6 +395,11 @@
       border-color: #9bb9ff;
       box-shadow: var(--shadow);
       transform: translateY(-1px);
+    }
+
+    .history-item.hover-key {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1), var(--shadow);
     }
 
     .history-item:active {
@@ -381,15 +457,23 @@
       color: var(--green);
     }
 
+    .badge.folder {
+      background: var(--orange-soft);
+      color: #c2410c;
+    }
+
     .history-text {
       color: #111827;
-      font-size: 13px;
-      line-height: 1.45;
+      font-size: 14px;
+      line-height: 1.55;
       word-break: break-word;
       white-space: pre-wrap;
     }
 
     .copy-hint {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
       color: var(--faint);
       font-size: 12px;
       font-weight: 700;
@@ -411,9 +495,45 @@
     }
 
     .icon-button:hover {
+      border-color: #9bb9ff;
+      background: var(--primary-soft);
+      color: var(--primary);
+    }
+
+    .icon-button:disabled {
+      opacity: 0.42;
+      cursor: default;
+      pointer-events: none;
+    }
+
+    .delete-button:hover {
       border-color: #fecaca;
       background: var(--red-soft);
       color: var(--red);
+    }
+
+    .edit-button {
+      font-size: 14px;
+    }
+
+    .star-button {
+      font-size: 15px;
+    }
+
+    .star-button.active {
+      border-color: #fde68a;
+      background: var(--yellow-soft);
+      color: var(--yellow);
+    }
+
+    .star-button.active:hover {
+      border-color: var(--yellow);
+      background: var(--yellow-soft);
+      color: var(--yellow);
+    }
+
+    .star-button.active .icon {
+      fill: currentColor;
     }
 
     .settings-grid {
@@ -445,6 +565,13 @@
       font-weight: 800;
     }
 
+    .card-subtitle {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      line-height: 1.35;
+    }
+
     .card-body {
       padding: 14px;
     }
@@ -459,6 +586,60 @@
       grid-template-columns: 1fr;
       align-items: start;
       gap: 10px;
+    }
+
+    .hotkey-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .hotkey-row {
+      display: grid;
+      grid-template-columns: minmax(150px, 0.85fr) minmax(220px, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-soft);
+    }
+
+    .hotkey-info {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .hotkey-info strong {
+      color: #111827;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .hotkey-info span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .hotkey-preview {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 5px;
+      min-height: 24px;
+    }
+
+    .hotkey-row .save-status {
+      min-height: 16px;
+      font-size: 11px;
+    }
+
+    .hotkey-note {
+      padding: 0 2px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
     }
 
     .label {
@@ -679,6 +860,352 @@
       font-weight: 800;
     }
 
+    .icon-sprite {
+      display: none;
+    }
+
+    .icon {
+      width: 16px;
+      height: 16px;
+      display: inline-block;
+      flex: 0 0 auto;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+    }
+
+    .icon.fill {
+      fill: currentColor;
+      stroke: currentColor;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(15, 23, 42, 0.42);
+      backdrop-filter: blur(8px);
+    }
+
+    .modal-backdrop[hidden] {
+      display: none;
+    }
+
+    .editor-dialog {
+      width: min(860px, 100%);
+      max-height: calc(100vh - 48px);
+      display: grid;
+      grid-template-rows: auto minmax(360px, 1fr) auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: 0 28px 70px rgba(15, 23, 42, 0.32);
+      overflow: hidden;
+    }
+
+    .editor-header,
+    .editor-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .editor-footer {
+      border-top: 1px solid var(--line);
+      border-bottom: 0;
+      background: var(--surface-soft);
+    }
+
+    .editor-title {
+      min-width: 0;
+    }
+
+    .editor-heading {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-width: 0;
+    }
+
+    .editor-icon {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: #111827;
+      color: #fff;
+      flex: 0 0 auto;
+    }
+
+    .editor-title strong {
+      display: block;
+      color: #111827;
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .editor-title span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .editor-body {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto minmax(240px, 1fr) auto;
+      gap: 12px;
+      padding: 16px;
+      overflow: auto;
+    }
+
+    .format-toolbar {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .format-group {
+      min-width: 0;
+      display: grid;
+      gap: 7px;
+      align-content: start;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-soft);
+    }
+
+    .format-group-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
+    .format-group-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .format-button {
+      min-height: 31px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .format-button:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    .editor-top-fields {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 12px;
+    }
+
+    .folder-field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .folder-field .label strong {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .copy-toggle-card {
+      min-height: 46px;
+      display: flex;
+      align-items: center;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-soft);
+    }
+
+    .editor-textarea {
+      width: 100%;
+      min-height: 260px;
+      resize: vertical;
+      padding: 13px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+      outline: none;
+      line-height: 1.5;
+      user-select: text;
+      white-space: pre-wrap;
+      box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    .editor-textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    }
+
+    .editor-info {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .checkbox-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 750;
+      cursor: pointer;
+    }
+
+    .checkbox-row input {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--primary);
+    }
+
+    .editor-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+    }
+
+    .palette-dialog {
+      width: min(560px, 100%);
+      max-height: min(680px, calc(100vh - 48px));
+      display: grid;
+      grid-template-rows: auto minmax(160px, 1fr);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: 0 28px 70px rgba(15, 23, 42, 0.32);
+      overflow: hidden;
+    }
+
+    .palette-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .palette-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #111827;
+      font-weight: 850;
+    }
+
+    .palette-body {
+      min-height: 0;
+      overflow: auto;
+      padding: 10px;
+      background: var(--bg);
+    }
+
+    .pinned-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .pinned-item {
+      width: 100%;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: start;
+      gap: 10px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .pinned-item:hover,
+    .pinned-item.active {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .pinned-index {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      background: var(--primary-soft);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .pinned-text {
+      min-width: 0;
+      display: block;
+      color: #111827;
+      font-size: 14px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .pinned-meta {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+    }
+
+    .editor-actions button,
+    .primary-button,
+    .secondary-button,
+    .danger-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+    }
+
     @media (max-width: 680px) {
       .topbar {
         align-items: flex-start;
@@ -692,7 +1219,8 @@
 
       .toolbar,
       .settings-grid,
-      .setting-row {
+      .setting-row,
+      .hotkey-row {
         grid-template-columns: 1fr;
       }
 
@@ -703,28 +1231,131 @@
       .text-input {
         width: 100%;
       }
+
+      .editor-dialog {
+        max-height: calc(100vh - 24px);
+      }
+
+      .format-toolbar,
+      .editor-top-fields {
+        grid-template-columns: 1fr;
+      }
+
+      .editor-footer {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .editor-actions {
+        width: 100%;
+        justify-content: flex-end;
+      }
     }
   </style>
 </head>
 <body>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="i-clipboard" viewBox="0 0 24 24">
+      <rect x="8" y="2" width="8" height="4" rx="1"></rect>
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+    </symbol>
+    <symbol id="i-x" viewBox="0 0 24 24">
+      <path d="M18 6 6 18"></path>
+      <path d="m6 6 12 12"></path>
+    </symbol>
+    <symbol id="i-save" viewBox="0 0 24 24">
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"></path>
+      <path d="M17 21v-8H7v8"></path>
+      <path d="M7 3v5h8"></path>
+    </symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24">
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"></path>
+    </symbol>
+    <symbol id="i-star" viewBox="0 0 24 24">
+      <path d="m12 2 3.1 6.3 7 .9-5 4.9 1.2 6.9-6.3-3.3L5.7 21l1.2-6.9-5-4.9 7-.9L12 2Z"></path>
+    </symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24">
+      <path d="M12 20h9"></path>
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+    </symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24">
+      <path d="M3 6h18"></path>
+      <path d="M8 6V4h8v2"></path>
+      <path d="M19 6 18 20H6L5 6"></path>
+      <path d="M10 11v5"></path>
+      <path d="M14 11v5"></path>
+    </symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24">
+      <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+    </symbol>
+    <symbol id="i-text" viewBox="0 0 24 24">
+      <path d="M4 7V4h16v3"></path>
+      <path d="M9 20h6"></path>
+      <path d="M12 4v16"></path>
+    </symbol>
+    <symbol id="i-eraser" viewBox="0 0 24 24">
+      <path d="m7 21-4-4L14 6l7 7-8 8Z"></path>
+      <path d="M17 17H7"></path>
+    </symbol>
+    <symbol id="i-list" viewBox="0 0 24 24">
+      <path d="M8 6h13"></path>
+      <path d="M8 12h13"></path>
+      <path d="M8 18h13"></path>
+      <path d="M3 6h.01"></path>
+      <path d="M3 12h.01"></path>
+      <path d="M3 18h.01"></path>
+    </symbol>
+    <symbol id="i-code" viewBox="0 0 24 24">
+      <path d="m16 18 6-6-6-6"></path>
+      <path d="m8 6-6 6 6 6"></path>
+    </symbol>
+    <symbol id="i-braces" viewBox="0 0 24 24">
+      <path d="M8 3H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2"></path>
+      <path d="M16 21h2a2 2 0 0 0 2-2v-3a2 2 0 0 1 2-2 2 2 0 0 1-2-2V9a2 2 0 0 0-2-2h-2"></path>
+    </symbol>
+    <symbol id="i-quote" viewBox="0 0 24 24">
+      <path d="M3 21c3 0 7-2 7-8V5H3v8h4c0 3-1 5-4 5Z"></path>
+      <path d="M14 21c3 0 7-2 7-8V5h-7v8h4c0 3-1 5-4 5Z"></path>
+    </symbol>
+    <symbol id="i-lines" viewBox="0 0 24 24">
+      <path d="M4 6h16"></path>
+      <path d="M4 12h16"></path>
+      <path d="M4 18h10"></path>
+    </symbol>
+    <symbol id="i-arrow-down-up" viewBox="0 0 24 24">
+      <path d="m7 3-4 4 4 4"></path>
+      <path d="M3 7h18"></path>
+      <path d="m17 21 4-4-4-4"></path>
+      <path d="M21 17H3"></path>
+    </symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24">
+      <path d="M9 14 4 9l5-5"></path>
+      <path d="M4 9h10a6 6 0 0 1 0 12h-2"></path>
+    </symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24">
+      <path d="m15 14 5-5-5-5"></path>
+      <path d="M20 9H10a6 6 0 0 0 0 12h2"></path>
+    </symbol>
+    <symbol id="i-rotate" viewBox="0 0 24 24">
+      <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+      <path d="M3 3v6h6"></path>
+    </symbol>
+  </svg>
   <div class="app">
-    <header class="topbar">
-      <div class="brand">
+    <nav class="tabs" aria-label="Điều hướng">
+      <div class="nav-brand">
         <div class="mark">FP</div>
-        <div class="brand-copy">
-          <div class="title">FastPaste</div>
-          <div id="app-subtitle" class="subtitle">Clipboard sync đang chạy nền</div>
-        </div>
+        <span>FastPaste</span>
+        <span id="app-subtitle" hidden>Clipboard sync đang chạy nền</span>
       </div>
-
-      <div class="top-actions">
+      <div class="tab-list">
+        <button class="tab active" data-tab="history" type="button">Lịch sử</button>
+        <button class="tab" data-tab="settings" type="button">Cài đặt</button>
+      </div>
+      <div class="nav-status">
         <div id="connection-pill" class="pill"><span class="status-dot"></span><span>Đang chạy</span></div>
       </div>
-    </header>
-
-    <nav class="tabs" aria-label="Điều hướng">
-      <button class="tab active" data-tab="history" type="button">Lịch sử</button>
-      <button class="tab" data-tab="settings" type="button">Cài đặt</button>
     </nav>
 
     <main class="content">
@@ -737,6 +1368,7 @@
           <input id="history-search" class="search" type="search" placeholder="Tìm trong lịch sử">
           <button id="clear-history" class="danger-button" type="button">Xóa tất cả</button>
         </div>
+        <div id="folder-filters" class="folder-strip"></div>
         <div id="history-container"></div>
       </section>
 
@@ -745,21 +1377,51 @@
           <div class="setting-stack">
             <div class="card">
               <div class="card-header">
-                <div class="card-title">Hotkey ẩn/hiện</div>
-              </div>
-              <div class="card-body setting-stack">
-                <div class="setting-row">
-                  <div class="label">
-                    <strong>Tổ hợp phím</strong>
-                    <span>Dùng dạng Ctrl+Alt+Z hoặc CommandOrControl+Alt+Z.</span>
-                  </div>
-                  <div class="input-group">
-                    <input id="hotkey-input" class="text-input" type="text" spellcheck="false" value="CommandOrControl+Alt+Z">
-                    <button id="save-hotkey" class="primary-button" type="button">Lưu</button>
-                  </div>
+                <div>
+                  <div class="card-title">Phím tắt</div>
+                  <div class="card-subtitle">Nhập như Ctrl+Alt+Z. Có thể dùng Ctrl, Alt, Shift, Win và F1..F12.</div>
                 </div>
-                <div id="hotkey-preview" class="preview-line"></div>
-                <div id="hotkey-status" class="save-status"></div>
+              </div>
+              <div class="card-body">
+                <div class="hotkey-list">
+                  <div class="hotkey-row">
+                    <div class="hotkey-info">
+                      <strong>Ẩn / hiện</strong>
+                      <span>Mở hoặc thu FastPaste.</span>
+                      <div id="hotkey-preview" class="hotkey-preview"></div>
+                      <div id="hotkey-status" class="save-status"></div>
+                    </div>
+                    <div class="input-group">
+                      <input id="hotkey-input" class="text-input" type="text" spellcheck="false" value="CommandOrControl+Alt+Z">
+                      <button id="save-hotkey" class="primary-button" type="button">Lưu</button>
+                    </div>
+                  </div>
+                  <div class="hotkey-row">
+                    <div class="hotkey-info">
+                      <strong>Edit mới nhất</strong>
+                      <span>Mở nhanh khung sửa mục đầu tiên.</span>
+                      <div id="edit-hotkey-preview" class="hotkey-preview"></div>
+                      <div id="edit-hotkey-status" class="save-status"></div>
+                    </div>
+                    <div class="input-group">
+                      <input id="edit-hotkey-input" class="text-input" type="text" spellcheck="false" value="CommandOrControl+Alt+E">
+                      <button id="save-edit-hotkey" class="primary-button" type="button">Lưu</button>
+                    </div>
+                  </div>
+                  <div class="hotkey-row">
+                    <div class="hotkey-info">
+                      <strong>Danh sách ghim</strong>
+                      <span>Mở palette pinned để chọn nhanh.</span>
+                      <div id="pinned-hotkey-preview" class="hotkey-preview"></div>
+                      <div id="pinned-hotkey-status" class="save-status"></div>
+                    </div>
+                    <div class="input-group">
+                      <input id="pinned-hotkey-input" class="text-input" type="text" spellcheck="false" value="CommandOrControl+Alt+P">
+                      <button id="save-pinned-hotkey" class="primary-button" type="button">Lưu</button>
+                    </div>
+                  </div>
+                  <div class="hotkey-note">Quick paste pinned: Alt+1..9 dùng 9 mục đã ghim đầu tiên.</div>
+                </div>
               </div>
             </div>
 
@@ -831,6 +1493,112 @@
     </main>
   </div>
 
+  <div id="editor-backdrop" class="modal-backdrop" hidden>
+    <section class="editor-dialog" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+      <header class="editor-header">
+        <div class="editor-heading">
+          <div class="editor-icon">
+            <svg class="icon"><use href="#i-clipboard"></use></svg>
+          </div>
+          <div class="editor-title">
+            <strong id="editor-title">Sửa clipboard</strong>
+            <span id="editor-meta">PC</span>
+          </div>
+        </div>
+        <div class="editor-actions">
+          <button id="editor-undo" class="icon-button" type="button" title="Undo">
+            <svg class="icon"><use href="#i-undo"></use></svg>
+          </button>
+          <button id="editor-redo" class="icon-button" type="button" title="Redo">
+            <svg class="icon"><use href="#i-redo"></use></svg>
+          </button>
+          <button id="editor-close" class="icon-button" type="button" title="Đóng">
+            <svg class="icon"><use href="#i-x"></use></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="editor-body">
+        <div class="format-toolbar" aria-label="Định dạng">
+          <div class="format-group">
+            <div class="format-group-title"><svg class="icon"><use href="#i-text"></use></svg><span>Chữ</span></div>
+            <div class="format-group-buttons">
+              <button class="format-button" type="button" data-format="lowercase"><svg class="icon"><use href="#i-text"></use></svg><span>lower</span></button>
+              <button class="format-button" type="button" data-format="uppercase"><svg class="icon"><use href="#i-text"></use></svg><span>UPPER</span></button>
+              <button class="format-button" type="button" data-format="titlecase"><svg class="icon"><use href="#i-text"></use></svg><span>Title</span></button>
+            </div>
+          </div>
+          <div class="format-group">
+            <div class="format-group-title"><svg class="icon"><use href="#i-eraser"></use></svg><span>Dọn</span></div>
+            <div class="format-group-buttons">
+              <button class="format-button" type="button" data-format="trim"><svg class="icon"><use href="#i-eraser"></use></svg><span>Trim</span></button>
+              <button class="format-button" type="button" data-format="one-line"><svg class="icon"><use href="#i-lines"></use></svg><span>1 dòng</span></button>
+              <button class="format-button" type="button" data-format="remove-spaces"><svg class="icon"><use href="#i-arrow-down-up"></use></svg><span>Xóa space</span></button>
+              <button class="format-button" type="button" data-format="collapse-spaces"><svg class="icon"><use href="#i-lines"></use></svg><span>Gọn space</span></button>
+            </div>
+          </div>
+          <div class="format-group">
+            <div class="format-group-title"><svg class="icon"><use href="#i-list"></use></svg><span>Khối</span></div>
+            <div class="format-group-buttons">
+              <button class="format-button" type="button" data-format="bullets"><svg class="icon"><use href="#i-list"></use></svg><span>Bullets</span></button>
+              <button class="format-button" type="button" data-format="numbers"><svg class="icon"><use href="#i-list"></use></svg><span>Number</span></button>
+              <button class="format-button" type="button" data-format="quote"><svg class="icon"><use href="#i-quote"></use></svg><span>Quote</span></button>
+              <button class="format-button" type="button" data-format="code"><svg class="icon"><use href="#i-code"></use></svg><span>Code</span></button>
+              <button class="format-button" type="button" data-format="json"><svg class="icon"><use href="#i-braces"></use></svg><span>JSON</span></button>
+            </div>
+          </div>
+        </div>
+        <div class="editor-top-fields">
+          <div class="folder-field">
+            <div class="label">
+              <strong><svg class="icon"><use href="#i-folder"></use></svg><span>Folder</span></strong>
+              <span>Nhập tên folder để gom các snippet hay dùng.</span>
+            </div>
+            <input id="editor-folder" class="text-input" type="text" list="folder-options" maxlength="48" placeholder="Ví dụ: Work, Email, Code">
+            <datalist id="folder-options"></datalist>
+          </div>
+          <div class="copy-toggle-card">
+            <label class="checkbox-row">
+              <input id="editor-copy-after-save" type="checkbox" checked>
+              <span>Copy sau khi lưu</span>
+            </label>
+          </div>
+        </div>
+        <textarea id="editor-text" class="editor-textarea" spellcheck="false"></textarea>
+        <div class="editor-info">
+          <span id="editor-count">0 ký tự</span>
+          <span id="editor-status" class="save-status"></span>
+        </div>
+      </div>
+
+      <footer class="editor-footer">
+        <span></span>
+        <div class="editor-actions">
+          <button id="editor-reset" class="secondary-button" type="button"><svg class="icon"><use href="#i-rotate"></use></svg><span>Reset</span></button>
+          <button id="editor-cancel" class="secondary-button" type="button"><svg class="icon"><use href="#i-x"></use></svg><span>Hủy</span></button>
+          <button id="editor-save" class="primary-button" type="button"><svg class="icon"><use href="#i-save"></use></svg><span>Lưu</span></button>
+        </div>
+      </footer>
+    </section>
+  </div>
+
+  <div id="pinned-backdrop" class="modal-backdrop" hidden>
+    <section class="palette-dialog" role="dialog" aria-modal="true" aria-labelledby="pinned-title">
+      <header class="palette-header">
+        <div class="palette-title">
+          <svg class="icon"><use href="#i-star"></use></svg>
+          <span id="pinned-title">Clipboard đã ghim</span>
+        </div>
+        <button id="pinned-close" class="icon-button" type="button" title="Đóng">
+          <svg class="icon"><use href="#i-x"></use></svg>
+        </button>
+      </header>
+      <div class="palette-body">
+        <div id="pinned-list" class="pinned-list"></div>
+      </div>
+    </section>
+  </div>
+
   <script>
     const invoke = window.__TAURI__.core.invoke;
     const listen = window.__TAURI__.event.listen;
@@ -841,7 +1609,21 @@
       data: null,
       activeTab: 'history',
       query: '',
+      folderFilter: 'all',
       currentHistory: [],
+      hoveredHistoryIndex: null,
+      editingEntryId: null,
+      editorDraft: {
+        initial: null,
+        last: null,
+        undo: [],
+        redo: [],
+        applying: false
+      },
+      pinnedPalette: {
+        items: [],
+        selectedIndex: 0
+      },
       updateUrl: 'https://github.com/sieuxuan/fast-paste/releases/latest'
     };
 
@@ -851,11 +1633,20 @@
       historyCount: document.getElementById('history-count'),
       historySearch: document.getElementById('history-search'),
       clearHistory: document.getElementById('clear-history'),
+      folderFilters: document.getElementById('folder-filters'),
       historyContainer: document.getElementById('history-container'),
       hotkeyInput: document.getElementById('hotkey-input'),
       hotkeyPreview: document.getElementById('hotkey-preview'),
       hotkeyStatus: document.getElementById('hotkey-status'),
       saveHotkey: document.getElementById('save-hotkey'),
+      editHotkeyInput: document.getElementById('edit-hotkey-input'),
+      editHotkeyPreview: document.getElementById('edit-hotkey-preview'),
+      editHotkeyStatus: document.getElementById('edit-hotkey-status'),
+      saveEditHotkey: document.getElementById('save-edit-hotkey'),
+      pinnedHotkeyInput: document.getElementById('pinned-hotkey-input'),
+      pinnedHotkeyPreview: document.getElementById('pinned-hotkey-preview'),
+      pinnedHotkeyStatus: document.getElementById('pinned-hotkey-status'),
+      savePinnedHotkey: document.getElementById('save-pinned-hotkey'),
       autostartCheckbox: document.getElementById('autostart-checkbox'),
       autostartTitle: document.getElementById('autostart-title'),
       autostartCopy: document.getElementById('autostart-copy'),
@@ -871,7 +1662,26 @@
       cloudAccount: document.getElementById('cloud-account'),
       googleSignIn: document.getElementById('google-sign-in'),
       googleSync: document.getElementById('google-sync'),
-      googleSignOut: document.getElementById('google-sign-out')
+      googleSignOut: document.getElementById('google-sign-out'),
+      editorBackdrop: document.getElementById('editor-backdrop'),
+      editorTitle: document.getElementById('editor-title'),
+      editorMeta: document.getElementById('editor-meta'),
+      editorFolder: document.getElementById('editor-folder'),
+      folderOptions: document.getElementById('folder-options'),
+      editorText: document.getElementById('editor-text'),
+      editorCount: document.getElementById('editor-count'),
+      editorStatus: document.getElementById('editor-status'),
+      editorCopyAfterSave: document.getElementById('editor-copy-after-save'),
+      editorUndo: document.getElementById('editor-undo'),
+      editorRedo: document.getElementById('editor-redo'),
+      editorReset: document.getElementById('editor-reset'),
+      editorClose: document.getElementById('editor-close'),
+      editorCancel: document.getElementById('editor-cancel'),
+      editorSave: document.getElementById('editor-save'),
+      formatButtons: document.querySelectorAll('[data-format]'),
+      pinnedBackdrop: document.getElementById('pinned-backdrop'),
+      pinnedList: document.getElementById('pinned-list'),
+      pinnedClose: document.getElementById('pinned-close')
     };
 
     function escapeHtml(value) {
@@ -881,6 +1691,10 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+    }
+
+    function icon(name, extraClass = '') {
+      return `<svg class="icon ${extraClass}" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
     }
 
     function normalizeKeyToken(token) {
@@ -1012,15 +1826,76 @@
         : { className: 'android', label: 'Android' };
     }
 
+    function cleanFolderName(folder) {
+      return String(folder || '').trim().replace(/\s+/g, ' ').slice(0, 48);
+    }
+
+    function getFolders(items) {
+      return Array.from(new Set(
+        items
+          .map(item => cleanFolderName(item.folder))
+          .filter(Boolean)
+      )).sort((a, b) => a.localeCompare(b, 'vi'));
+    }
+
+    function renderFolderFilters(items) {
+      const folders = getFolders(items);
+      const pinnedCount = items.filter(item => item.pinned).length;
+      const unfiledCount = items.filter(item => !cleanFolderName(item.folder)).length;
+      const filters = [
+        { id: 'all', icon: 'clipboard', label: `Tất cả (${items.length})` },
+        { id: 'pinned', icon: 'star', label: `Đã ghim (${pinnedCount})` },
+        { id: 'unfiled', icon: 'folder', label: `Chưa folder (${unfiledCount})` },
+        ...folders.map(folder => ({
+          id: `folder:${folder}`,
+          icon: 'folder',
+          label: `${folder} (${items.filter(item => cleanFolderName(item.folder) === folder).length})`
+        }))
+      ];
+
+      if (state.folderFilter !== 'all' && !filters.some(filter => filter.id === state.folderFilter)) {
+        state.folderFilter = 'all';
+      }
+
+      els.folderFilters.innerHTML = filters.map(filter => `
+        <button class="filter-chip ${state.folderFilter === filter.id ? 'active' : ''}" type="button" data-folder-filter="${escapeHtml(filter.id)}">
+          ${icon(filter.icon)}<span>${escapeHtml(filter.label)}</span>
+        </button>
+      `).join('');
+
+      els.folderOptions.innerHTML = folders.map(folder => `<option value="${escapeHtml(folder)}"></option>`).join('');
+    }
+
+    function applyFolderFilter(items) {
+      if (state.folderFilter === 'pinned') return items.filter(item => item.pinned);
+      if (state.folderFilter === 'unfiled') return items.filter(item => !cleanFolderName(item.folder));
+      if (state.folderFilter.startsWith('folder:')) {
+        const folder = state.folderFilter.slice('folder:'.length);
+        return items.filter(item => cleanFolderName(item.folder) === folder);
+      }
+      return items;
+    }
+
     function renderHistory() {
       const allItems = state.data?.history || [];
+      if (state.hoveredHistoryIndex !== null && !allItems[state.hoveredHistoryIndex]) {
+        state.hoveredHistoryIndex = null;
+      }
       const query = state.query.trim().toLowerCase();
-      const filtered = query
+      const searched = query
         ? allItems.filter(item => String(item.text || '').toLowerCase().includes(query))
         : allItems;
+      const filtered = applyFolderFilter(searched);
+      const displayItems = [...filtered].sort((left, right) => {
+        if (Boolean(left.pinned) !== Boolean(right.pinned)) return left.pinned ? -1 : 1;
+        return new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime();
+      });
 
       state.currentHistory = allItems;
-      els.historyCount.textContent = `${allItems.length} mục`;
+      renderFolderFilters(allItems);
+      els.historyCount.textContent = filtered.length === allItems.length
+        ? `${allItems.length} mục`
+        : `${filtered.length}/${allItems.length} mục`;
       els.clearHistory.disabled = allItems.length === 0;
 
       if (!allItems.length) {
@@ -1046,7 +1921,7 @@
       }
 
       const groups = new Map();
-      filtered.forEach(item => {
+      displayItems.forEach(item => {
         const originalIndex = allItems.indexOf(item);
         const dateLabel = formatDate(item.timestamp);
         if (!groups.has(dateLabel)) groups.set(dateLabel, []);
@@ -1060,21 +1935,26 @@
             ${items.map(item => {
               const meta = sourceMeta(item.source);
               const text = String(item.text || '');
+              const folder = cleanFolderName(item.folder);
               const displayText = text.length > 260 ? `${text.slice(0, 260)}...` : text;
               return `
-                <div class="history-item">
+                <div class="history-item ${item.pinned ? 'pinned' : ''} ${state.hoveredHistoryIndex === item.originalIndex ? 'hover-key' : ''}" data-hover-index="${item.originalIndex}">
                   <button class="history-copy" type="button" data-index="${item.originalIndex}" title="Copy">
                     <span class="history-main">
                       <span class="history-meta">
                         <span class="badge ${meta.className}">${meta.label}</span>
+                        ${item.pinned ? '<span class="badge folder">Đã ghim</span>' : ''}
+                        ${folder ? `<span class="badge folder">${escapeHtml(folder)}</span>` : ''}
                         <span>${formatTime(item.timestamp)}</span>
                       </span>
                       <span class="history-text">${escapeHtml(displayText)}</span>
                     </span>
                   </button>
                   <span class="history-actions">
-                    <span class="copy-hint">Copy</span>
-                    <button class="icon-button" type="button" data-delete-index="${item.originalIndex}" title="Xóa">×</button>
+                    <span class="copy-hint">${icon('copy')}<span>Copy</span></span>
+                    <button class="icon-button star-button ${item.pinned ? 'active' : ''}" type="button" data-pin-index="${item.originalIndex}" title="${item.pinned ? 'Bỏ ghim' : 'Ghim'}">${icon('star')}</button>
+                    <button class="icon-button edit-button" type="button" data-edit-index="${item.originalIndex}" title="Sửa">${icon('pencil')}</button>
+                    <button class="icon-button delete-button" type="button" data-delete-index="${item.originalIndex}" title="Xóa">${icon('trash')}</button>
                   </span>
                 </div>`;
             }).join('')}
@@ -1089,6 +1969,20 @@
 
       try {
         await invoke('delete_history_item', { id: entry.id });
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function toggleHistoryPin(index) {
+      const entry = state.currentHistory[index];
+      if (!entry) return;
+
+      try {
+        await invoke('toggle_history_pin', {
+          id: entry.id,
+          pinned: !entry.pinned
+        });
       } catch (error) {
         console.error(error);
       }
@@ -1113,12 +2007,22 @@
       const settings = state.data?.settings || {};
       const ips = state.data?.ips || [];
       const hotkey = settings.hotkey || 'CommandOrControl+Alt+Z';
+      const editHotkey = settings.edit_hotkey || 'CommandOrControl+Alt+E';
+      const pinnedHotkey = settings.pinned_hotkey || 'CommandOrControl+Alt+P';
 
       els.versionTitle.textContent = `FastPaste ${APP_VERSION}`;
       if (document.activeElement !== els.hotkeyInput) {
         els.hotkeyInput.value = hotkeyInputText(hotkey);
       }
-      els.hotkeyPreview.innerHTML = `Hiển thị: ${displayHotkey(els.hotkeyInput.value)}`;
+      if (document.activeElement !== els.editHotkeyInput) {
+        els.editHotkeyInput.value = hotkeyInputText(editHotkey);
+      }
+      if (document.activeElement !== els.pinnedHotkeyInput) {
+        els.pinnedHotkeyInput.value = hotkeyInputText(pinnedHotkey);
+      }
+      els.hotkeyPreview.innerHTML = displayHotkey(els.hotkeyInput.value);
+      els.editHotkeyPreview.innerHTML = displayHotkey(els.editHotkeyInput.value);
+      els.pinnedHotkeyPreview.innerHTML = displayHotkey(els.pinnedHotkeyInput.value);
 
       els.autostartCheckbox.checked = Boolean(settings.auto_start);
       els.autostartTitle.textContent = settings.auto_start ? 'Đang bật' : 'Đang tắt';
@@ -1194,12 +2098,56 @@
       try {
         await invoke('save_hotkey', { hotkey: canonical });
         els.hotkeyInput.value = hotkeyInputText(canonical);
-        els.hotkeyPreview.innerHTML = `Hiển thị: ${displayHotkey(canonical)}`;
+        els.hotkeyPreview.innerHTML = displayHotkey(canonical);
         setStatus(els.hotkeyStatus, 'Đã lưu hotkey.', 'ok');
       } catch (error) {
         setStatus(els.hotkeyStatus, String(error), 'error');
       } finally {
         els.saveHotkey.disabled = false;
+      }
+    }
+
+    async function saveEditHotkey() {
+      const canonical = toTauriHotkey(els.editHotkeyInput.value);
+      if (!canonical) {
+        setStatus(els.editHotkeyStatus, 'Hotkey edit không được để trống.', 'error');
+        return;
+      }
+
+      els.saveEditHotkey.disabled = true;
+      setStatus(els.editHotkeyStatus, 'Đang lưu...');
+
+      try {
+        await invoke('save_edit_hotkey', { hotkey: canonical });
+        els.editHotkeyInput.value = hotkeyInputText(canonical);
+        els.editHotkeyPreview.innerHTML = displayHotkey(canonical);
+        setStatus(els.editHotkeyStatus, 'Đã lưu hotkey edit.', 'ok');
+      } catch (error) {
+        setStatus(els.editHotkeyStatus, String(error), 'error');
+      } finally {
+        els.saveEditHotkey.disabled = false;
+      }
+    }
+
+    async function savePinnedHotkey() {
+      const canonical = toTauriHotkey(els.pinnedHotkeyInput.value);
+      if (!canonical) {
+        setStatus(els.pinnedHotkeyStatus, 'Hotkey pinned không được để trống.', 'error');
+        return;
+      }
+
+      els.savePinnedHotkey.disabled = true;
+      setStatus(els.pinnedHotkeyStatus, 'Đang lưu...');
+
+      try {
+        await invoke('save_pinned_hotkey', { hotkey: canonical });
+        els.pinnedHotkeyInput.value = hotkeyInputText(canonical);
+        els.pinnedHotkeyPreview.innerHTML = displayHotkey(canonical);
+        setStatus(els.pinnedHotkeyStatus, 'Đã lưu hotkey pinned.', 'ok');
+      } catch (error) {
+        setStatus(els.pinnedHotkeyStatus, String(error), 'error');
+      } finally {
+        els.savePinnedHotkey.disabled = false;
       }
     }
 
@@ -1292,6 +2240,327 @@
       }
     }
 
+    function updateEditorCount() {
+      const length = els.editorText.value.length;
+      const lines = els.editorText.value ? els.editorText.value.split(/\r?\n/).length : 0;
+      els.editorCount.textContent = `${length} ký tự · ${lines} dòng`;
+    }
+
+    function currentEditorDraft() {
+      return {
+        text: els.editorText.value,
+        folder: cleanFolderName(els.editorFolder.value)
+      };
+    }
+
+    function sameDraft(left, right) {
+      return Boolean(left && right && left.text === right.text && left.folder === right.folder);
+    }
+
+    function editorHasUnsavedChanges() {
+      return Boolean(state.editingEntryId && !sameDraft(currentEditorDraft(), state.editorDraft.initial));
+    }
+
+    function updateEditorHistoryButtons() {
+      els.editorUndo.disabled = state.editorDraft.undo.length === 0;
+      els.editorRedo.disabled = state.editorDraft.redo.length === 0;
+      els.editorReset.disabled = sameDraft(currentEditorDraft(), state.editorDraft.initial);
+    }
+
+    function applyEditorDraft(draft) {
+      state.editorDraft.applying = true;
+      els.editorText.value = draft.text;
+      els.editorFolder.value = draft.folder;
+      state.editorDraft.last = { ...draft };
+      updateEditorCount();
+      updateEditorHistoryButtons();
+      state.editorDraft.applying = false;
+    }
+
+    function pushEditorUndo(draft = state.editorDraft.last) {
+      if (!draft) return false;
+      const current = currentEditorDraft();
+      if (sameDraft(draft, current)) return false;
+      state.editorDraft.undo.push({ ...draft });
+      if (state.editorDraft.undo.length > 80) {
+        state.editorDraft.undo.shift();
+      }
+      state.editorDraft.redo = [];
+      return true;
+    }
+
+    function pushCurrentEditorUndo() {
+      const current = currentEditorDraft();
+      state.editorDraft.undo.push({ ...current });
+      if (state.editorDraft.undo.length > 80) {
+        state.editorDraft.undo.shift();
+      }
+      state.editorDraft.redo = [];
+    }
+
+    function trackEditorInput() {
+      if (state.editorDraft.applying) return;
+      const previous = state.editorDraft.last;
+      const current = currentEditorDraft();
+      if (!sameDraft(previous, current)) {
+        if (previous) {
+          state.editorDraft.undo.push({ ...previous });
+          if (state.editorDraft.undo.length > 80) state.editorDraft.undo.shift();
+        }
+        state.editorDraft.redo = [];
+        state.editorDraft.last = { ...current };
+      }
+      updateEditorCount();
+      updateEditorHistoryButtons();
+      setStatus(els.editorStatus, '');
+    }
+
+    function undoEditorChange() {
+      const previous = state.editorDraft.undo.pop();
+      if (!previous) return;
+      state.editorDraft.redo.push(currentEditorDraft());
+      applyEditorDraft(previous);
+      setStatus(els.editorStatus, '');
+    }
+
+    function redoEditorChange() {
+      const next = state.editorDraft.redo.pop();
+      if (!next) return;
+      state.editorDraft.undo.push(currentEditorDraft());
+      applyEditorDraft(next);
+      setStatus(els.editorStatus, '');
+    }
+
+    function resetEditorDraft() {
+      const initial = state.editorDraft.initial;
+      if (!initial || sameDraft(currentEditorDraft(), initial)) return;
+      pushCurrentEditorUndo();
+      applyEditorDraft(initial);
+      setStatus(els.editorStatus, '');
+    }
+
+    function openEditor(entry) {
+      if (!entry) {
+        switchTab('history');
+        return;
+      }
+
+      const meta = sourceMeta(entry.source);
+      const draft = {
+        text: String(entry.text || ''),
+        folder: cleanFolderName(entry.folder)
+      };
+      state.editingEntryId = entry.id;
+      state.editorDraft.initial = { ...draft };
+      state.editorDraft.last = { ...draft };
+      state.editorDraft.undo = [];
+      state.editorDraft.redo = [];
+      els.editorTitle.textContent = 'Sửa clipboard';
+      els.editorMeta.textContent = `${meta.label} · ${formatDateTime(entry.timestamp)}`;
+      els.editorFolder.value = draft.folder;
+      els.editorText.value = draft.text;
+      els.editorCopyAfterSave.checked = true;
+      setStatus(els.editorStatus, '');
+      updateEditorCount();
+      updateEditorHistoryButtons();
+      els.editorBackdrop.hidden = false;
+      window.setTimeout(() => {
+        els.editorText.focus();
+        els.editorText.setSelectionRange(0, els.editorText.value.length);
+      }, 0);
+    }
+
+    function openEditorByIndex(index) {
+      const entry = state.currentHistory[index];
+      if (entry) openEditor(entry);
+    }
+
+    function closeEditor() {
+      state.editingEntryId = null;
+      state.editorDraft.initial = null;
+      state.editorDraft.last = null;
+      state.editorDraft.undo = [];
+      state.editorDraft.redo = [];
+      els.editorBackdrop.hidden = true;
+      setStatus(els.editorStatus, '');
+    }
+
+    function requestCloseEditor() {
+      if (editorHasUnsavedChanges() && !confirm('Nội dung đã thay đổi. Đóng mà không lưu?')) {
+        return;
+      }
+      closeEditor();
+    }
+
+    function getPinnedItems() {
+      return (state.data?.history || []).filter(item => item.pinned);
+    }
+
+    function renderPinnedPalette() {
+      const items = state.pinnedPalette.items || [];
+
+      if (!items.length) {
+        els.pinnedList.innerHTML = `
+          <div class="empty">
+            <div>
+              <strong>Chưa có clipboard được ghim</strong>
+              <span>Bấm biểu tượng sao ở dòng hay dùng để đưa vào danh sách này.</span>
+            </div>
+          </div>`;
+        return;
+      }
+
+      els.pinnedList.innerHTML = items.map((item, index) => {
+        const folder = cleanFolderName(item.folder);
+        const meta = [
+          folder,
+          formatDateTime(item.timestamp),
+          index < 9 ? `Phím ${index + 1}` : ''
+        ].filter(Boolean).join(' · ');
+        const text = String(item.text || '');
+        const displayText = text.length > 220 ? `${text.slice(0, 220)}...` : text;
+
+        return `
+          <button class="pinned-item ${index === state.pinnedPalette.selectedIndex ? 'active' : ''}" type="button" data-pinned-index="${index}">
+            <span class="pinned-index">${index < 9 ? index + 1 : icon('star')}</span>
+            <span>
+              <span class="pinned-text">${escapeHtml(displayText)}</span>
+              <span class="pinned-meta">${escapeHtml(meta || 'Đã ghim')}</span>
+            </span>
+          </button>`;
+      }).join('');
+    }
+
+    function openPinnedPalette(items = getPinnedItems()) {
+      state.pinnedPalette.items = Array.isArray(items) && items.length ? items : getPinnedItems();
+      state.pinnedPalette.selectedIndex = 0;
+      renderPinnedPalette();
+      els.pinnedBackdrop.hidden = false;
+    }
+
+    function closePinnedPalette() {
+      els.pinnedBackdrop.hidden = true;
+    }
+
+    function movePinnedSelection(delta) {
+      const items = state.pinnedPalette.items || [];
+      if (!items.length) return;
+      const next = (state.pinnedPalette.selectedIndex + delta + items.length) % items.length;
+      state.pinnedPalette.selectedIndex = next;
+      renderPinnedPalette();
+      els.pinnedList.querySelector(`[data-pinned-index="${next}"]`)?.scrollIntoView({ block: 'nearest' });
+    }
+
+    async function copyPinnedIndex(index) {
+      const entry = state.pinnedPalette.items?.[index];
+      if (!entry) return;
+      try {
+        await invoke('copy_text', { text: entry.text });
+        closePinnedPalette();
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function copyPinnedSlot(index) {
+      const entry = getPinnedItems()[index];
+      if (!entry) return;
+      try {
+        await invoke('copy_text', { text: entry.text });
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    function replaceEditorText(transform) {
+      const textarea = els.editorText;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const hasSelection = end > start;
+      const original = textarea.value;
+      const target = hasSelection ? original.slice(start, end) : original;
+      const replacement = transform(target);
+
+      pushCurrentEditorUndo();
+
+      if (hasSelection) {
+        textarea.value = original.slice(0, start) + replacement + original.slice(end);
+        textarea.setSelectionRange(start, start + replacement.length);
+      } else {
+        textarea.value = replacement;
+        textarea.setSelectionRange(0, replacement.length);
+      }
+
+      textarea.focus();
+      state.editorDraft.last = currentEditorDraft();
+      updateEditorCount();
+      updateEditorHistoryButtons();
+      setStatus(els.editorStatus, '');
+    }
+
+    function formatLines(text, mapper) {
+      return text
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(mapper)
+        .join('\n');
+    }
+
+    function applyFormat(action) {
+      const transforms = {
+        trim: text => text.split(/\r?\n/).map(line => line.trimEnd()).join('\n').trim(),
+        lowercase: text => text.toLocaleLowerCase('vi-VN'),
+        uppercase: text => text.toLocaleUpperCase('vi-VN'),
+        titlecase: text => text.toLocaleLowerCase('vi-VN').replace(/\p{L}[\p{L}\p{M}]*/gu, word => word.charAt(0).toLocaleUpperCase('vi-VN') + word.slice(1)),
+        'one-line': text => text.split(/\s*\r?\n\s*/).filter(Boolean).join(' '),
+        'remove-spaces': text => text.replace(/\s+/g, ''),
+        'collapse-spaces': text => text.replace(/[^\S\r\n]+/g, ' ').replace(/\s*\r?\n\s*/g, '\n').trim(),
+        bullets: text => formatLines(text, line => `- ${line.replace(/^[-*•]\s*/, '')}`),
+        numbers: text => formatLines(text, (line, index) => `${index + 1}. ${line.replace(/^\d+\.\s*/, '')}`),
+        quote: text => text.split(/\r?\n/).map(line => line ? `> ${line.replace(/^>\s*/, '')}` : '>').join('\n'),
+        code: text => text.startsWith('```') && text.endsWith('```') ? text : `\`\`\`\n${text.trim()}\n\`\`\``,
+        json: text => {
+          try {
+            return JSON.stringify(JSON.parse(text), null, 2);
+          } catch (error) {
+            setStatus(els.editorStatus, 'Không parse được JSON.', 'error');
+            return text;
+          }
+        }
+      };
+
+      const transform = transforms[action];
+      if (transform) replaceEditorText(transform);
+    }
+
+    async function saveEditedItem() {
+      const id = state.editingEntryId;
+      const text = els.editorText.value;
+      if (!id) return;
+      if (!text.trim()) {
+        setStatus(els.editorStatus, 'Nội dung không được để trống.', 'error');
+        return;
+      }
+
+      els.editorSave.disabled = true;
+      setStatus(els.editorStatus, 'Đang lưu...');
+
+      try {
+        await invoke('update_history_item', {
+          id,
+          text,
+          folder: cleanFolderName(els.editorFolder.value),
+          copyAfterSave: els.editorCopyAfterSave.checked
+        });
+        closeEditor();
+      } catch (error) {
+        setStatus(els.editorStatus, String(error), 'error');
+      } finally {
+        els.editorSave.disabled = false;
+      }
+    }
+
     function bindEvents() {
       document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
@@ -1302,7 +2571,26 @@
         renderHistory();
       });
 
+      els.folderFilters.addEventListener('click', event => {
+        const filterButton = event.target.closest('[data-folder-filter]');
+        if (!filterButton) return;
+        state.folderFilter = filterButton.dataset.folderFilter;
+        renderHistory();
+      });
+
       els.historyContainer.addEventListener('click', event => {
+        const pinButton = event.target.closest('[data-pin-index]');
+        if (pinButton) {
+          toggleHistoryPin(Number(pinButton.dataset.pinIndex));
+          return;
+        }
+
+        const editButton = event.target.closest('[data-edit-index]');
+        if (editButton) {
+          openEditorByIndex(Number(editButton.dataset.editIndex));
+          return;
+        }
+
         const deleteButton = event.target.closest('[data-delete-index]');
         if (deleteButton) {
           deleteHistoryItem(Number(deleteButton.dataset.deleteIndex));
@@ -1317,16 +2605,55 @@
         if (entry) invoke('copy_text', { text: entry.text });
       });
 
+      els.historyContainer.addEventListener('pointerover', event => {
+        const item = event.target.closest('[data-hover-index]');
+        if (!item) return;
+        const index = Number(item.dataset.hoverIndex);
+        if (state.hoveredHistoryIndex !== index) {
+          state.hoveredHistoryIndex = index;
+          renderHistory();
+        }
+      });
+
+      els.historyContainer.addEventListener('pointerout', event => {
+        const item = event.target.closest('[data-hover-index]');
+        if (!item || item.contains(event.relatedTarget)) return;
+        if (state.hoveredHistoryIndex === Number(item.dataset.hoverIndex)) {
+          state.hoveredHistoryIndex = null;
+          renderHistory();
+        }
+      });
+
       els.hotkeyInput.addEventListener('input', () => {
-        els.hotkeyPreview.innerHTML = `Hiển thị: ${displayHotkey(els.hotkeyInput.value)}`;
+        els.hotkeyPreview.innerHTML = displayHotkey(els.hotkeyInput.value);
         setStatus(els.hotkeyStatus, '');
+      });
+
+      els.editHotkeyInput.addEventListener('input', () => {
+        els.editHotkeyPreview.innerHTML = displayHotkey(els.editHotkeyInput.value);
+        setStatus(els.editHotkeyStatus, '');
+      });
+
+      els.pinnedHotkeyInput.addEventListener('input', () => {
+        els.pinnedHotkeyPreview.innerHTML = displayHotkey(els.pinnedHotkeyInput.value);
+        setStatus(els.pinnedHotkeyStatus, '');
       });
 
       els.hotkeyInput.addEventListener('keydown', event => {
         if (event.key === 'Enter') saveHotkey();
       });
 
+      els.editHotkeyInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') saveEditHotkey();
+      });
+
+      els.pinnedHotkeyInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') savePinnedHotkey();
+      });
+
       els.saveHotkey.addEventListener('click', saveHotkey);
+      els.saveEditHotkey.addEventListener('click', saveEditHotkey);
+      els.savePinnedHotkey.addEventListener('click', savePinnedHotkey);
       els.autostartCheckbox.addEventListener('change', saveAutoStart);
       els.clearHistory.addEventListener('click', clearHistory);
       els.checkUpdate.addEventListener('click', () => checkForUpdates(false));
@@ -1334,12 +2661,110 @@
       els.googleSignIn.addEventListener('click', googleSignIn);
       els.googleSync.addEventListener('click', googleSyncNow);
       els.googleSignOut.addEventListener('click', googleSignOut);
+      els.editorText.addEventListener('input', trackEditorInput);
+      els.editorFolder.addEventListener('input', trackEditorInput);
+      els.editorUndo.addEventListener('click', undoEditorChange);
+      els.editorRedo.addEventListener('click', redoEditorChange);
+      els.editorReset.addEventListener('click', resetEditorDraft);
+      els.editorClose.addEventListener('click', requestCloseEditor);
+      els.editorCancel.addEventListener('click', requestCloseEditor);
+      els.editorSave.addEventListener('click', saveEditedItem);
+      els.editorBackdrop.addEventListener('click', event => {
+        if (event.target === els.editorBackdrop) requestCloseEditor();
+      });
+      els.pinnedClose.addEventListener('click', closePinnedPalette);
+      els.pinnedBackdrop.addEventListener('click', event => {
+        if (event.target === els.pinnedBackdrop) closePinnedPalette();
+      });
+      els.pinnedList.addEventListener('click', event => {
+        const item = event.target.closest('[data-pinned-index]');
+        if (item) copyPinnedIndex(Number(item.dataset.pinnedIndex));
+      });
+      els.formatButtons.forEach(button => {
+        button.addEventListener('click', () => applyFormat(button.dataset.format));
+      });
+      document.addEventListener('keydown', event => {
+        if (!els.pinnedBackdrop.hidden) {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            closePinnedPalette();
+          } else if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            movePinnedSelection(1);
+          } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            movePinnedSelection(-1);
+          } else if (event.key === 'Enter') {
+            event.preventDefault();
+            copyPinnedIndex(state.pinnedPalette.selectedIndex);
+          } else if (/^[1-9]$/.test(event.key)) {
+            const index = Number(event.key) - 1;
+            if (index < state.pinnedPalette.items.length) {
+              event.preventDefault();
+              copyPinnedIndex(index);
+            }
+          }
+          return;
+        }
+
+        if (els.editorBackdrop.hidden) {
+          const isTyping = event.target.closest('input, textarea, select, [contenteditable="true"]');
+          if (!isTyping && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
+            event.preventDefault();
+            copyPinnedSlot(Number(event.key) - 1);
+            return;
+          }
+          if (!isTyping && state.hoveredHistoryIndex !== null) {
+            if (event.key.toLowerCase() === 'e') {
+              event.preventDefault();
+              openEditorByIndex(state.hoveredHistoryIndex);
+              return;
+            }
+            if (event.key === 'Delete') {
+              event.preventDefault();
+              deleteHistoryItem(state.hoveredHistoryIndex);
+              return;
+            }
+          }
+          return;
+        }
+
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          requestCloseEditor();
+        }
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z') {
+          event.preventDefault();
+          undoEditorChange();
+        }
+        if (
+          (event.ctrlKey || event.metaKey) &&
+          (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))
+        ) {
+          event.preventDefault();
+          redoEditorChange();
+        }
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+          event.preventDefault();
+          saveEditedItem();
+        }
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+          event.preventDefault();
+          saveEditedItem();
+        }
+      });
     }
 
     bindEvents();
     listen('update_state', event => {
       state.data = event.payload;
       render();
+    });
+    listen('edit_history_item', event => {
+      openEditor(event.payload);
+    });
+    listen('open_pinned_list', event => {
+      openPinnedPalette(event.payload);
     });
     invoke('request_state');
     checkForUpdates(true);

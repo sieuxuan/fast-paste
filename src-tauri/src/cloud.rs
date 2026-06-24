@@ -50,6 +50,10 @@ pub struct CloudEntry {
     pub text: String,
     pub timestamp: i64,
     pub source: String,
+    #[serde(default)]
+    pub pinned: bool,
+    #[serde(default)]
+    pub folder: String,
 }
 
 pub struct CloudSyncResult {
@@ -596,10 +600,28 @@ fn merge_entries(entries: Vec<CloudEntry>) -> Vec<CloudEntry> {
         }
         let should_replace = by_text
             .get(&entry.text)
-            .map(|current| entry.timestamp > current.timestamp)
+            .map(|current| {
+                entry.timestamp > current.timestamp
+                    || (entry.timestamp == current.timestamp
+                        && (entry.pinned && !current.pinned
+                            || (!entry.folder.trim().is_empty()
+                                && current.folder.trim().is_empty())))
+            })
             .unwrap_or(true);
         if should_replace {
-            by_text.insert(entry.text.clone(), entry);
+            let mut next = entry;
+            if let Some(current) = by_text.get(&next.text) {
+                next.pinned = next.pinned || current.pinned;
+                if next.folder.trim().is_empty() && !current.folder.trim().is_empty() {
+                    next.folder = current.folder.clone();
+                }
+            }
+            by_text.insert(next.text.clone(), next);
+        } else if let Some(current) = by_text.get_mut(&entry.text) {
+            current.pinned = current.pinned || entry.pinned;
+            if current.folder.trim().is_empty() && !entry.folder.trim().is_empty() {
+                current.folder = entry.folder;
+            }
         }
     }
 
