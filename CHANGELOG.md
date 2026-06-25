@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.1 - 2026-06-25
+
+- Polished Vietnamese labels and status messages across desktop and Android.
+- Changed pinned palette item clicks to edit instead of copy, with edit and unpin actions on each pinned item.
+- Added configurable pinned quick slots 1-9 instead of assigning slots only by pinned order.
+- Improved desktop history/editor wording, format button labels, Google sync badges, and hotkey error messages.
+- Improved Android menu, Google status labels, share toast, and background sync notification wording.
+
 ## 2.2.0 - 2026-06-24
 
 - Added Google login cloud sync for desktop and Android using Google Drive app data.

@@ -138,17 +138,27 @@
       display:flex;
       flex-direction:column;
       gap:6px;
-      padding:4px 0 12px;
+      padding:0 0 12px;
+    }
+    .sb-section-label {
+      -webkit-app-region:no-drag;
+      margin:10px 4px 7px;
+      color:var(--txf);
+      font-size:10px;
+      font-weight:900;
+      letter-spacing:.08em;
+      line-height:1;
+      text-transform:uppercase;
     }
     .nav-btn, .pinned-launch {
       width:100%;
-      height:42px;
+      height:44px;
       display:flex;
       align-items:center;
-      gap:10px;
-      padding:0 10px;
+      gap:11px;
+      padding:0 11px;
       border:1px solid transparent;
-      border-radius:var(--r);
+      border-radius:13px;
       background:transparent;
       color:var(--txd);
       cursor:pointer;
@@ -158,9 +168,10 @@
     }
     .nav-btn:hover, .pinned-launch:hover { background:var(--g2); color:var(--tx); }
     .nav-btn.active {
-      border-color:var(--bd2);
-      background:var(--g3);
-      color:var(--ac);
+      border-color:rgba(56,189,248,.34);
+      background:linear-gradient(135deg, rgba(56,189,248,.14), rgba(129,140,248,.09));
+      color:var(--tx);
+      box-shadow:inset 0 0 0 1px rgba(56,189,248,.12);
     }
     .nav-btn span:nth-child(2), .pinned-launch span:nth-child(2) { min-width:0; flex:1; }
     .sb-nav-count {
@@ -206,12 +217,12 @@
       display:flex;
       align-items:center;
       gap:9px;
-      min-height:40px;
+      min-height:44px;
       margin-top:12px;
-      padding:9px 10px;
+      padding:10px 11px;
       border:1px solid var(--bd);
-      border-radius:var(--r);
-      background:var(--g);
+      border-radius:13px;
+      background:linear-gradient(135deg, rgba(255,255,255,.07), rgba(255,255,255,.03));
       color:var(--txd);
       font-size:12px;
       font-weight:700;
@@ -230,11 +241,18 @@
     .sb-bottom {
       -webkit-app-region:no-drag;
       display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
+      flex-direction:column;
+      align-items:stretch;
+      gap:9px;
       padding-top:12px;
       border-top:1px solid var(--bd);
+    }
+    .sb-bottom-row {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      min-width:0;
     }
     .hotkey-keys {
       display:flex;
@@ -242,6 +260,39 @@
       flex-wrap:wrap;
       gap:4px;
       min-width:0;
+      color:var(--txd);
+      font-size:12px;
+      font-weight:800;
+      line-height:1.25;
+    }
+    .language-control {
+      display:grid;
+      grid-template-columns:1fr auto;
+      align-items:center;
+      gap:8px;
+      min-height:38px;
+      padding:6px 8px 6px 10px;
+      border:1px solid var(--bd);
+      border-radius:13px;
+      background:var(--g);
+      color:var(--txd);
+      font-size:12px;
+      font-weight:800;
+    }
+    .language-select {
+      min-width:70px;
+      height:28px;
+      border:1px solid var(--bd2);
+      border-radius:9px;
+      background:var(--g2);
+      color:var(--tx);
+      font:800 12px var(--sans);
+      outline:none;
+      cursor:pointer;
+    }
+    .language-select:focus {
+      border-color:rgba(56,189,248,.55);
+      box-shadow:0 0 0 3px var(--acg);
     }
 
     .icon-btn {
@@ -467,7 +518,10 @@
     .history-list { display:grid; gap:9px; }
     .hi {
       position:relative;
-      padding:12px 52px 12px 13px;
+      display:grid;
+      grid-template-columns:minmax(0, 1fr) auto;
+      gap:12px;
+      padding:13px 13px 13px 14px;
       border:1px solid var(--bd);
       border-radius:var(--r);
       background:linear-gradient(135deg, rgba(255,255,255,.07), rgba(255,255,255,.035));
@@ -482,6 +536,12 @@
       transform:translateY(-1px);
     }
     body.light .hi { box-shadow:0 15px 42px rgba(15,23,42,.06); }
+    body.light .hi:hover, body.light .hi.keyboard-hover {
+      border-color:rgba(2,132,199,.45);
+      background:linear-gradient(135deg, rgba(2,132,199,.1), rgba(79,70,229,.055));
+      box-shadow:0 18px 45px rgba(15,23,42,.12), inset 0 0 0 1px rgba(2,132,199,.08);
+    }
+    .hmain { min-width:0; }
     .hmeta {
       display:flex;
       align-items:center;
@@ -545,24 +605,34 @@
       box-shadow:inset 0 0 0 1px rgba(255,255,255,.18);
     }
     .hactions {
-      position:absolute;
-      right:9px;
-      top:50%;
       display:flex;
-      flex-direction:column;
-      gap:5px;
-      opacity:0;
-      pointer-events:none;
-      transform:translateY(-50%) translateX(4px);
-      transition:opacity .16s ease, transform .16s ease;
+      align-items:center;
+      align-self:start;
+      gap:6px;
     }
     .hi:hover .hactions, .hi.keyboard-hover .hactions {
       opacity:1;
       pointer-events:auto;
-      transform:translateY(-50%) translateX(0);
     }
-    .hactions .icon-btn { width:30px; height:30px; border-radius:8px; background:rgba(7,10,19,.66); }
-    body.light .hactions .icon-btn { background:rgba(255,255,255,.88); }
+    .hactions .icon-btn {
+      width:32px;
+      height:32px;
+      border-radius:9px;
+      background:rgba(7,10,19,.58);
+    }
+    .hactions .action-copy { border-color:rgba(56,189,248,.24); background:rgba(56,189,248,.12); color:var(--ac); }
+    .hactions .action-pin { border-color:rgba(251,191,36,.24); background:rgba(251,191,36,.1); color:var(--yw); }
+    .hactions .action-pin.active { border-color:rgba(251,191,36,.5); background:var(--ywb); color:var(--yw); }
+    .hactions .action-pin.active svg { fill:currentColor; stroke:currentColor; }
+    .hactions .action-edit { border-color:rgba(129,140,248,.26); background:rgba(129,140,248,.12); color:var(--ac2); }
+    .hactions .action-delete { border-color:rgba(248,113,113,.26); background:var(--redb); color:var(--red); }
+    .hactions .icon-btn:hover { filter:saturate(1.2) brightness(1.08); }
+    body.light .hactions .icon-btn { background:rgba(255,255,255,.9); }
+    body.light .hactions .action-copy { background:rgba(2,132,199,.12); color:#0369a1; }
+    body.light .hactions .action-pin { background:rgba(180,83,9,.14); color:#92400e; }
+    body.light .hactions .action-pin.active { background:rgba(180,83,9,.22); color:#92400e; }
+    body.light .hactions .action-edit { background:rgba(79,70,229,.12); color:#4338ca; }
+    body.light .hactions .action-delete { background:rgba(220,38,38,.12); color:#b91c1c; }
 
     .grid {
       display:grid;
@@ -657,7 +727,7 @@
     }
     .hotkey-row {
       display:grid;
-      grid-template-columns:minmax(160px, .8fr) minmax(240px, 1fr) minmax(140px, .6fr);
+      grid-template-columns:minmax(180px, .8fr) minmax(280px, 1.2fr);
       gap:12px;
       align-items:start;
       padding:12px 0;
@@ -699,6 +769,7 @@
       color:var(--txd);
       font-size:12px;
     }
+    .hotkey-row .preview-line { display:none; }
     .status-line {
       min-height:18px;
       margin-top:7px;
@@ -765,6 +836,10 @@
       animation:fpModal .18s ease;
     }
     body.light .emodal, body.light .pmodal { background:linear-gradient(145deg, rgba(248,251,255,.98), rgba(237,243,251,.95)); box-shadow:0 26px 80px rgba(15,23,42,.18); }
+    .emodal {
+      width:min(94vw, 760px);
+      max-height:min(94vh, 820px);
+    }
     .modal-head, .modal-foot {
       display:flex;
       align-items:center;
@@ -775,13 +850,31 @@
     }
     .modal-foot { border-top:1px solid var(--bd); border-bottom:0; }
     .modal-title { min-width:0; }
+    .modal-title-inner {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+    }
+    .modal-title-icon {
+      width:36px;
+      height:36px;
+      display:grid;
+      place-items:center;
+      flex:0 0 auto;
+      border:1px solid rgba(56,189,248,.28);
+      border-radius:11px;
+      background:var(--acg);
+      color:var(--ac);
+    }
+    .modal-title-icon svg { width:18px; height:18px; }
     .modal-title strong {
       display:block;
       color:var(--tx);
       font-size:16px;
       font-weight:800;
     }
-    .modal-title span {
+    .modal-title > span, .modal-title-inner > div > span {
       display:block;
       margin-top:3px;
       color:var(--txd);
@@ -790,7 +883,7 @@
     .emodal-body {
       min-height:0;
       overflow:auto;
-      padding:14px 16px;
+      padding:14px 18px 12px;
     }
     .efmt {
       display:flex;
@@ -800,6 +893,9 @@
     }
     .fmt-btn {
       min-height:30px;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
       padding:0 9px;
       border:1px solid var(--bd);
       border-radius:8px;
@@ -809,12 +905,13 @@
       font-size:12px;
       font-weight:800;
     }
+    .fmt-btn svg { width:14px; height:14px; color:var(--ac); }
     .fmt-btn:hover { border-color:var(--bd2); color:var(--tx); background:var(--g2); }
     .editor-text {
-      min-height:150px;
-      max-height:40vh;
+      min-height:220px;
+      max-height:56vh;
       resize:vertical;
-      padding:11px;
+      padding:13px;
       font-family:var(--mono);
       font-size:13px;
       line-height:1.52;
@@ -835,11 +932,37 @@
     }
     .form-row label { color:var(--txd); font-size:12px; font-weight:800; }
     .editor-folder { height:38px; padding:0 10px; }
+    .editor-meta-strip {
+      display:grid;
+      grid-template-columns:1fr;
+      gap:8px;
+      margin-top:12px;
+    }
+    .tag-field {
+      display:grid;
+      grid-template-columns:auto minmax(0, 1fr);
+      align-items:center;
+      gap:10px;
+    }
+    .tag-field-label {
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      min-height:34px;
+      padding:0 10px;
+      border:1px solid var(--bd);
+      border-radius:9px;
+      background:var(--g);
+      color:var(--txd);
+      font-size:12px;
+      font-weight:800;
+    }
+    .tag-field-label svg { width:14px; height:14px; color:var(--ac); }
     .mini-toggle-row {
       display:flex;
       align-items:center;
       gap:9px;
-      margin-top:12px;
+      min-height:36px;
       color:var(--txd);
       font-size:13px;
       font-weight:700;
@@ -847,7 +970,8 @@
     .mini-toggle-row .toggle-btn { width:44px; height:26px; }
     .mini-toggle-row .toggle-btn .tthumb { width:18px; height:18px; }
     .mini-toggle-row .toggle-btn[data-on="true"] .tthumb { transform:translateX(18px); }
-    .foot-left, .foot-right { display:flex; align-items:center; gap:8px; }
+    .foot-left, .foot-right { display:flex; align-items:center; gap:8px; min-width:0; }
+    .foot-left { flex-wrap:wrap; }
 
     .pmodal {
       align-self:start;
@@ -855,10 +979,42 @@
       margin-top:8vh;
     }
     .pinned-hint {
+      display:flex;
+      align-items:center;
+      gap:6px;
       color:var(--txd);
       font-family:var(--mono);
       font-size:12px;
       white-space:nowrap;
+    }
+    .pinned-hint .faint { display:inline; margin:0; }
+    .palette-hotkey-row {
+      display:grid;
+      grid-template-columns:auto minmax(130px, 180px) auto minmax(0, 1fr);
+      align-items:center;
+      gap:10px;
+      padding:12px 14px;
+      border-bottom:1px solid var(--bd);
+      background:rgba(255,255,255,.03);
+    }
+    .palette-hotkey-row .label {
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      color:var(--tx);
+      font-size:12px;
+      font-weight:800;
+      white-space:nowrap;
+    }
+    .palette-hotkey-row .tinput {
+      width:100%;
+      text-align:center;
+    }
+    .palette-hotkey-row .status-line {
+      min-height:0;
+      margin-top:0;
+      flex:1;
+      min-width:0;
     }
     .pinned-list {
       display:grid;
@@ -880,6 +1036,33 @@
       cursor:pointer;
       text-align:left;
     }
+    .pitem-top {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      min-width:0;
+    }
+    .pitem-actions {
+      display:flex;
+      align-items:center;
+      gap:5px;
+    }
+    .pitem-action {
+      width:28px;
+      height:28px;
+      display:grid;
+      place-items:center;
+      border:1px solid var(--bd);
+      border-radius:8px;
+      background:var(--g2);
+      color:var(--txd);
+      cursor:pointer;
+    }
+    .pitem-action svg { width:14px; height:14px; }
+    .pitem-action:hover { border-color:var(--bd2); color:var(--tx); }
+    .pitem-action.edit { color:var(--ac2); background:rgba(129,140,248,.12); }
+    .pitem-action.unpin { color:var(--yw); background:var(--ywb); }
     .pitem.active {
       border-color:var(--ac);
       background:var(--acg);
@@ -897,6 +1080,22 @@
       font-size:11px;
       font-weight:500;
     }
+    .slot-select {
+      height:28px;
+      min-width:58px;
+      margin-left:auto;
+      border:1px solid var(--bd);
+      border-radius:8px;
+      background:var(--g2);
+      color:var(--tx);
+      font:800 12px var(--font);
+      outline:none;
+      cursor:pointer;
+    }
+    .slot-select:focus {
+      border-color:rgba(56,189,248,.55);
+      box-shadow:0 0 0 3px var(--acg);
+    }
     .ptext {
       display:-webkit-box;
       overflow:hidden;
@@ -910,16 +1109,17 @@
     }
     .pmeta { color:var(--txf); font-size:11px; font-weight:700; }
 
-    @media (max-width: 900px) {
+    @media (max-width: 720px) {
       :root { --sw:82px; }
       .sidebar { padding:12px 8px; }
-      .brand-text, .nav-btn span:nth-child(2), .pinned-launch span:nth-child(2), .sb-glance, .hotkey-keys { display:none; }
+      .brand-text, .nav-btn span:nth-child(2), .pinned-launch span:nth-child(2), .sb-glance, .hotkey-keys, .sb-section-label, .language-control { display:none; }
       .pulse-dot { margin-left:0; }
       .sb-logo { justify-content:center; }
       .nav-btn, .pinned-launch { justify-content:center; padding:0; }
       .sb-nav-count { position:absolute; transform:translate(16px,-13px); min-width:18px; height:18px; padding:0 5px; font-size:10px; }
       .grid { grid-template-columns:1fr; }
       .hotkey-row { grid-template-columns:1fr; }
+      .palette-hotkey-row { grid-template-columns:1fr; }
       .phead-row { align-items:flex-start; flex-direction:column; }
       .toolbar { width:100%; }
       .search-wrap { flex:1; width:auto; min-width:0; }
@@ -934,9 +1134,10 @@
     <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9L4.2 7A2 2 0 1 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 1 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></symbol>
     <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8-6.2-3.3L5.8 21 7 14.2 2 9.3l6.9-1L12 2Z"/></symbol>
     <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
-    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6 18 20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M12.6 2H4a2 2 0 0 0-2 2v8.6a2 2 0 0 0 .6 1.4l7.4 7.4a2 2 0 0 0 2.8 0l8.6-8.6a2 2 0 0 0 0-2.8L14 2.6A2 2 0 0 0 12.6 2Z"/><path d="M7.5 7.5h.01"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
@@ -948,6 +1149,11 @@
     <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1 0l-2 2a5 5 0 0 0 7.1 7.1l1.1-1.1"/></symbol>
     <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-1"/></symbol>
     <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h1"/></symbol>
+    <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></symbol>
+    <symbol id="i-list-ordered" viewBox="0 0 24 24"><path d="M10 6h11"/><path d="M10 12h11"/><path d="M10 18h11"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-1.5 2-3 0-.6-.4-1-1-1s-1 .4-1 1"/></symbol>
+    <symbol id="i-quote" viewBox="0 0 24 24"><path d="M3 21c3 0 7-1 7-8V5H4v8h4c0 3-2 5-5 5Z"/><path d="M14 21c3 0 7-1 7-8V5h-6v8h4c0 3-2 5-5 5Z"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol>
     <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M5 13a10 10 0 0 1 14 0"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M12 20h.01"/></symbol>
     <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></symbol>
   </svg>
@@ -961,25 +1167,23 @@
       </div>
 
       <nav class="sb-nav" aria-label="Điều hướng">
-        <button id="nav-history" class="nav-btn active" type="button" data-panel="history"><svg><use href="#i-clipboard"></use></svg><span>Clipboard</span><span id="history-count" class="sb-nav-count">0</span></button>
-        <button id="nav-devices" class="nav-btn" type="button" data-panel="devices"><svg><use href="#i-devices"></use></svg><span>Devices</span><span id="device-online-count" class="sb-nav-count">0</span></button>
-        <button id="nav-settings" class="nav-btn" type="button" data-panel="settings"><svg><use href="#i-settings"></use></svg><span>Settings</span></button>
+        <button id="nav-history" class="nav-btn active" type="button" data-panel="history"><svg><use href="#i-clipboard"></use></svg><span data-i18n="navClipboard">Lịch sử</span><span id="history-count" class="sb-nav-count">0</span></button>
+        <button id="nav-devices" class="nav-btn" type="button" data-panel="devices"><svg><use href="#i-devices"></use></svg><span data-i18n="navDevices">Thiết bị</span><span id="device-online-count" class="sb-nav-count">0</span></button>
+        <button id="nav-settings" class="nav-btn" type="button" data-panel="settings"><svg><use href="#i-settings"></use></svg><span data-i18n="navSettings">Cài đặt</span></button>
       </nav>
 
       <div class="divider"></div>
 
-      <button id="pinned-launch" class="pinned-launch" type="button"><svg><use href="#i-star"></use></svg><span>Pinned Palette</span><kbd>Alt</kbd><kbd>1</kbd></button>
-
-      <div class="sb-glance">
-        <span id="sidebar-cloud-dot" class="dot"></span>
-        <span id="sidebar-cloud-text">Cloud chưa sẵn sàng</span>
-      </div>
+      <button id="pinned-launch" class="pinned-launch" type="button"><svg><use href="#i-star"></use></svg><span data-i18n="pinnedPalette">Bảng ghim</span></button>
 
       <div class="spacer"></div>
 
       <div class="sb-bottom">
-        <div id="sidebar-hotkey-keys" class="hotkey-keys"></div>
-        <button id="theme-btn" class="icon-btn" type="button" title="Đổi giao diện"><svg><use href="#i-moon"></use></svg></button>
+        <label class="language-control" for="language-select"><span data-i18n="language">Ngôn ngữ</span><select id="language-select" class="language-select" aria-label="Ngôn ngữ"><option value="vi">VN</option><option value="en">EN</option></select></label>
+        <div class="sb-bottom-row">
+          <div id="sidebar-hotkey-keys" class="hotkey-keys"><span id="sidebar-cloud-dot" class="dot"></span><span id="sidebar-cloud-text">Chưa sẵn sàng đồng bộ</span></div>
+          <button id="theme-btn" class="icon-btn" type="button" title="Đổi giao diện" data-i18n-title="themeTitle"><svg><use href="#i-moon"></use></svg></button>
+        </div>
       </div>
     </aside>
 
@@ -987,21 +1191,21 @@
       <section id="panel-history" class="panel active">
         <header class="phead">
           <div class="phead-row">
-            <h1>Clipboard</h1>
+            <h1 data-i18n="historyTitle">Lịch sử</h1>
             <div class="toolbar">
               <div class="search-wrap">
                 <svg><use href="#i-search"></use></svg>
-                <input id="history-search" type="search" placeholder="Tìm lịch sử clipboard" spellcheck="false">
-                <button id="clear-search" class="icon-btn clear-search" type="button" title="Xóa tìm kiếm"><svg><use href="#i-x"></use></svg></button>
+                <input id="history-search" type="search" placeholder="Tìm lịch sử clipboard" data-i18n-placeholder="historySearch" spellcheck="false">
+                <button id="clear-search" class="icon-btn clear-search" type="button" title="Xóa tìm kiếm" data-i18n-title="clearSearchTitle"><svg><use href="#i-x"></use></svg></button>
               </div>
-              <button id="add-new" class="btn primary" type="button"><svg><use href="#i-plus"></use></svg><span>Thêm</span></button>
-              <button id="clear-history" class="btn ghost" type="button" title="Xóa lịch sử"><svg><use href="#i-trash"></use></svg></button>
+              <button id="add-new" class="btn primary" type="button"><svg><use href="#i-plus"></use></svg><span data-i18n="add">Thêm</span></button>
+              <button id="clear-history" class="btn ghost" type="button" title="Xóa lịch sử" data-i18n-title="clearHistoryTitle"><svg><use href="#i-trash"></use></svg></button>
             </div>
           </div>
           <div id="clear-history-row" class="confirm-row" hidden>
-            <span>Xóa toàn bộ lịch sử clipboard?</span>
-            <button id="confirm-clear" class="btn danger" type="button">Xóa</button>
-            <button id="cancel-clear" class="btn ghost" type="button">Hủy</button>
+            <span data-i18n="clearHistoryConfirm">Xóa toàn bộ lịch sử clipboard?</span>
+            <button id="confirm-clear" class="btn danger" type="button" data-i18n="delete">Xóa</button>
+            <button id="cancel-clear" class="btn ghost" type="button" data-i18n="cancel">Hủy</button>
           </div>
         </header>
         <div id="folder-filters" class="chip-row"></div>
@@ -1009,63 +1213,63 @@
       </section>
 
       <section id="panel-devices" class="panel">
-        <header class="phead"><div class="phead-row"><h1>Devices</h1></div></header>
+        <header class="phead"><div class="phead-row"><h1 data-i18n="devicesTitle">Thiết bị</h1></div></header>
         <div class="scroll">
           <div class="srv-card card card-pad">
             <div class="srv-top">
-              <div class="srv-title"><span class="dot ok"></span><span>WebSocket Server</span></div>
+              <div class="srv-title"><span class="dot ok"></span><span data-i18n="websocketServer">Máy chủ WebSocket</span></div>
               <span class="tag">:4567</span>
             </div>
             <div id="device-server-ip" class="ip-row"></div>
-            <div id="srv-clients" class="muted">Chưa có kết nối</div>
+            <div id="srv-clients" class="muted" data-i18n="noConnection">Chưa có kết nối</div>
           </div>
 
-          <div class="section-label">Thiết bị kết nối</div>
+          <div class="section-label" data-i18n="connectedDevices">Thiết bị kết nối</div>
           <div id="devices-list" class="device-list"></div>
 
-          <div class="section-label">Google Drive Sync</div>
+          <div class="section-label" data-i18n="googleDriveSync">Đồng bộ Google Drive</div>
           <div class="cloud-card card card-pad">
             <div class="cloud-top">
-              <div class="cloud-title"><svg><use href="#i-cloud"></use></svg><span id="cloud-title">Google sync</span></div>
-              <span id="cloud-badge" class="badge">Off</span>
+              <div class="cloud-title"><svg><use href="#i-cloud"></use></svg><span id="cloud-title">Đồng bộ Google Drive</span></div>
+              <span id="cloud-badge" class="badge">Tắt</span>
             </div>
-            <div id="cloud-status" class="muted" style="margin-top:9px;">Đang chờ trạng thái.</div>
+            <div id="cloud-status" class="muted" style="margin-top:9px;" data-i18n="cloudWaiting">Đang chờ trạng thái.</div>
             <div id="cloud-account" class="faint" style="margin-top:5px;"></div>
             <div class="button-row">
-              <button id="google-sign-in" class="btn primary" type="button">Đăng nhập Google</button>
-              <button id="google-sync" class="btn" type="button" hidden><svg><use href="#i-rotate"></use></svg><span>Đồng bộ ngay</span></button>
-              <button id="google-sign-out" class="btn ghost" type="button" hidden>Đăng xuất</button>
+              <button id="google-sign-in" class="btn primary" type="button" data-i18n="googleSignIn">Đăng nhập Google</button>
+              <button id="google-sync" class="btn" type="button" hidden><svg><use href="#i-rotate"></use></svg><span data-i18n="syncNow">Đồng bộ ngay</span></button>
+              <button id="google-sign-out" class="btn ghost" type="button" hidden data-i18n="signOut">Đăng xuất</button>
             </div>
           </div>
         </div>
       </section>
 
       <section id="panel-settings" class="panel">
-        <header class="phead"><div class="phead-row"><h1>Settings</h1></div></header>
+        <header class="phead"><div class="phead-row"><h1 data-i18n="settingsTitle">Cài đặt</h1></div></header>
         <div class="scroll sbody">
           <div class="settings-wrap">
             <div class="setting-card card card-pad">
-              <h2>Global Hotkeys</h2>
+              <h2 data-i18n="globalHotkeys">Phím tắt</h2>
               <div class="hotkey-row">
-                <div class="label"><strong>Mở cửa sổ chính</strong><span>Hiện hoặc ẩn FastPaste.</span></div>
+                <div class="label"><strong data-i18n="mainHotkeyTitle">Mở cửa sổ chính</strong><span data-i18n="mainHotkeyDesc">Hiện hoặc ẩn FastPaste.</span></div>
                 <div>
-                  <div class="input-line"><input id="hotkey-input" class="tinput" type="text" spellcheck="false"><button id="save-hotkey" class="btn" type="button">Lưu</button></div>
+                  <div class="input-line"><input id="hotkey-input" class="tinput" type="text" spellcheck="false"><button id="save-hotkey" class="btn" type="button" data-i18n="save">Lưu</button></div>
                   <div id="hotkey-status" class="status-line"></div>
                 </div>
                 <div id="hotkey-preview" class="preview-line"></div>
               </div>
               <div class="hotkey-row">
-                <div class="label"><strong>Sửa mục gần nhất</strong><span>Mở editor cho clipboard hiện tại.</span></div>
+                <div class="label"><strong data-i18n="editHotkeyTitle">Sửa mục gần nhất</strong><span data-i18n="editHotkeyDesc">Mở trình sửa cho clipboard hiện tại.</span></div>
                 <div>
-                  <div class="input-line"><input id="edit-hotkey-input" class="tinput" type="text" spellcheck="false"><button id="save-edit-hotkey" class="btn" type="button">Lưu</button></div>
+                  <div class="input-line"><input id="edit-hotkey-input" class="tinput" type="text" spellcheck="false"><button id="save-edit-hotkey" class="btn" type="button" data-i18n="save">Lưu</button></div>
                   <div id="edit-hotkey-status" class="status-line"></div>
                 </div>
                 <div id="edit-hotkey-preview" class="preview-line"></div>
               </div>
               <div class="hotkey-row">
-                <div class="label"><strong>Mở Pinned Palette</strong><span>Chọn nhanh các mục đã ghim.</span></div>
+                <div class="label"><strong data-i18n="pinnedHotkeyTitle">Mở bảng ghim</strong><span data-i18n="pinnedHotkeyDesc">Chọn nhanh các mục đã ghim.</span></div>
                 <div>
-                  <div class="input-line"><input id="pinned-hotkey-input" class="tinput" type="text" spellcheck="false"><button id="save-pinned-hotkey" class="btn" type="button">Lưu</button></div>
+                  <div class="input-line"><input id="pinned-hotkey-input" class="tinput" type="text" spellcheck="false"><button id="save-pinned-hotkey" class="btn" type="button" data-i18n="save">Lưu</button></div>
                   <div id="pinned-hotkey-status" class="status-line"></div>
                 </div>
                 <div id="pinned-hotkey-preview" class="preview-line"></div>
@@ -1075,17 +1279,17 @@
             <div class="setting-card card card-pad">
               <div class="auto-row">
                 <div class="label"><strong id="autostart-title">Đang tắt</strong><span id="autostart-copy">FastPaste chỉ chạy khi bạn mở thủ công.</span></div>
-                <button id="autostart-toggle" class="toggle-btn" type="button" data-on="false" aria-label="Khởi động cùng Windows"><span class="tthumb"></span></button>
+                <button id="autostart-toggle" class="toggle-btn" type="button" data-on="false" aria-label="Khởi động cùng Windows" data-i18n-aria-label="autostartAria"><span class="tthumb"></span></button>
               </div>
               <div id="autostart-status" class="status-line"></div>
             </div>
 
             <div class="setting-card card card-pad">
               <div class="auto-row">
-                <div class="label"><strong id="version-title">FastPaste 2.2.0</strong><span id="update-status">Chưa kiểm tra cập nhật.</span></div>
+                <div class="label"><strong id="version-title">FastPaste 2.2.1</strong><span id="update-status">Chưa kiểm tra cập nhật.</span></div>
                 <div class="button-row">
-                  <button id="check-update" class="btn" type="button"><svg><use href="#i-rotate"></use></svg><span>Kiểm tra</span></button>
-                  <button id="open-update" class="btn primary" type="button" hidden><svg><use href="#i-download"></use></svg><span>Tải bản mới</span></button>
+                  <button id="check-update" class="btn" type="button"><svg><use href="#i-rotate"></use></svg><span data-i18n="checkUpdate">Kiểm tra</span></button>
+                  <button id="open-update" class="btn primary" type="button" hidden><svg><use href="#i-download"></use></svg><span data-i18n="downloadUpdate">Tải bản mới</span></button>
                 </div>
               </div>
             </div>
@@ -1098,39 +1302,46 @@
   <div id="editor-backdrop" class="overlay" hidden>
     <div class="emodal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
       <div class="modal-head">
-        <div class="modal-title"><strong id="editor-title">Sửa clipboard</strong><span id="editor-meta">Mục lịch sử</span></div>
-        <button id="editor-close" class="icon-btn" type="button" title="Đóng"><svg><use href="#i-x"></use></svg></button>
+        <div class="modal-title">
+          <div class="modal-title-inner">
+            <span class="modal-title-icon"><svg><use href="#i-pencil"></use></svg></span>
+            <div><strong id="editor-title">Sửa clipboard</strong><span id="editor-meta">Mục lịch sử</span></div>
+          </div>
+        </div>
+        <button id="editor-close" class="icon-btn" type="button" title="Đóng" data-i18n-title="close"><svg><use href="#i-x"></use></svg></button>
       </div>
       <div class="emodal-body">
         <div class="efmt">
-          <button class="fmt-btn" type="button" data-format="trim">Trim</button>
-          <button class="fmt-btn" type="button" data-format="lowercase">lower</button>
-          <button class="fmt-btn" type="button" data-format="uppercase">UPPER</button>
-          <button class="fmt-btn" type="button" data-format="titlecase">Title</button>
-          <button class="fmt-btn" type="button" data-format="one-line">One line</button>
-          <button class="fmt-btn" type="button" data-format="collapse-spaces">Spaces</button>
-          <button class="fmt-btn" type="button" data-format="remove-spaces">No spaces</button>
-          <button class="fmt-btn" type="button" data-format="bullets">Bullets</button>
-          <button class="fmt-btn" type="button" data-format="numbers">Numbers</button>
-          <button class="fmt-btn" type="button" data-format="quote">Quote</button>
-          <button class="fmt-btn" type="button" data-format="code">Code</button>
-          <button class="fmt-btn" type="button" data-format="json">JSON</button>
+          <button class="fmt-btn" type="button" data-format="trim"><svg><use href="#i-type"></use></svg><span data-i18n="formatTrim">Cắt gọn</span></button>
+          <button class="fmt-btn" type="button" data-format="lowercase"><svg><use href="#i-type"></use></svg><span data-i18n="formatLower">chữ thường</span></button>
+          <button class="fmt-btn" type="button" data-format="uppercase"><svg><use href="#i-type"></use></svg><span data-i18n="formatUpper">CHỮ HOA</span></button>
+          <button class="fmt-btn" type="button" data-format="titlecase"><svg><use href="#i-type"></use></svg><span data-i18n="formatTitle">Tiêu đề</span></button>
+          <button class="fmt-btn" type="button" data-format="one-line"><svg><use href="#i-list"></use></svg><span data-i18n="formatOneLine">Một dòng</span></button>
+          <button class="fmt-btn" type="button" data-format="collapse-spaces"><svg><use href="#i-list"></use></svg><span data-i18n="formatSpaces">Gọn cách</span></button>
+          <button class="fmt-btn" type="button" data-format="remove-spaces"><svg><use href="#i-x"></use></svg><span data-i18n="formatNoSpaces">Bỏ cách</span></button>
+          <button class="fmt-btn" type="button" data-format="bullets"><svg><use href="#i-list"></use></svg><span data-i18n="formatBullets">Gạch dòng</span></button>
+          <button class="fmt-btn" type="button" data-format="numbers"><svg><use href="#i-list-ordered"></use></svg><span data-i18n="formatNumbers">Đánh số</span></button>
+          <button class="fmt-btn" type="button" data-format="quote"><svg><use href="#i-quote"></use></svg><span data-i18n="formatQuote">Trích dẫn</span></button>
+          <button class="fmt-btn" type="button" data-format="code"><svg><use href="#i-code"></use></svg><span data-i18n="formatCode">Mã</span></button>
+          <button class="fmt-btn" type="button" data-format="json"><svg><use href="#i-code"></use></svg><span>JSON</span></button>
         </div>
         <textarea id="editor-text" class="editor-text" spellcheck="false"></textarea>
         <div id="editor-count" class="editor-count">0 ký tự · 1 dòng</div>
-        <div class="form-row"><label for="editor-folder">Folder</label><input id="editor-folder" class="editor-folder" list="folder-options" type="text" spellcheck="false" placeholder="Ví dụ: Work"><datalist id="folder-options"></datalist></div>
-        <div class="mini-toggle-row"><button id="editor-autocopy-btn" class="toggle-btn" type="button" data-on="true"><span class="tthumb"></span></button><span>Copy sau khi lưu</span></div>
+        <div class="editor-meta-strip">
+          <label class="tag-field" for="editor-folder"><span class="tag-field-label"><svg><use href="#i-tag"></use></svg><span data-i18n="tagLabel">Nhãn</span></span><input id="editor-folder" class="editor-folder" list="folder-options" type="text" spellcheck="false" placeholder="Ví dụ: Công việc, Code, Cá nhân" data-i18n-placeholder="tagPlaceholder"><datalist id="folder-options"></datalist></label>
+        </div>
         <div id="editor-status" class="status-line"></div>
       </div>
       <div class="modal-foot">
         <div class="foot-left">
-          <button id="editor-undo" class="btn ghost" type="button"><svg><use href="#i-undo"></use></svg></button>
-          <button id="editor-redo" class="btn ghost" type="button"><svg><use href="#i-redo"></use></svg></button>
-          <button id="editor-reset" class="btn ghost" type="button">Reset</button>
+          <div class="mini-toggle-row"><button id="editor-autocopy-btn" class="toggle-btn" type="button" data-on="true"><span class="tthumb"></span></button><span data-i18n="copyAfterSave">Sao chép sau khi lưu</span></div>
+          <button id="editor-undo" class="btn ghost" type="button" title="Hoàn tác" data-i18n-title="undo"><svg><use href="#i-undo"></use></svg></button>
+          <button id="editor-redo" class="btn ghost" type="button" title="Làm lại" data-i18n-title="redo"><svg><use href="#i-redo"></use></svg></button>
+          <button id="editor-reset" class="btn ghost" type="button"><svg><use href="#i-rotate"></use></svg><span data-i18n="reset">Đặt lại</span></button>
         </div>
         <div class="foot-right">
-          <button id="editor-cancel" class="btn ghost" type="button">Hủy</button>
-          <button id="editor-save" class="btn primary" type="button">Lưu</button>
+          <button id="editor-cancel" class="btn ghost" type="button" data-i18n="cancel">Hủy</button>
+          <button id="editor-save" class="btn primary" type="button"><svg><use href="#i-copy"></use></svg><span data-i18n="save">Lưu</span></button>
         </div>
       </div>
     </div>
@@ -1139,21 +1350,278 @@
   <div id="pinned-backdrop" class="overlay" hidden>
     <div class="pmodal" role="dialog" aria-modal="true">
       <div class="modal-head">
-        <div class="modal-title"><strong>Pinned Palette</strong><span class="pinned-hint">↑↓ · Enter · Alt+1-9</span></div>
-        <button id="pinned-close" class="icon-btn" type="button" title="Đóng"><svg><use href="#i-x"></use></svg></button>
+        <div class="modal-title"><strong data-i18n="pinnedPalette">Bảng ghim</strong><span id="pinned-hint" class="pinned-hint">↑↓ · Enter</span></div>
+        <button id="pinned-close" class="icon-btn" type="button" title="Đóng" data-i18n-title="close"><svg><use href="#i-x"></use></svg></button>
+      </div>
+      <div class="palette-hotkey-row">
+        <span class="label"><svg><use href="#i-star"></use></svg><span data-i18n="quickSlotHotkeyTitle">Dán nhanh 1-9</span></span>
+        <input id="palette-hotkey-input" class="tinput" type="text" spellcheck="false">
+        <button id="save-palette-hotkey" class="btn" type="button" data-i18n="save">Lưu</button>
+        <div id="palette-hotkey-status" class="status-line"></div>
       </div>
       <div id="pinned-list" class="pinned-list"></div>
     </div>
   </div>
 
   <script>
-    const invoke = window.TAURI.core.invoke;
-    const listen = window.TAURI.event.listen;
-    const APP_VERSION = '2.2.0';
+    const tauriApi = window.__TAURI__ || window.TAURI;
+    if (!tauriApi?.core?.invoke || !tauriApi?.event?.listen) {
+      throw new Error('Không tìm thấy Tauri API. Hãy mở app bằng FastPaste thay vì mở trực tiếp file HTML.');
+    }
+    const invoke = tauriApi.core.invoke;
+    const listen = tauriApi.event.listen;
+    const APP_VERSION = '2.2.1';
     const UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/sieuxuan/fast-paste/master/update.json';
+    const I18N = {
+      vi: {
+        navClipboard: 'Lịch sử',
+        navDevices: 'Thiết bị',
+        navSettings: 'Cài đặt',
+        pinnedPalette: 'Bảng ghim',
+        language: 'Ngôn ngữ',
+        themeTitle: 'Đổi giao diện',
+        historyTitle: 'Lịch sử',
+        historySearch: 'Tìm lịch sử clipboard',
+        clearSearchTitle: 'Xóa tìm kiếm',
+        add: 'Thêm',
+        clearHistoryTitle: 'Xóa lịch sử',
+        clearHistoryConfirm: 'Xóa toàn bộ lịch sử clipboard?',
+        delete: 'Xóa',
+        cancel: 'Hủy',
+        devicesTitle: 'Thiết bị',
+        websocketServer: 'Máy chủ WebSocket',
+        connectedDevices: 'Thiết bị kết nối',
+        googleDriveSync: 'Đồng bộ Google Drive',
+        googleSignIn: 'Đăng nhập Google',
+        syncNow: 'Đồng bộ ngay',
+        retry: 'Thử lại',
+        signOut: 'Đăng xuất',
+        settingsTitle: 'Cài đặt',
+        globalHotkeys: 'Phím tắt',
+        mainHotkeyTitle: 'Mở cửa sổ chính',
+        mainHotkeyDesc: 'Hiện hoặc ẩn FastPaste.',
+        editHotkeyTitle: 'Sửa mục gần nhất',
+        editHotkeyDesc: 'Mở trình sửa cho clipboard hiện tại.',
+        pinnedHotkeyTitle: 'Mở bảng ghim',
+        pinnedHotkeyDesc: 'Chọn nhanh các mục đã ghim.',
+        quickSlotHotkeyTitle: 'Dán nhanh 1-9',
+        quickSlotHotkeyDesc: 'Phím trước số cho các vị trí đã ghim.',
+        save: 'Lưu',
+        autostartAria: 'Khởi động cùng Windows',
+        checkUpdate: 'Kiểm tra',
+        downloadUpdate: 'Tải bản mới',
+        close: 'Đóng',
+        tagLabel: 'Nhãn',
+        tagPlaceholder: 'Ví dụ: Công việc, Code, Cá nhân',
+        copyAfterSave: 'Sao chép sau khi lưu',
+        reset: 'Đặt lại',
+        undo: 'Hoàn tác',
+        redo: 'Làm lại',
+        formatTrim: 'Cắt gọn',
+        formatLower: 'chữ thường',
+        formatUpper: 'CHỮ HOA',
+        formatTitle: 'Tiêu đề',
+        formatOneLine: 'Một dòng',
+        formatSpaces: 'Gọn cách',
+        formatNoSpaces: 'Bỏ cách',
+        formatBullets: 'Gạch dòng',
+        formatNumbers: 'Đánh số',
+        formatQuote: 'Trích dẫn',
+        formatCode: 'Mã',
+        allTags: 'Tất cả',
+        pinned: 'Đã ghim',
+        untagged: 'Chưa gắn nhãn',
+        noClipboardTitle: 'Chưa có dữ liệu clipboard',
+        noClipboardDesc: 'Sao chép nội dung trên PC hoặc kết nối Android để bắt đầu.',
+        noResultTitle: 'Không tìm thấy kết quả',
+        noResultDesc: 'Thử từ khóa khác hoặc đổi bộ lọc nhãn.',
+        pinBadge: 'Ghim',
+        copyTitle: 'Sao chép',
+        unpinTitle: 'Bỏ ghim',
+        pinTitle: 'Ghim',
+        editTitle: 'Sửa',
+        deleteTitle: 'Xóa',
+        noLanIp: 'Không tìm thấy IP LAN',
+        noConnection: 'Chưa có kết nối',
+        connectedCount: count => `${count} thiết bị đang kết nối`,
+        noAndroidTitle: 'Chưa có Android kết nối',
+        noAndroidDesc: 'Mở app Android và dùng cùng mạng LAN với PC.',
+        cloudSyncing: 'Đang đồng bộ',
+        cloudSignedIn: 'Đã đăng nhập',
+        cloudSyncReady: 'Sẵn sàng đồng bộ',
+        cloudReady: 'Sẵn sàng đồng bộ',
+        cloudOff: 'Chưa bật đồng bộ',
+        cloudBadgeSyncing: 'Đồng bộ',
+        cloudBadgeAuto: 'Tự động',
+        cloudBadgeReady: 'Sẵn sàng',
+        cloudBadgeOff: 'Tắt',
+        cloudSignInTitle: 'Đăng nhập Google',
+        cloudNotConfiguredTitle: 'Chưa bật đồng bộ Google',
+        cloudWaiting: 'Đang chờ trạng thái.',
+        cloudLoginHint: 'Đăng nhập Google để bật tự đồng bộ.',
+        cloudNotConfiguredHint: 'Bản cài đặt này chưa cấu hình đồng bộ Google.',
+        cloudLastSync: 'Lần đồng bộ',
+        cloudNoSync: 'chưa có',
+        cloudAutoHint: 'FastPaste sẽ tự đồng bộ khi mở app và khi có clipboard mới.',
+        cloudReleaseHint: 'Cần dùng bản phát hành đã cấu hình đồng bộ Google.',
+        autostartOn: 'Đang bật tự khởi động',
+        autostartOff: 'Đang tắt tự khởi động',
+        autostartOnDesc: 'FastPaste chạy ẩn trong tray khi đăng nhập Windows.',
+        autostartOffDesc: 'FastPaste chỉ chạy khi bạn mở thủ công.',
+        editorAddTitle: 'Thêm clipboard',
+        editorEditTitle: 'Sửa clipboard',
+        editorNewMeta: 'Mục mới',
+        charLine: (chars, lines) => `${chars} ký tự · ${lines} dòng`,
+        invalidJson: 'JSON không hợp lệ.',
+        emptyContent: 'Nội dung không được để trống.',
+        saving: 'Đang lưu...',
+        saved: 'Đã lưu.',
+        hotkeyEmpty: 'Hotkey không được để trống.',
+        hotkeySaved: 'Đã lưu hotkey.',
+        autostartSavedOn: 'Đã bật tự khởi động ẩn.',
+        autostartSavedOff: 'Đã tắt tự khởi động.',
+        checkingUpdate: 'Đang kiểm tra cập nhật...',
+        updateAvailable: version => `Có bản mới ${version}. Bấm tải để mở GitHub.`,
+        updateLatest: 'Đang dùng bản mới nhất.',
+        updateFailed: error => `Không kiểm tra được cập nhật: ${error}`,
+        googleOpening: 'Đang mở đăng nhập Google...',
+        googleSyncing: 'Đang đồng bộ Google Drive...',
+        noPinnedTitle: 'Chưa có mục ghim',
+        noPinnedDesc: 'Ghim vài clipboard để mở nhanh bằng bảng ghim.',
+        pinnedFallback: 'Đã ghim',
+        slotTitle: 'Vị trí 1-9',
+        unknownDate: 'Không rõ ngày',
+        today: 'Hôm nay',
+        yesterday: 'Hôm qua',
+        unset: 'Chưa đặt'
+      },
+      en: {
+        navClipboard: 'Clipboard',
+        navDevices: 'Devices',
+        navSettings: 'Settings',
+        pinnedPalette: 'Pinned Palette',
+        language: 'Language',
+        themeTitle: 'Toggle theme',
+        historyTitle: 'Clipboard',
+        historySearch: 'Search clipboard history',
+        clearSearchTitle: 'Clear search',
+        add: 'Add',
+        clearHistoryTitle: 'Clear history',
+        clearHistoryConfirm: 'Clear all clipboard history?',
+        delete: 'Delete',
+        cancel: 'Cancel',
+        devicesTitle: 'Devices',
+        websocketServer: 'WebSocket Server',
+        connectedDevices: 'Connected devices',
+        googleDriveSync: 'Google Drive Sync',
+        googleSignIn: 'Sign in with Google',
+        syncNow: 'Sync now',
+        retry: 'Retry',
+        signOut: 'Sign out',
+        settingsTitle: 'Settings',
+        globalHotkeys: 'Global Hotkeys',
+        mainHotkeyTitle: 'Main window',
+        mainHotkeyDesc: 'Show or hide FastPaste.',
+        editHotkeyTitle: 'Edit latest item',
+        editHotkeyDesc: 'Open the editor for the current clipboard.',
+        pinnedHotkeyTitle: 'Open Pinned Palette',
+        pinnedHotkeyDesc: 'Quickly choose pinned items.',
+        quickSlotHotkeyTitle: 'Quick paste 1-9',
+        quickSlotHotkeyDesc: 'Prefix before the pinned slot number.',
+        save: 'Save',
+        autostartAria: 'Start with Windows',
+        checkUpdate: 'Check',
+        downloadUpdate: 'Download update',
+        close: 'Close',
+        tagLabel: 'Tag',
+        tagPlaceholder: 'Example: Work, Code, Personal',
+        copyAfterSave: 'Copy after saving',
+        reset: 'Reset',
+        undo: 'Undo',
+        redo: 'Redo',
+        formatTrim: 'Trim',
+        formatLower: 'lower',
+        formatUpper: 'UPPER',
+        formatTitle: 'Title',
+        formatOneLine: 'One line',
+        formatSpaces: 'Spaces',
+        formatNoSpaces: 'No spaces',
+        formatBullets: 'Bullets',
+        formatNumbers: 'Numbers',
+        formatQuote: 'Quote',
+        formatCode: 'Code',
+        allTags: 'All',
+        pinned: 'Pinned',
+        untagged: 'Untagged',
+        noClipboardTitle: 'No clipboard data yet',
+        noClipboardDesc: 'Copy something on PC or connect Android to begin.',
+        noResultTitle: 'No results found',
+        noResultDesc: 'Try another keyword or tag filter.',
+        pinBadge: 'Pinned',
+        copyTitle: 'Copy',
+        unpinTitle: 'Unpin',
+        pinTitle: 'Pin',
+        editTitle: 'Edit',
+        deleteTitle: 'Delete',
+        noLanIp: 'No LAN IP found',
+        noConnection: 'No connection yet',
+        connectedCount: count => `${count} device${count === 1 ? '' : 's'} connected`,
+        noAndroidTitle: 'No Android connected',
+        noAndroidDesc: 'Open the Android app on the same LAN as this PC.',
+        cloudSyncing: 'Cloud is syncing',
+        cloudSignedIn: 'Cloud signed in',
+        cloudSyncReady: 'Cloud sync ready',
+        cloudReady: 'Cloud ready',
+        cloudOff: 'Cloud off',
+        cloudBadgeSyncing: 'Syncing',
+        cloudBadgeAuto: 'Auto',
+        cloudBadgeReady: 'Ready',
+        cloudBadgeOff: 'Off',
+        cloudSignInTitle: 'Sign in with Google',
+        cloudNotConfiguredTitle: 'Google sync is off',
+        cloudWaiting: 'Waiting for status.',
+        cloudLoginHint: 'Sign in with Google to enable auto sync.',
+        cloudNotConfiguredHint: 'This build does not have Google sync configured.',
+        cloudLastSync: 'Last sync',
+        cloudNoSync: 'never',
+        cloudAutoHint: 'FastPaste auto syncs when the app opens and when clipboard changes.',
+        cloudReleaseHint: 'Use a release build configured for Google sync.',
+        autostartOn: 'Autostart is on',
+        autostartOff: 'Autostart is off',
+        autostartOnDesc: 'FastPaste runs hidden in tray when Windows starts.',
+        autostartOffDesc: 'FastPaste only runs when you open it manually.',
+        editorAddTitle: 'Add clipboard',
+        editorEditTitle: 'Edit clipboard',
+        editorNewMeta: 'New item',
+        charLine: (chars, lines) => `${chars} chars · ${lines} line${lines === 1 ? '' : 's'}`,
+        invalidJson: 'Invalid JSON.',
+        emptyContent: 'Content cannot be empty.',
+        saving: 'Saving...',
+        saved: 'Saved.',
+        hotkeyEmpty: 'Hotkey cannot be empty.',
+        hotkeySaved: 'Hotkey saved.',
+        autostartSavedOn: 'Hidden autostart enabled.',
+        autostartSavedOff: 'Autostart disabled.',
+        checkingUpdate: 'Checking for updates...',
+        updateAvailable: version => `Version ${version} is available. Click download to open GitHub.`,
+        updateLatest: 'You are on the latest version.',
+        updateFailed: error => `Could not check updates: ${error}`,
+        googleOpening: 'Opening Google login...',
+        googleSyncing: 'Syncing Google Drive...',
+        noPinnedTitle: 'No pinned items',
+        noPinnedDesc: 'Pin clipboard items to open them quickly from Pinned Palette.',
+        pinnedFallback: 'Pinned',
+        slotTitle: 'Slot 1-9',
+        unknownDate: 'Unknown date',
+        today: 'Today',
+        yesterday: 'Yesterday',
+        unset: 'Not set'
+      }
+    };
 
     const state = {
       data: null,
+      language: localStorage.getItem('fp-language') === 'en' ? 'en' : 'vi',
       activePanel: 'history',
       query: '',
       folderFilter: 'all',
@@ -1173,6 +1641,7 @@
       sidebarHotkeyKeys: document.getElementById('sidebar-hotkey-keys'),
       sidebarCloudDot: document.getElementById('sidebar-cloud-dot'),
       sidebarCloudText: document.getElementById('sidebar-cloud-text'),
+      languageSelect: document.getElementById('language-select'),
       themeBtn: document.getElementById('theme-btn'),
       pinnedLaunch: document.getElementById('pinned-launch'),
       historySearch: document.getElementById('history-search'),
@@ -1230,9 +1699,35 @@
       editorCancel: document.getElementById('editor-cancel'),
       editorSave: document.getElementById('editor-save'),
       pinnedBackdrop: document.getElementById('pinned-backdrop'),
+      pinnedHint: document.getElementById('pinned-hint'),
+      paletteHotkeyInput: document.getElementById('palette-hotkey-input'),
+      savePaletteHotkey: document.getElementById('save-palette-hotkey'),
+      paletteHotkeyStatus: document.getElementById('palette-hotkey-status'),
       pinnedList: document.getElementById('pinned-list'),
       pinnedClose: document.getElementById('pinned-close')
     };
+
+    function t(key, ...args) {
+      const value = (I18N[state.language] || I18N.vi)[key] ?? I18N.vi[key] ?? key;
+      return typeof value === 'function' ? value(...args) : value;
+    }
+
+    function applyLanguage() {
+      document.documentElement.lang = state.language === 'en' ? 'en' : 'vi';
+      if (els.languageSelect) els.languageSelect.value = state.language;
+      document.querySelectorAll('[data-i18n]').forEach(element => {
+        element.textContent = t(element.dataset.i18n);
+      });
+      document.querySelectorAll('[data-i18n-placeholder]').forEach(element => {
+        element.placeholder = t(element.dataset.i18nPlaceholder);
+      });
+      document.querySelectorAll('[data-i18n-title]').forEach(element => {
+        element.title = t(element.dataset.i18nTitle);
+      });
+      document.querySelectorAll('[data-i18n-aria-label]').forEach(element => {
+        element.setAttribute('aria-label', t(element.dataset.i18nAriaLabel));
+      });
+    }
 
     function escapeHtml(value) {
       return String(value ?? '')
@@ -1283,8 +1778,30 @@
         .map(normalizeKeyToken)
         .filter(Boolean);
 
-      if (!parts.length) return '<span class="muted">Chưa đặt</span>';
+      if (!parts.length) return `<span class="muted">${escapeHtml(t('unset'))}</span>`;
       return parts.map(part => `<kbd>${escapeHtml(part)}</kbd>`).join(' <span class="faint">+</span> ');
+    }
+
+    function formatQuickSlotRange(raw) {
+      const prefix = hotkeyInputText(raw || 'Alt');
+      return `${prefix || 'Alt'}+1-9`;
+    }
+
+    function quickSlotFromEvent(event) {
+      if (!/^[1-9]$/.test(event.key)) return null;
+      const prefix = String(state.data?.settings?.quick_slot_hotkey || 'Alt')
+        .split('+')
+        .map(part => normalizeKeyToken(part).toLowerCase())
+        .filter(Boolean);
+      const wantsCtrl = prefix.includes('ctrl');
+      const wantsAlt = prefix.includes('alt');
+      const wantsShift = prefix.includes('shift');
+      const wantsWin = prefix.includes('win');
+      const ctrlOk = wantsCtrl ? (event.ctrlKey || event.metaKey) : !(event.ctrlKey || event.metaKey);
+      const altOk = wantsAlt ? event.altKey : !event.altKey;
+      const shiftOk = wantsShift ? event.shiftKey : !event.shiftKey;
+      const winOk = wantsWin ? event.metaKey : true;
+      return ctrlOk && altOk && shiftOk && winOk ? Number(event.key) : null;
     }
 
     function hotkeyInputText(raw) {
@@ -1334,29 +1851,33 @@
       return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 64);
     }
 
+    function currentLocale() {
+      return state.language === 'en' ? 'en-US' : 'vi-VN';
+    }
+
     function formatDate(isoString) {
       const date = new Date(isoString);
-      if (Number.isNaN(date.getTime())) return 'Không rõ ngày';
+      if (Number.isNaN(date.getTime())) return t('unknownDate');
 
       const today = new Date();
       const yesterday = new Date(today);
       yesterday.setDate(yesterday.getDate() - 1);
 
-      if (date.toDateString() === today.toDateString()) return 'Hôm nay';
-      if (date.toDateString() === yesterday.toDateString()) return 'Hôm qua';
-      return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      if (date.toDateString() === today.toDateString()) return t('today');
+      if (date.toDateString() === yesterday.toDateString()) return t('yesterday');
+      return date.toLocaleDateString(currentLocale(), { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
 
     function formatTime(isoString) {
       const date = new Date(isoString);
       if (Number.isNaN(date.getTime())) return '--:--';
-      return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+      return date.toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit' });
     }
 
     function formatDateTime(timestamp) {
       const date = new Date(timestamp);
-      if (Number.isNaN(date.getTime())) return 'không rõ';
-      return date.toLocaleString('vi-VN', {
+      if (Number.isNaN(date.getTime())) return t('unknownDate');
+      return date.toLocaleString(currentLocale(), {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
@@ -1392,27 +1913,25 @@
     }
 
     function updateSidebar() {
-      const settings = state.data?.settings || {};
       const history = state.data?.history || [];
       const clients = state.data?.clients || [];
       const cloud = state.data?.cloud || {};
 
-      els.sidebarHotkeyKeys.innerHTML = displayHotkey(settings.hotkey || 'CommandOrControl+Alt+Z');
       els.historyCount.textContent = String(history.length);
       els.deviceOnlineCount.textContent = String(clients.length);
 
       els.sidebarCloudDot.className = 'dot';
+      let cloudLabel = t('cloudOff');
       if (cloud.syncing) {
         els.sidebarCloudDot.classList.add('syncing');
-        els.sidebarCloudText.textContent = 'Cloud đang sync';
+        cloudLabel = t('cloudSyncing');
       } else if (cloud.signed_in) {
         els.sidebarCloudDot.classList.add('ok');
-        els.sidebarCloudText.textContent = cloud.account_email || 'Cloud đã đăng nhập';
+        cloudLabel = t('cloudSyncReady');
       } else if (cloud.configured) {
-        els.sidebarCloudText.textContent = 'Cloud sẵn sàng';
-      } else {
-        els.sidebarCloudText.textContent = 'Cloud đang tắt';
+        cloudLabel = t('cloudSyncReady');
       }
+      els.sidebarCloudText.textContent = cloudLabel;
     }
 
     function getFolders() {
@@ -1421,20 +1940,20 @@
         const folder = cleanFolderName(item.folder);
         if (folder) folders.add(folder);
       });
-      return Array.from(folders).sort((a, b) => a.localeCompare(b, 'vi'));
+      return Array.from(folders).sort((a, b) => a.localeCompare(b, currentLocale()));
     }
 
     function renderFolderFilters() {
       const filters = [
-        { key: 'all', label: 'Tất cả' },
-        { key: 'pinned', label: 'Đã ghim' },
-        { key: 'none', label: 'Chưa folder' },
+        { key: 'all', label: t('allTags') },
+        { key: 'pinned', label: t('pinned') },
+        { key: 'none', label: t('untagged') },
         ...getFolders().map(folder => ({ key: `folder:${folder}`, label: folder, folder }))
       ];
 
       els.folderFilters.innerHTML = filters.map(filter => `
         <button class="chip ${state.folderFilter === filter.key ? 'active' : ''}" type="button" data-filter="${escapeHtml(filter.key)}">
-          ${filter.folder ? icon('i-folder') : ''}<span>${escapeHtml(filter.label)}</span>
+          ${filter.folder ? icon('i-tag') : ''}<span>${escapeHtml(filter.label)}</span>
         </button>
       `).join('');
     }
@@ -1457,7 +1976,7 @@
     }
 
     function sourceBadge(item) {
-      return item.source === 'Android'
+      return String(item.source || '').toUpperCase() === 'ANDROID'
         ? `<span class="badge b-android">${icon('i-phone')}Android</span>`
         : `<span class="badge b-pc">${icon('i-devices')}PC</span>`;
     }
@@ -1477,12 +1996,12 @@
       els.clearSearch.hidden = !state.query;
 
       if (!allItems.length) {
-        els.historyContainer.innerHTML = '<div class="empty"><div><strong>Chưa có dữ liệu clipboard</strong><span>Copy nội dung trên PC hoặc kết nối Android để bắt đầu.</span></div></div>';
+        els.historyContainer.innerHTML = `<div class="empty"><div><strong>${escapeHtml(t('noClipboardTitle'))}</strong><span>${escapeHtml(t('noClipboardDesc'))}</span></div></div>`;
         return;
       }
 
       if (!filtered.length) {
-        els.historyContainer.innerHTML = '<div class="empty"><div><strong>Không tìm thấy kết quả</strong><span>Thử từ khóa khác hoặc đổi folder filter.</span></div></div>';
+        els.historyContainer.innerHTML = `<div class="empty"><div><strong>${escapeHtml(t('noResultTitle'))}</strong><span>${escapeHtml(t('noResultDesc'))}</span></div></div>`;
         return;
       }
 
@@ -1503,20 +2022,22 @@
               const folder = cleanFolderName(item.folder);
               return `
                 <article class="hi ${state.hoveredHistoryIndex === item.index ? 'keyboard-hover' : ''}" data-hover-index="${item.index}" data-index="${item.index}">
-                  <div class="hmeta">
-                    ${sourceBadge(item)}
-                    ${item.pinned ? `<span class="badge b-pin">${icon('i-star')}Ghim</span>` : ''}
-                    ${isUrl(text) ? `<span class="badge b-url">${icon('i-link')}URL</span>` : ''}
-                    ${folder ? `<span class="badge">${icon('i-folder')}${escapeHtml(folder)}</span>` : ''}
-                    <span class="time">${escapeHtml(formatTime(item.timestamp))}</span>
+                  <div class="hmain">
+                    <div class="hmeta">
+                      ${sourceBadge(item)}
+                      ${item.pinned ? `<span class="badge b-pin">${icon('i-star')}${escapeHtml(t('pinBadge'))}</span>` : ''}
+                      ${isUrl(text) ? `<span class="badge b-url">${icon('i-link')}URL</span>` : ''}
+                      ${folder ? `<span class="badge">${icon('i-tag')}${escapeHtml(folder)}</span>` : ''}
+                      <span class="time">${escapeHtml(formatTime(item.timestamp))}</span>
+                    </div>
+                    <div class="htext">${escapeHtml(displayText)}</div>
+                    ${isHexColor(text) ? `<div class="color-preview"><span class="swatch" style="background:${escapeHtml(text.trim())}"></span><span>${escapeHtml(text.trim().toUpperCase())}</span></div>` : ''}
                   </div>
-                  <div class="htext">${escapeHtml(displayText)}</div>
-                  ${isHexColor(text) ? `<div class="color-preview"><span class="swatch" style="background:${escapeHtml(text.trim())}"></span><span>${escapeHtml(text.trim().toUpperCase())}</span></div>` : ''}
                   <div class="hactions">
-                    <button class="icon-btn" type="button" data-index="${item.index}" title="Copy">${icon('i-copy')}</button>
-                    <button class="icon-btn" type="button" data-pin-index="${item.index}" title="${item.pinned ? 'Bỏ ghim' : 'Ghim'}">${icon('i-star')}</button>
-                    <button class="icon-btn" type="button" data-edit-index="${item.index}" title="Sửa">${icon('i-pencil')}</button>
-                    <button class="icon-btn danger" type="button" data-delete-index="${item.index}" title="Xóa">${icon('i-trash')}</button>
+                    <button class="icon-btn action-copy" type="button" data-index="${item.index}" title="${escapeHtml(t('copyTitle'))}">${icon('i-copy')}</button>
+                    <button class="icon-btn action-pin ${item.pinned ? 'active' : ''}" type="button" data-pin-index="${item.index}" title="${escapeHtml(item.pinned ? t('unpinTitle') : t('pinTitle'))}">${icon('i-star')}</button>
+                    <button class="icon-btn action-edit" type="button" data-edit-index="${item.index}" title="${escapeHtml(t('editTitle'))}">${icon('i-pencil')}</button>
+                    <button class="icon-btn action-delete" type="button" data-delete-index="${item.index}" title="${escapeHtml(t('deleteTitle'))}">${icon('i-trash')}</button>
                   </div>
                 </article>`;
             }).join('')}
@@ -1531,11 +2052,11 @@
 
       els.deviceServerIp.innerHTML = ips.length
         ? ips.map(ip => `<span class="tag">${escapeHtml(ip)}:4567</span>`).join('')
-        : '<span class="tag">Không tìm thấy IP LAN</span>';
+        : `<span class="tag">${escapeHtml(t('noLanIp'))}</span>`;
 
       els.srvClients.textContent = clients.length
-        ? `${clients.length} thiết bị đang kết nối`
-        : 'Chưa có kết nối';
+        ? t('connectedCount', clients.length)
+        : t('noConnection');
 
       els.devicesList.innerHTML = clients.length
         ? clients.map(ip => `
@@ -1544,7 +2065,7 @@
             <span class="badge b-android">Android</span>
           </div>
         `).join('')
-        : '<div class="empty"><div><strong>Chưa có Android kết nối</strong><span>Mở app Android và dùng cùng mạng LAN với PC.</span></div></div>';
+        : `<div class="empty"><div><strong>${escapeHtml(t('noAndroidTitle'))}</strong><span>${escapeHtml(t('noAndroidDesc'))}</span></div></div>`;
 
       renderCloudSettings();
     }
@@ -1554,32 +2075,37 @@
       const configured = Boolean(cloud.configured);
       const signedIn = Boolean(cloud.signed_in);
       const syncing = Boolean(cloud.syncing);
-      const account = cloud.account_email || '';
       const statusText = cloud.status || '';
       const hasError = statusText.toLowerCase().includes('lỗi') || statusText.toLowerCase().includes('error') || statusText.toLowerCase().includes('cần đăng nhập');
 
-      els.cloudBadge.textContent = syncing ? 'Syncing' : signedIn ? 'Auto' : configured ? 'Ready' : 'Off';
+      els.cloudBadge.textContent = syncing
+        ? t('cloudBadgeSyncing')
+        : signedIn
+          ? t('cloudBadgeAuto')
+          : configured
+            ? t('cloudBadgeReady')
+            : t('cloudBadgeOff');
       els.cloudBadge.className = `badge ${syncing ? 'b-pc' : signedIn ? 'b-android' : ''}`.trim();
       els.cloudTitle.textContent = signedIn
-        ? 'Google Drive Sync'
+        ? t('googleDriveSync')
         : configured
-          ? 'Đăng nhập Google'
-          : 'Google sync chưa bật';
+          ? t('cloudSignInTitle')
+          : t('cloudNotConfiguredTitle');
       els.cloudStatus.textContent = statusText || (
         configured
-          ? 'Đăng nhập Google để bật tự đồng bộ.'
-          : 'Bản cài đặt này chưa cấu hình Google sync.'
+          ? t('cloudLoginHint')
+          : t('cloudNotConfiguredHint')
       );
       els.cloudAccount.textContent = signedIn
-        ? `${account || 'Đã đăng nhập'} · Lần sync: ${cloud.last_sync_at ? formatDateTime(cloud.last_sync_at) : 'chưa có'}`
+        ? (cloud.last_sync_at ? `${t('cloudSyncReady')} · ${t('cloudLastSync')}: ${formatDateTime(cloud.last_sync_at)}` : t('cloudSyncReady'))
         : configured
-          ? 'FastPaste sẽ tự sync khi mở app và khi có clipboard mới.'
-          : 'Cần dùng bản release đã cấu hình Google sync.';
+          ? t('cloudAutoHint')
+          : t('cloudReleaseHint');
 
       els.googleSignIn.hidden = signedIn;
       els.googleSync.hidden = !signedIn;
       els.googleSignOut.hidden = !signedIn;
-      els.googleSync.innerHTML = `${syncing ? '<svg style="animation:fpSpin .8s linear infinite"><use href="#i-rotate"></use></svg>' : icon('i-rotate')}<span>${hasError ? 'Thử lại' : 'Đồng bộ ngay'}</span>`;
+      els.googleSync.innerHTML = `${syncing ? '<svg style="animation:fpSpin .8s linear infinite"><use href="#i-rotate"></use></svg>' : icon('i-rotate')}<span>${escapeHtml(hasError ? t('retry') : t('syncNow'))}</span>`;
 
       els.googleSignIn.disabled = !configured || syncing;
       els.googleSync.disabled = !configured || !signedIn || syncing;
@@ -1590,28 +2116,32 @@
       const settings = state.data?.settings || {};
       const mainHotkey = settings.hotkey || 'CommandOrControl+Alt+Z';
       const editHotkey = settings.edit_hotkey || 'CommandOrControl+Alt+E';
-      const pinnedHotkey = settings.pinned_hotkey || 'Alt+1';
+      const pinnedHotkey = settings.pinned_hotkey || 'CommandOrControl+Alt+P';
+      const quickSlotHotkey = settings.quick_slot_hotkey || 'Alt';
 
       els.versionTitle.textContent = `FastPaste ${APP_VERSION}`;
 
       if (document.activeElement !== els.hotkeyInput) els.hotkeyInput.value = hotkeyInputText(mainHotkey);
       if (document.activeElement !== els.editHotkeyInput) els.editHotkeyInput.value = hotkeyInputText(editHotkey);
       if (document.activeElement !== els.pinnedHotkeyInput) els.pinnedHotkeyInput.value = hotkeyInputText(pinnedHotkey);
+      if (document.activeElement !== els.paletteHotkeyInput) els.paletteHotkeyInput.value = hotkeyInputText(quickSlotHotkey);
 
       els.hotkeyPreview.innerHTML = displayHotkey(els.hotkeyInput.value || mainHotkey);
       els.editHotkeyPreview.innerHTML = displayHotkey(els.editHotkeyInput.value || editHotkey);
       els.pinnedHotkeyPreview.innerHTML = displayHotkey(els.pinnedHotkeyInput.value || pinnedHotkey);
+      els.pinnedHint.innerHTML = `${escapeHtml(formatQuickSlotRange(quickSlotHotkey))} <span class="faint">·</span> ↑↓ <span class="faint">·</span> Enter`;
 
       setToggle(els.autostartToggle, Boolean(settings.auto_start));
-      els.autostartTitle.textContent = settings.auto_start ? 'Đang bật autostart' : 'Đang tắt autostart';
+      els.autostartTitle.textContent = settings.auto_start ? t('autostartOn') : t('autostartOff');
       els.autostartCopy.textContent = settings.auto_start
-        ? 'FastPaste chạy ẩn trong tray khi đăng nhập Windows.'
-        : 'FastPaste chỉ chạy khi bạn mở thủ công.';
+        ? t('autostartOnDesc')
+        : t('autostartOffDesc');
 
       els.folderOptions.innerHTML = getFolders().map(folder => `<option value="${escapeHtml(folder)}"></option>`).join('');
     }
 
     function render() {
+      applyLanguage();
       renderHistory();
       renderSettings();
       renderDevices();
@@ -1659,8 +2189,8 @@
         redo: [],
         applying: false
       };
-      els.editorTitle.textContent = isNew ? 'Thêm clipboard' : 'Sửa clipboard';
-      els.editorMeta.textContent = isNew ? 'Mục mới' : `${entry.source || 'PC'} · ${formatDateTime(entry.timestamp)}`;
+      els.editorTitle.textContent = isNew ? t('editorAddTitle') : t('editorEditTitle');
+      els.editorMeta.textContent = isNew ? t('editorNewMeta') : `${entry.source || 'PC'} · ${formatDateTime(entry.timestamp)}`;
       els.editorText.value = state.editorDraft.last;
       els.editorFolder.value = cleanFolderName(entry?.folder);
       setToggle(els.editorAutocopyBtn, true);
@@ -1684,7 +2214,7 @@
     function updateEditorCount() {
       const text = els.editorText.value;
       const lines = text.length ? text.split(/\r\n|\r|\n/).length : 1;
-      els.editorCount.textContent = `${text.length} ký tự · ${lines} dòng`;
+      els.editorCount.textContent = t('charLine', text.length, lines);
     }
 
     function updateEditorButtons() {
@@ -1778,7 +2308,7 @@
         try {
           next = JSON.stringify(JSON.parse(text), null, 2);
         } catch (error) {
-          setStatus(els.editorStatus, 'JSON không hợp lệ.', 'error');
+          setStatus(els.editorStatus, t('invalidJson'), 'error');
           return;
         }
       }
@@ -1787,17 +2317,18 @@
     }
 
     async function saveEditedItem() {
+      if (els.editorSave.disabled) return;
       const text = els.editorText.value;
       const folder = cleanFolderName(els.editorFolder.value);
       const copyAfterSave = getToggle(els.editorAutocopyBtn);
 
       if (!text.trim()) {
-        setStatus(els.editorStatus, 'Nội dung không được để trống.', 'error');
+        setStatus(els.editorStatus, t('emptyContent'), 'error');
         return;
       }
 
       els.editorSave.disabled = true;
-      setStatus(els.editorStatus, 'Đang lưu...');
+      setStatus(els.editorStatus, t('saving'));
 
       try {
         if (state.editingEntryId === 'new') {
@@ -1805,7 +2336,7 @@
         } else {
           await invoke('update_history_item', { id: state.editingEntryId, text, folder, copyAfterSave });
         }
-        setStatus(els.editorStatus, 'Đã lưu.', 'ok');
+        setStatus(els.editorStatus, t('saved'), 'ok');
         closeEditor();
       } catch (error) {
         setStatus(els.editorStatus, String(error), 'error');
@@ -1829,17 +2360,45 @@
     async function saveHotkeySetting(input, statusEl, commandName, argName, previewEl) {
       const canonical = toTauriHotkey(input.value);
       if (!canonical) {
-        setStatus(statusEl, 'Hotkey không được để trống.', 'error');
-        return;
+        setStatus(statusEl, t('hotkeyEmpty'), 'error');
+        return null;
       }
-      setStatus(statusEl, 'Đang lưu...');
+      setStatus(statusEl, t('saving'));
       try {
         await invoke(commandName, { [argName]: canonical });
         input.value = hotkeyInputText(canonical);
         previewEl.innerHTML = displayHotkey(canonical);
-        setStatus(statusEl, 'Đã lưu hotkey.', 'ok');
+        setStatus(statusEl, t('hotkeySaved'), 'ok');
+        return canonical;
       } catch (error) {
         setStatus(statusEl, String(error), 'error');
+        return null;
+      }
+    }
+
+    async function savePinnedHotkeyFrom(input, statusEl, previewEl = els.pinnedHotkeyPreview) {
+      const canonical = await saveHotkeySetting(input, statusEl, 'save_pinned_hotkey', 'hotkey', previewEl);
+      if (!canonical) return;
+      const readable = hotkeyInputText(canonical);
+      els.pinnedHotkeyInput.value = readable;
+      els.pinnedHotkeyPreview.innerHTML = displayHotkey(canonical);
+    }
+
+    async function saveQuickSlotHotkey() {
+      const canonical = toTauriHotkey(els.paletteHotkeyInput.value);
+      if (!canonical) {
+        setStatus(els.paletteHotkeyStatus, t('hotkeyEmpty'), 'error');
+        return;
+      }
+
+      setStatus(els.paletteHotkeyStatus, t('saving'));
+      try {
+        await invoke('save_quick_slot_hotkey', { hotkey: canonical });
+        els.paletteHotkeyInput.value = hotkeyInputText(canonical);
+        els.pinnedHint.innerHTML = `${escapeHtml(formatQuickSlotRange(canonical))} <span class="faint">·</span> ↑↓ <span class="faint">·</span> Enter`;
+        setStatus(els.paletteHotkeyStatus, t('hotkeySaved'), 'ok');
+      } catch (error) {
+        setStatus(els.paletteHotkeyStatus, String(error), 'error');
       }
     }
 
@@ -1847,10 +2406,10 @@
       const nextValue = !getToggle(els.autostartToggle);
       setToggle(els.autostartToggle, nextValue);
       els.autostartToggle.disabled = true;
-      setStatus(els.autostartStatus, 'Đang lưu...');
+      setStatus(els.autostartStatus, t('saving'));
       try {
         await invoke('save_autostart', { autostart: nextValue });
-        setStatus(els.autostartStatus, nextValue ? 'Đã bật tự khởi động ẩn.' : 'Đã tắt tự khởi động.', 'ok');
+        setStatus(els.autostartStatus, nextValue ? t('autostartSavedOn') : t('autostartSavedOff'), 'ok');
       } catch (error) {
         setToggle(els.autostartToggle, !nextValue);
         setStatus(els.autostartStatus, String(error), 'error');
@@ -1861,7 +2420,7 @@
 
     async function checkForUpdates(silent = false) {
       els.checkUpdate.disabled = true;
-      if (!silent) els.updateStatus.textContent = 'Đang kiểm tra cập nhật...';
+      if (!silent) els.updateStatus.textContent = t('checkingUpdate');
 
       try {
         const response = await fetch(`${UPDATE_MANIFEST_URL}?t=${Date.now()}`, { cache: 'no-store' });
@@ -1873,15 +2432,15 @@
 
         if (latestVersion && compareVersions(latestVersion, APP_VERSION) > 0) {
           state.updateUrl = updateUrl;
-          els.updateStatus.textContent = `Có bản mới ${latestVersion}. Bấm tải để mở GitHub.`;
+          els.updateStatus.textContent = t('updateAvailable', latestVersion);
           els.openUpdate.hidden = false;
         } else {
           state.updateUrl = manifest?.releaseUrl || state.updateUrl;
-          els.updateStatus.textContent = 'Đang dùng bản mới nhất.';
+          els.updateStatus.textContent = t('updateLatest');
           els.openUpdate.hidden = true;
         }
       } catch (error) {
-        if (!silent) els.updateStatus.textContent = `Không kiểm tra được cập nhật: ${error.message || error}`;
+        if (!silent) els.updateStatus.textContent = t('updateFailed', error.message || error);
       } finally {
         els.checkUpdate.disabled = false;
       }
@@ -1897,7 +2456,7 @@
 
     async function googleSignIn() {
       els.googleSignIn.disabled = true;
-      els.cloudStatus.textContent = 'Đang mở Google login...';
+      els.cloudStatus.textContent = t('googleOpening');
       try {
         await invoke('google_sign_in');
       } catch (error) {
@@ -1907,7 +2466,7 @@
 
     async function googleSyncNow() {
       els.googleSync.disabled = true;
-      els.cloudStatus.textContent = 'Đang đồng bộ Google Drive...';
+      els.cloudStatus.textContent = t('googleSyncing');
       try {
         await invoke('google_sync_now');
       } catch (error) {
@@ -1926,24 +2485,55 @@
 
     function renderPinnedPalette() {
       if (els.pinnedBackdrop.hidden) return;
+      if (state.data?.history) {
+        state.pinnedPalette.items = sortPinnedItems(state.data.history.filter(item => item.pinned));
+        if (state.pinnedPalette.selectedIndex >= state.pinnedPalette.items.length) {
+          state.pinnedPalette.selectedIndex = Math.max(0, state.pinnedPalette.items.length - 1);
+        }
+      }
       const items = state.pinnedPalette.items;
       els.pinnedList.innerHTML = items.length
         ? items.map((item, index) => {
           const text = String(item.text || '');
-          const badge = index < 9 ? String(index + 1) : icon('i-star');
+          const slot = Number(item.quick_slot || 0);
+          const badge = slot >= 1 && slot <= 9 ? String(slot) : icon('i-star');
+          const slotOptions = ['<option value="">-</option>', ...Array.from({ length: 9 }, (_, optionIndex) => {
+            const value = optionIndex + 1;
+            return `<option value="${value}" ${slot === value ? 'selected' : ''}>${value}</option>`;
+          })].join('');
           return `
-            <button class="pitem ${index === state.pinnedPalette.selectedIndex ? 'active' : ''}" type="button" data-pinned-index="${index}">
-              <span class="pidx">${badge}</span>
+            <div class="pitem ${index === state.pinnedPalette.selectedIndex ? 'active' : ''}" data-pinned-index="${index}">
+              <div class="pitem-top">
+                <span class="pidx">${badge}</span>
+                <select class="slot-select" data-slot-id="${escapeHtml(item.id)}" title="${escapeHtml(t('slotTitle'))}">
+                  ${slotOptions}
+                </select>
+                <div class="pitem-actions">
+                  <button class="pitem-action edit" type="button" data-pinned-edit-index="${index}" title="${escapeHtml(t('editTitle'))}">${icon('i-pencil')}</button>
+                  <button class="pitem-action unpin" type="button" data-pinned-unpin-index="${index}" title="${escapeHtml(t('unpinTitle'))}">${icon('i-star')}</button>
+                </div>
+              </div>
               <span class="ptext">${escapeHtml(text)}</span>
-              <span class="pmeta">${escapeHtml(cleanFolderName(item.folder) || item.source || 'Pinned')} · ${escapeHtml(formatTime(item.timestamp))}</span>
-            </button>`;
+              <span class="pmeta">${escapeHtml(cleanFolderName(item.folder) || item.source || t('pinnedFallback'))} · ${escapeHtml(formatTime(item.timestamp))}</span>
+            </div>`;
         }).join('')
-        : '<div class="empty" style="grid-column:1/-1"><div><strong>Chưa có mục ghim</strong><span>Ghim vài clipboard để mở nhanh bằng Alt+1-9.</span></div></div>';
+        : `<div class="empty" style="grid-column:1/-1"><div><strong>${escapeHtml(t('noPinnedTitle'))}</strong><span>${escapeHtml(t('noPinnedDesc'))}</span></div></div>`;
+    }
+
+    function sortPinnedItems(items) {
+      return [...items].sort((left, right) => {
+        const leftSlot = Number(left.quick_slot || 0);
+        const rightSlot = Number(right.quick_slot || 0);
+        if (leftSlot && rightSlot) return leftSlot - rightSlot;
+        if (leftSlot) return -1;
+        if (rightSlot) return 1;
+        return new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime();
+      });
     }
 
     function openPinnedPalette(items) {
       const pinned = items || (state.data?.history || []).filter(item => item.pinned);
-      state.pinnedPalette.items = pinned;
+      state.pinnedPalette.items = sortPinnedItems(pinned);
       state.pinnedPalette.selectedIndex = 0;
       els.pinnedBackdrop.hidden = false;
       renderPinnedPalette();
@@ -1960,23 +2550,37 @@
       renderPinnedPalette();
     }
 
-    async function copyPinnedPalette(index = state.pinnedPalette.selectedIndex) {
+    function editPinnedPalette(index = state.pinnedPalette.selectedIndex) {
+      const entry = state.pinnedPalette.items[index];
+      if (!entry) return;
+      closePinnedPalette();
+      openEditor(entry);
+    }
+
+    async function unpinPinnedPalette(index) {
       const entry = state.pinnedPalette.items[index];
       if (!entry) return;
       try {
-        await invoke('copy_text', { text: entry.text || '' });
-        closePinnedPalette();
+        await invoke('toggle_history_pin', { id: entry.id, pinned: false });
       } catch (error) {
         console.error(error);
       }
     }
 
     async function copyPinnedSlot(slot) {
-      const items = (state.data?.history || []).filter(item => item.pinned);
-      const entry = items[slot - 1];
+      const entry = (state.data?.history || []).find(item => item.pinned && Number(item.quick_slot) === slot);
       if (!entry) return;
       try {
         await invoke('copy_text', { text: entry.text || '' });
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function setPinnedSlot(id, slotValue) {
+      const slot = slotValue ? Number(slotValue) : null;
+      try {
+        await invoke('set_pinned_slot', { id, slot });
       } catch (error) {
         console.error(error);
       }
@@ -1993,6 +2597,23 @@
 
     function bindEvents() {
       els.navButtons.forEach(btn => btn.addEventListener('click', () => switchPanel(btn.dataset.panel)));
+      els.languageSelect.addEventListener('change', event => {
+        state.language = event.target.value === 'en' ? 'en' : 'vi';
+        localStorage.setItem('fp-language', state.language);
+        applyLanguage();
+        render();
+        if (!els.editorBackdrop.hidden) {
+          updateEditorCount();
+          const entry = state.currentHistory.find(item => item.id === state.editingEntryId);
+          if (state.editingEntryId === 'new') {
+            els.editorTitle.textContent = t('editorAddTitle');
+            els.editorMeta.textContent = t('editorNewMeta');
+          } else if (entry) {
+            els.editorTitle.textContent = t('editorEditTitle');
+            els.editorMeta.textContent = `${entry.source || 'PC'} · ${formatDateTime(entry.timestamp)}`;
+          }
+        }
+      });
       els.themeBtn.addEventListener('click', toggleTheme);
       els.pinnedLaunch.addEventListener('click', () => openPinnedPalette());
       els.addNew.addEventListener('click', openNewItem);
@@ -2064,13 +2685,25 @@
           setStatus(status, '');
         });
         input.addEventListener('keydown', event => {
-          if (event.key === 'Enter') event.target.closest('.input-line').querySelector('button').click();
+          if (event.key === 'Enter') {
+            const container = event.target.closest('.input-line, .palette-hotkey-row');
+            const button = container?.querySelector('button');
+            if (button) button.click();
+          }
         });
+      });
+      els.paletteHotkeyInput.addEventListener('input', () => {
+        els.pinnedHint.innerHTML = `${escapeHtml(formatQuickSlotRange(els.paletteHotkeyInput.value || 'Alt'))} <span class="faint">·</span> ↑↓ <span class="faint">·</span> Enter`;
+        setStatus(els.paletteHotkeyStatus, '');
+      });
+      els.paletteHotkeyInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') saveQuickSlotHotkey();
       });
 
       els.saveHotkey.addEventListener('click', () => saveHotkeySetting(els.hotkeyInput, els.hotkeyStatus, 'save_hotkey', 'hotkey', els.hotkeyPreview));
       els.saveEditHotkey.addEventListener('click', () => saveHotkeySetting(els.editHotkeyInput, els.editHotkeyStatus, 'save_edit_hotkey', 'hotkey', els.editHotkeyPreview));
-      els.savePinnedHotkey.addEventListener('click', () => saveHotkeySetting(els.pinnedHotkeyInput, els.pinnedHotkeyStatus, 'save_pinned_hotkey', 'hotkey', els.pinnedHotkeyPreview));
+      els.savePinnedHotkey.addEventListener('click', () => savePinnedHotkeyFrom(els.pinnedHotkeyInput, els.pinnedHotkeyStatus));
+      els.savePaletteHotkey.addEventListener('click', saveQuickSlotHotkey);
       els.autostartToggle.addEventListener('click', saveAutoStart);
 
       els.checkUpdate.addEventListener('click', () => checkForUpdates(false));
@@ -2090,10 +2723,26 @@
       document.querySelectorAll('[data-format]').forEach(btn => btn.addEventListener('click', () => applyFormat(btn.dataset.format)));
 
       els.pinnedClose.addEventListener('click', closePinnedPalette);
+      els.pinnedList.addEventListener('change', event => {
+        const select = event.target.closest('[data-slot-id]');
+        if (!select) return;
+        setPinnedSlot(select.dataset.slotId, select.value);
+      });
       els.pinnedList.addEventListener('click', event => {
+        if (event.target.closest('[data-slot-id]')) return;
+        const editButton = event.target.closest('[data-pinned-edit-index]');
+        const unpinButton = event.target.closest('[data-pinned-unpin-index]');
+        if (editButton) {
+          editPinnedPalette(Number(editButton.dataset.pinnedEditIndex));
+          return;
+        }
+        if (unpinButton) {
+          unpinPinnedPalette(Number(unpinButton.dataset.pinnedUnpinIndex));
+          return;
+        }
         const item = event.target.closest('[data-pinned-index]');
         if (!item) return;
-        copyPinnedPalette(Number(item.dataset.pinnedIndex));
+        editPinnedPalette(Number(item.dataset.pinnedIndex));
       });
       els.editorBackdrop.addEventListener('click', event => {
         if (event.target === els.editorBackdrop) closeEditor();
@@ -2103,10 +2752,10 @@
       });
 
       document.addEventListener('keydown', event => {
-        const altNumber = event.altKey && /^[1-9]$/.test(event.key);
-        if (altNumber) {
+        const quickSlot = quickSlotFromEvent(event);
+        if (quickSlot) {
           event.preventDefault();
-          copyPinnedSlot(Number(event.key));
+          copyPinnedSlot(quickSlot);
           return;
         }
 
@@ -2122,13 +2771,18 @@
           }
           if (event.key === 'Enter') {
             event.preventDefault();
-            copyPinnedPalette();
+            editPinnedPalette();
           }
           return;
         }
 
         if (!els.editorBackdrop.hidden) {
           if (event.key === 'Escape') closeEditor();
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+            event.preventDefault();
+            saveEditedItem();
+            return;
+          }
           if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
             event.preventDefault();
             event.shiftKey ? editorRedo() : editorUndo();
@@ -2168,6 +2822,7 @@
 
     bindEvents();
     initTheme();
+    applyLanguage();
 
     listen('update_state', event => {
       state.data = event.payload;

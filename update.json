@@ -1,15 +1,15 @@
 {
-  "version": "2.2.0",
-  "releaseUrl": "https://github.com/sieuxuan/fast-paste/releases/tag/v2.2.0",
-  "notes": "Adds Google login cloud sync, faster batched Drive updates, safer delete sync, desktop and Android UI improvements, Android search, and more reliable update/download links.",
+  "version": "2.2.1",
+  "releaseUrl": "https://github.com/sieuxuan/fast-paste/releases/tag/v2.2.1",
+  "notes": "Polishes Vietnamese UI on desktop and Android, fixes pinned palette edit/unpin behavior, adds custom pinned slots, and improves quick sync/status wording.",
   "desktop": {
-    "version": "2.2.0",
-    "downloadUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.0/FastPaste-Portable.exe",
-    "installerUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.0/FastPaste_2.2.0_x64-setup.exe"
+    "version": "2.2.1",
+    "downloadUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.1/FastPaste-Portable.exe",
+    "installerUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.1/FastPaste_2.2.1_x64-setup.exe"
   },
   "android": {
-    "versionName": "2.2.0",
-    "versionCode": 220,
-    "apkUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.0/FastPaste-Android.apk"
+    "versionName": "2.2.1",
+    "versionCode": 221,
+    "apkUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.1/FastPaste-Android.apk"
   }
 }

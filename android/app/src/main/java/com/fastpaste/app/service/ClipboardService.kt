@@ -73,7 +73,7 @@ class ClipboardService : Service() {
     }
 
     private fun startSync(host: String, port: Int) {
-        val notification = buildNotification("Connecting to $host:$port...")
+        val notification = buildNotification("Đang kết nối tới $host:$port...")
         startForeground(NOTIFICATION_ID, notification)
 
         wsClient?.disconnect()
@@ -95,10 +95,10 @@ class ClipboardService : Service() {
                         ConnectionState.CONNECTED -> {
                             sendHistorySync(client)
                             Log.d(TAG, "Connected; exchanging clipboard history")
-                            "Connected to $host"
+                            "Đã kết nối tới $host"
                         }
-                        ConnectionState.CONNECTING -> "Connecting to $host..."
-                        ConnectionState.DISCONNECTED -> "Disconnected — retrying..."
+                        ConnectionState.CONNECTING -> "Đang kết nối tới $host..."
+                        ConnectionState.DISCONNECTED -> "Đã ngắt kết nối, đang thử lại..."
                     }
                     updateNotification(status)
                 }

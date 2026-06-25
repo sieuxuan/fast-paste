@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
                     putExtra(com.fastpaste.app.service.ClipboardService.EXTRA_TEXT, sharedText)
                 }
                 startService(serviceIntent)
-                Toast.makeText(this, "Sent to PC!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Đã gửi tới PC", Toast.LENGTH_SHORT).show()
                 finish() // Close UI immediately after sharing
                 return
             }
@@ -154,7 +154,7 @@ class MainActivity : ComponentActivity() {
             if (now - lastSilentCloudSyncAt < SILENT_CLOUD_SYNC_INTERVAL_MS) return
             lastSilentCloudSyncAt = now
         } else {
-            viewModel.setCloudMessage("Đang mở Google login...")
+            viewModel.setCloudMessage("Đang mở đăng nhập Google...")
         }
 
         val request = AuthorizationRequest.builder()
@@ -181,7 +181,7 @@ class MainActivity : ComponentActivity() {
             }
             .addOnFailureListener { error ->
                 if (interactive) {
-                    viewModel.setCloudMessage("Không mở được Google login: ${error.message ?: "lỗi không rõ"}")
+                    viewModel.setCloudMessage("Không mở được đăng nhập Google: ${error.message ?: "lỗi không rõ"}")
                 }
             }
     }

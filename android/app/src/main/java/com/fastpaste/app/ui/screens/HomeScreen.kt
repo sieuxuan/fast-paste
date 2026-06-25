@@ -154,7 +154,7 @@ fun HomeScreen(
                 },
                 actions = {
                     IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Menu")
+                        Icon(Icons.Default.MoreVert, contentDescription = "Trình đơn")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -257,7 +257,7 @@ private fun SettingsSheet(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            "Menu",
+            "Trình đơn",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
@@ -630,9 +630,9 @@ private fun StatusStrip(
 ) {
     val connection = connectionUi(state.connectionState)
     val cloudText = when {
-        state.cloudSyncing -> "Google đang sync"
-        state.cloudSignedIn -> "Google auto"
-        else -> "Google chưa login"
+        state.cloudSyncing -> "Google đang đồng bộ"
+        state.cloudSignedIn -> "Google tự đồng bộ"
+        else -> "Google chưa đăng nhập"
     }
     val cloudColor = if (state.cloudSignedIn || state.cloudSyncing) GreenConnected else RedDisconnected
 
@@ -711,7 +711,7 @@ private fun EmptyHistory() {
             Spacer(Modifier.height(8.dp))
             Text("Chưa có dữ liệu copy", fontWeight = FontWeight.SemiBold)
             Text(
-                "Copy trên điện thoại hoặc PC để bắt đầu đồng bộ.",
+                "Sao chép trên điện thoại hoặc PC để bắt đầu đồng bộ.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )

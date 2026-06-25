@@ -17,10 +17,10 @@ class FastPasteApp : Application() {
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Fast Paste Sync",
+            "Đồng bộ FastPaste",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Clipboard sync service notification"
+            description = "Thông báo dịch vụ đồng bộ clipboard"
         }
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(channel)

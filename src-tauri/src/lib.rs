@@ -31,23 +31,56 @@ fn default_pinned_hotkey() -> String {
     "CommandOrControl+Alt+P".to_string()
 }
 
-fn is_quick_slot_hotkey(hotkey: &str) -> bool {
-    let normalized = hotkey
+fn default_quick_slot_hotkey() -> String {
+    "Alt".to_string()
+}
+
+fn normalize_hotkey_text(hotkey: &str) -> String {
+    hotkey
         .split('+')
         .map(|part| part.trim().to_ascii_lowercase())
-        .collect::<Vec<_>>();
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("+")
+}
 
-    normalized.len() == 2
-        && normalized
-            .iter()
-            .any(|part| part == "alt" || part == "option")
-        && normalized.iter().any(|part| {
-            part.len() == 1
-                && part
-                    .chars()
-                    .next()
-                    .is_some_and(|ch| ('1'..='9').contains(&ch))
-        })
+fn quick_slot_hotkey(prefix: &str, slot: usize) -> String {
+    let prefix = prefix.trim().trim_end_matches('+').trim();
+    if prefix.is_empty() {
+        slot.to_string()
+    } else {
+        format!("{prefix}+{slot}")
+    }
+}
+
+fn is_quick_slot_hotkey(hotkey: &str, prefix: &str) -> bool {
+    let normalized = normalize_hotkey_text(hotkey);
+    (1..=9).any(|slot| normalized == normalize_hotkey_text(&quick_slot_hotkey(prefix, slot)))
+}
+
+fn validate_quick_slot_prefix(prefix: &str) -> Result<String, String> {
+    let prefix = prefix.trim().trim_end_matches('+').trim().to_string();
+    if prefix.is_empty() {
+        return Err("Phím dán nhanh không được để trống. Ví dụ: Alt hoặc Ctrl+Alt.".to_string());
+    }
+
+    let has_slot_number = prefix.split('+').any(|part| {
+        let part = part.trim();
+        part.len() == 1
+            && part
+                .chars()
+                .next()
+                .is_some_and(|ch| ('1'..='9').contains(&ch))
+    });
+    if has_slot_number {
+        return Err("Chỉ nhập phần phím trước số. Ví dụ: Alt hoặc Ctrl+Alt.".to_string());
+    }
+
+    quick_slot_hotkey(&prefix, 1)
+        .parse::<Shortcut>()
+        .map_err(|_| "Phím dán nhanh không hợp lệ. Ví dụ: Alt hoặc Ctrl+Alt.".to_string())?;
+
+    Ok(prefix)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -58,6 +91,8 @@ struct AppSettings {
     edit_hotkey: String,
     #[serde(default = "default_pinned_hotkey")]
     pinned_hotkey: String,
+    #[serde(default = "default_quick_slot_hotkey")]
+    quick_slot_hotkey: String,
     #[serde(default)]
     auto_start: bool,
 }
@@ -70,6 +105,8 @@ struct HistoryItem {
     source: String,
     #[serde(default)]
     pinned: bool,
+    #[serde(default)]
+    quick_slot: Option<u8>,
     #[serde(default)]
     folder: String,
 }
@@ -124,27 +161,28 @@ struct AppState(Arc<Mutex<AppStateData>>);
 fn save_hotkey(hotkey: String, state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
     let new_shortcut = hotkey
         .parse::<Shortcut>()
-        .map_err(|_| "Hotkey không hợp lệ. Ví dụ: CommandOrControl+Alt+Z".to_string())?;
+        .map_err(|_| "Phím tắt không hợp lệ. Ví dụ: CommandOrControl+Alt+Z".to_string())?;
 
     let mut data = state.0.lock().unwrap();
     let old_hotkey = data.settings.hotkey.clone();
     let edit_hotkey = data.settings.edit_hotkey.clone();
     let pinned_hotkey = data.settings.pinned_hotkey.clone();
+    let quick_slot_hotkey = data.settings.quick_slot_hotkey.clone();
 
     if old_hotkey == hotkey {
         return Ok(());
     }
 
-    if is_quick_slot_hotkey(&hotkey) {
-        return Err("Alt+1..9 đang dùng cho quick paste pinned.".to_string());
+    if is_quick_slot_hotkey(&hotkey, &quick_slot_hotkey) {
+        return Err("Phím tắt này đang dùng cho dán nhanh mục ghim 1..9.".to_string());
     }
 
     if edit_hotkey == hotkey {
-        return Err("Hotkey này đang dùng để mở edit clipboard mới nhất.".to_string());
+        return Err("Phím tắt này đang dùng để sửa clipboard mới nhất.".to_string());
     }
 
     if pinned_hotkey == hotkey {
-        return Err("Hotkey này đang dùng để mở danh sách đã ghim.".to_string());
+        return Err("Phím tắt này đang dùng để mở danh sách đã ghim.".to_string());
     }
 
     let old_shortcut = old_hotkey.parse::<Shortcut>().ok();
@@ -185,27 +223,28 @@ fn save_edit_hotkey(
 ) -> Result<(), String> {
     let new_shortcut = hotkey
         .parse::<Shortcut>()
-        .map_err(|_| "Hotkey edit không hợp lệ. Ví dụ: CommandOrControl+Alt+E".to_string())?;
+        .map_err(|_| "Phím sửa nhanh không hợp lệ. Ví dụ: CommandOrControl+Alt+E".to_string())?;
 
     let mut data = state.0.lock().unwrap();
     let old_hotkey = data.settings.edit_hotkey.clone();
     let toggle_hotkey = data.settings.hotkey.clone();
     let pinned_hotkey = data.settings.pinned_hotkey.clone();
+    let quick_slot_hotkey = data.settings.quick_slot_hotkey.clone();
 
     if old_hotkey == hotkey {
         return Ok(());
     }
 
-    if is_quick_slot_hotkey(&hotkey) {
-        return Err("Alt+1..9 đang dùng cho quick paste pinned.".to_string());
+    if is_quick_slot_hotkey(&hotkey, &quick_slot_hotkey) {
+        return Err("Phím tắt này đang dùng cho dán nhanh mục ghim 1..9.".to_string());
     }
 
     if toggle_hotkey == hotkey {
-        return Err("Hotkey này đang dùng để ẩn/hiện FastPaste.".to_string());
+        return Err("Phím tắt này đang dùng để ẩn/hiện FastPaste.".to_string());
     }
 
     if pinned_hotkey == hotkey {
-        return Err("Hotkey này đang dùng để mở danh sách đã ghim.".to_string());
+        return Err("Phím tắt này đang dùng để mở danh sách đã ghim.".to_string());
     }
 
     let old_shortcut = old_hotkey.parse::<Shortcut>().ok();
@@ -228,7 +267,7 @@ fn save_edit_hotkey(
                 }
             });
         }
-        return Err(format!("Không thể đăng ký hotkey edit: {error}"));
+        return Err(format!("Không thể đăng ký phím sửa nhanh: {error}"));
     }
 
     data.settings.edit_hotkey = hotkey;
@@ -246,27 +285,28 @@ fn save_pinned_hotkey(
 ) -> Result<(), String> {
     let new_shortcut = hotkey
         .parse::<Shortcut>()
-        .map_err(|_| "Hotkey pinned không hợp lệ. Ví dụ: CommandOrControl+Alt+P".to_string())?;
+        .map_err(|_| "Phím mở bảng ghim không hợp lệ. Ví dụ: CommandOrControl+Alt+P".to_string())?;
 
     let mut data = state.0.lock().unwrap();
     let old_hotkey = data.settings.pinned_hotkey.clone();
     let toggle_hotkey = data.settings.hotkey.clone();
     let edit_hotkey = data.settings.edit_hotkey.clone();
+    let quick_slot_hotkey = data.settings.quick_slot_hotkey.clone();
 
     if old_hotkey == hotkey {
         return Ok(());
     }
 
-    if is_quick_slot_hotkey(&hotkey) {
-        return Err("Alt+1..9 đang dùng cho quick paste pinned.".to_string());
+    if is_quick_slot_hotkey(&hotkey, &quick_slot_hotkey) {
+        return Err("Phím tắt này đang dùng cho dán nhanh mục ghim 1..9.".to_string());
     }
 
     if toggle_hotkey == hotkey {
-        return Err("Hotkey này đang dùng để ẩn/hiện FastPaste.".to_string());
+        return Err("Phím tắt này đang dùng để ẩn/hiện FastPaste.".to_string());
     }
 
     if edit_hotkey == hotkey {
-        return Err("Hotkey này đang dùng để mở edit clipboard mới nhất.".to_string());
+        return Err("Phím tắt này đang dùng để sửa clipboard mới nhất.".to_string());
     }
 
     let old_shortcut = old_hotkey.parse::<Shortcut>().ok();
@@ -289,10 +329,53 @@ fn save_pinned_hotkey(
                 }
             });
         }
-        return Err(format!("Không thể đăng ký hotkey pinned: {error}"));
+        return Err(format!("Không thể đăng ký phím mở bảng ghim: {error}"));
     }
 
     data.settings.pinned_hotkey = hotkey;
+    save_state(&data);
+    drop(data);
+    broadcast_state(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn save_quick_slot_hotkey(
+    hotkey: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let prefix = validate_quick_slot_prefix(&hotkey)?;
+
+    let mut data = state.0.lock().unwrap();
+    let old_prefix = data.settings.quick_slot_hotkey.clone();
+
+    if normalize_hotkey_text(&old_prefix) == normalize_hotkey_text(&prefix) {
+        return Ok(());
+    }
+
+    for slot in 1..=9 {
+        let slot_hotkey = quick_slot_hotkey(&prefix, slot);
+        let normalized_slot = normalize_hotkey_text(&slot_hotkey);
+        if normalized_slot == normalize_hotkey_text(&data.settings.hotkey) {
+            return Err("Phím dán nhanh bị trùng phím ẩn/hiện FastPaste.".to_string());
+        }
+        if normalized_slot == normalize_hotkey_text(&data.settings.edit_hotkey) {
+            return Err("Phím dán nhanh bị trùng phím sửa clipboard mới nhất.".to_string());
+        }
+        if normalized_slot == normalize_hotkey_text(&data.settings.pinned_hotkey) {
+            return Err("Phím dán nhanh bị trùng phím mở bảng ghim.".to_string());
+        }
+    }
+
+    unregister_quick_paste_slots(&app, &old_prefix);
+    if let Err(error) = register_quick_paste_slots(&app, &prefix) {
+        unregister_quick_paste_slots(&app, &prefix);
+        let _ = register_quick_paste_slots(&app, &old_prefix);
+        return Err(error);
+    }
+
+    data.settings.quick_slot_hotkey = prefix;
     save_state(&data);
     drop(data);
     broadcast_state(&app);
@@ -329,11 +412,18 @@ fn save_autostart(
 }
 
 #[tauri::command]
-fn copy_text(text: String, app: AppHandle) {
+fn copy_text(text: String, app: AppHandle, state: State<'_, AppState>) {
     let _ = app.clipboard().write_text(text.clone());
+    {
+        let mut data = state.0.lock().unwrap();
+        promote_or_insert_history(&mut data, &text, "PC");
+        save_state(&data);
+    }
+    broadcast_state(&app);
     if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
         let _ = tx.send(text);
     }
+    queue_cloud_sync(&app);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
@@ -405,6 +495,48 @@ fn toggle_history_pin(
         };
 
         item.pinned = pinned;
+        if !pinned {
+            item.quick_slot = None;
+        }
+        save_state(&data);
+    }
+
+    broadcast_state(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_pinned_slot(
+    id: String,
+    slot: Option<u8>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if let Some(slot) = slot {
+        if !(1..=9).contains(&slot) {
+            return Err("Vị trí phải từ 1 đến 9.".to_string());
+        }
+    }
+
+    {
+        let mut data = state.0.lock().unwrap();
+        if let Some(slot) = slot {
+            for item in data.history.iter_mut() {
+                if item.quick_slot == Some(slot) {
+                    item.quick_slot = None;
+                }
+            }
+        }
+
+        let Some(item) = data.history.iter_mut().find(|item| item.id == id) else {
+            return Err("Không tìm thấy mục đã ghim.".to_string());
+        };
+
+        if !item.pinned {
+            return Err("Chỉ có thể đặt vị trí cho mục đã ghim.".to_string());
+        }
+
+        item.quick_slot = slot;
         save_state(&data);
     }
 
@@ -525,15 +657,15 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
         let mut data = data_arc.lock().unwrap();
         refresh_cloud_state(&mut data.cloud);
         if !data.cloud.configured {
-            data.cloud.status = "Google sync chưa được bật trong bản build này.".to_string();
+            data.cloud.status = "Chưa bật đồng bộ Google trong bản build này.".to_string();
             save_state(&data);
             drop(data);
             broadcast_state(&app);
-            return Err("Google sync chưa được bật trong bản build này.".to_string());
+            return Err("Chưa bật đồng bộ Google trong bản build này.".to_string());
         }
 
         data.cloud.syncing = true;
-        data.cloud.status = "Đang mở Google login...".to_string();
+        data.cloud.status = "Đang mở đăng nhập Google...".to_string();
         save_state(&data);
     }
     broadcast_state(&app);
@@ -557,7 +689,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
             data.cloud.syncing = false;
             data.cloud.signed_in = cloud::is_signed_in();
             data.cloud.account_email = cloud::signed_in_email();
-            data.cloud.status = format!("Google login lỗi: {error}");
+            data.cloud.status = format!("Đăng nhập Google lỗi: {error}");
             save_state(&data);
             drop(data);
             broadcast_state(&app);
@@ -621,7 +753,7 @@ fn open_last_clipboard_editor(app: &AppHandle) {
 
 fn open_pinned_clipboard_list(app: &AppHandle) {
     show_window(app);
-    let entries = app
+    let mut entries = app
         .try_state::<AppState>()
         .and_then(|state| {
             let data = state.0.lock().ok()?;
@@ -634,17 +766,28 @@ fn open_pinned_clipboard_list(app: &AppHandle) {
             )
         })
         .unwrap_or_default();
+    entries.sort_by(|a, b| match (a.quick_slot, b.quick_slot) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => timestamp_to_millis(&b.timestamp).cmp(&timestamp_to_millis(&a.timestamp)),
+    });
     let _ = app.emit("open_pinned_list", entries);
 }
 
-fn copy_pinned_slot(app: &AppHandle, index: usize) {
+fn copy_pinned_slot(app: &AppHandle, slot: usize) {
     let text = app.try_state::<AppState>().and_then(|state| {
-        let data = state.0.lock().ok()?;
-        data.history
+        let mut data = state.0.lock().ok()?;
+        let text = data
+            .history
             .iter()
-            .filter(|item| item.pinned)
-            .nth(index)
-            .map(|item| item.text.clone())
+            .find(|item| item.pinned && item.quick_slot == Some(slot as u8))
+            .map(|item| item.text.clone());
+        if let Some(text) = text.as_deref() {
+            promote_or_insert_history(&mut data, text, "PC");
+            save_state(&data);
+        }
+        text
     });
 
     if let Some(text) = text {
@@ -652,23 +795,38 @@ fn copy_pinned_slot(app: &AppHandle, index: usize) {
         if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
             let _ = tx.send(text);
         }
+        broadcast_state(app);
+        queue_cloud_sync(app);
     }
 }
 
-fn register_quick_paste_slots(app: &AppHandle) {
+fn unregister_quick_paste_slots(app: &AppHandle, prefix: &str) {
     for slot in 1..=9 {
-        let hotkey = format!("Alt+{slot}");
+        let hotkey = quick_slot_hotkey(prefix, slot);
         if let Ok(shortcut) = hotkey.parse::<Shortcut>() {
-            let index = slot - 1;
-            let _ = app
+            let _ = app.global_shortcut().unregister(shortcut);
+        }
+    }
+}
+
+fn register_quick_paste_slots(app: &AppHandle, prefix: &str) -> Result<(), String> {
+    for slot in 1..=9 {
+        let hotkey = quick_slot_hotkey(prefix, slot);
+        if let Ok(shortcut) = hotkey.parse::<Shortcut>() {
+            app
                 .global_shortcut()
                 .on_shortcut(shortcut, move |app, _, event| {
                     if event.state == ShortcutState::Pressed {
-                        copy_pinned_slot(app, index);
+                        copy_pinned_slot(app, slot);
                     }
-                });
+                })
+                .map_err(|error| format!("Không thể đăng ký phím dán nhanh {hotkey}: {error}"))?;
+        } else {
+            return Err(format!("Phím dán nhanh không hợp lệ: {hotkey}"));
         }
     }
+
+    Ok(())
 }
 
 fn should_start_hidden() -> bool {
@@ -708,6 +866,7 @@ fn load_state() -> AppStateData {
             hotkey: default_hotkey(),
             edit_hotkey: default_edit_hotkey(),
             pinned_hotkey: default_pinned_hotkey(),
+            quick_slot_hotkey: default_quick_slot_hotkey(),
             auto_start: false,
         },
         history: vec![],
@@ -725,7 +884,7 @@ fn refresh_cloud_state(cloud_state: &mut cloud::CloudUiState) {
     cloud_state.account_email = cloud::signed_in_email();
 
     if !cloud_state.configured {
-        cloud_state.status = "Google sync chưa được bật trong bản build này.".to_string();
+        cloud_state.status = "Chưa bật đồng bộ Google trong bản build này.".to_string();
     } else if cloud_state.signed_in {
         if cloud_state.status.trim().is_empty()
             || cloud_state.status.contains("chưa được bật")
@@ -793,6 +952,7 @@ fn make_history_item(text: &str, source: &str) -> HistoryItem {
         timestamp: chrono::Utc::now().to_rfc3339(),
         source: source.to_string(),
         pinned: false,
+        quick_slot: None,
         folder: String::new(),
     }
 }
@@ -807,6 +967,7 @@ fn make_history_item_at(text: &str, source: &str, timestamp_millis: i64) -> Hist
         timestamp,
         source: source.to_string(),
         pinned: false,
+        quick_slot: None,
         folder: String::new(),
     }
 }
@@ -823,6 +984,18 @@ fn make_history_item_from_cloud(entry: &cloud::CloudEntry) -> HistoryItem {
     item.pinned = entry.pinned;
     item.folder = clean_folder_name(&entry.folder);
     item
+}
+
+fn promote_or_insert_history(data: &mut AppStateData, text: &str, source: &str) {
+    if let Some(index) = data.history.iter().position(|item| item.text == text) {
+        let mut item = data.history.remove(index);
+        item.timestamp = chrono::Utc::now().to_rfc3339();
+        item.source = source.to_string();
+        data.history.insert(0, item);
+    } else {
+        data.history.insert(0, make_history_item(text, source));
+    }
+    trim_history(&mut data.history);
 }
 
 fn apply_sync_metadata(item: &mut HistoryItem, pinned: bool, folder: &str) {
@@ -925,12 +1098,12 @@ fn make_history_sync_payload(
     current_clipboard: Option<String>,
 ) -> Option<String> {
     if let Some(text) = current_clipboard {
+        let should_promote = data.history.first().map(|item| item.text != text).unwrap_or(true);
         if !text.is_empty()
             && !has_deleted_text_marker(data, &text)
-            && !data.history.iter().any(|item| item.text == text)
+            && should_promote
         {
-            data.history.insert(0, make_history_item(&text, "PC"));
-            trim_history(&mut data.history);
+            promote_or_insert_history(data, &text, "PC");
             save_state(data);
         }
     }
@@ -1012,11 +1185,11 @@ async fn sync_google_drive(
         refresh_cloud_state(&mut data.cloud);
 
         if !data.cloud.configured {
-            data.cloud.status = "Google sync chưa được bật trong bản build này.".to_string();
+            data.cloud.status = "Chưa bật đồng bộ Google trong bản build này.".to_string();
             save_state(&data);
             drop(data);
             broadcast_state(&app);
-            return Err("Google sync chưa được bật trong bản build này.".to_string());
+            return Err("Chưa bật đồng bộ Google trong bản build này.".to_string());
         }
 
         if data.cloud.syncing {
@@ -1462,8 +1635,7 @@ pub fn run() {
 
                                     let _ = app_rx.clipboard().write_text(text.to_string());
                                     let mut d = data_rx.lock().unwrap();
-                                    d.history.insert(0, make_history_item(text, "ANDROID"));
-                                    trim_history(&mut d.history);
+                                    promote_or_insert_history(&mut d, text, "ANDROID");
                                     save_state(&d);
                                     drop(d);
                                     broadcast_state(&app_rx);
@@ -1495,8 +1667,7 @@ pub fn run() {
                             let is_deleted_startup_clipboard =
                                 is_startup_snapshot && has_deleted_text_marker(&d, &text);
                             if is_new && !is_deleted_startup_clipboard {
-                                d.history.insert(0, make_history_item(&text, "PC"));
-                                trim_history(&mut d.history);
+                                promote_or_insert_history(&mut d, &text, "PC");
                                 save_state(&d);
                                 drop(d);
                                 broadcast_state(&app_handle_clip);
@@ -1547,7 +1718,7 @@ pub fn run() {
                         });
                 }
             }
-            register_quick_paste_slots(app.handle());
+            let _ = register_quick_paste_slots(app.handle(), &settings.quick_slot_hotkey);
 
             Ok(())
         })
@@ -1555,10 +1726,12 @@ pub fn run() {
             save_hotkey,
             save_edit_hotkey,
             save_pinned_hotkey,
+            save_quick_slot_hotkey,
             save_autostart,
             copy_text,
             update_history_item,
             toggle_history_pin,
+            set_pinned_slot,
             delete_history_item,
             clear_history,
             add_history_item,

@@ -38,7 +38,7 @@ impl Default for CloudUiState {
             status: if is_configured() {
                 "Đăng nhập Google để đồng bộ qua Drive".to_string()
             } else {
-                "Google sync chưa được bật trong bản build này.".to_string()
+                "Chưa bật đồng bộ Google trong bản build này.".to_string()
             },
             last_sync_at: None,
         }
@@ -129,7 +129,7 @@ pub fn sign_out() {
 
 pub async fn sign_in(app: &AppHandle) -> Result<Option<String>, String> {
     let config = load_config()
-        .ok_or_else(|| "Google sync chưa được bật trong bản build này.".to_string())?;
+        .ok_or_else(|| "Chưa bật đồng bộ Google trong bản build này.".to_string())?;
     if config.desktop_client_id.trim().is_empty() {
         return Err("Google desktopClientId đang trống.".to_string());
     }
@@ -166,7 +166,7 @@ pub async fn sign_in(app: &AppHandle) -> Result<Option<String>, String> {
 
     app.opener()
         .open_url(auth_url, None::<&str>)
-        .map_err(|error| format!("Không mở được Google login: {error}"))?;
+        .map_err(|error| format!("Không mở được đăng nhập Google: {error}"))?;
 
     let code = wait_for_oauth_code(listener, &csrf_state).await?;
     let mut token = exchange_code(&config, &redirect_uri, &verifier, &code).await?;
@@ -224,7 +224,7 @@ async fn wait_for_oauth_code(
 ) -> Result<String, String> {
     let accept_result = tokio::time::timeout(Duration::from_secs(180), listener.accept())
         .await
-        .map_err(|_| "Hết thời gian chờ Google login.".to_string())?
+        .map_err(|_| "Hết thời gian chờ đăng nhập Google.".to_string())?
         .map_err(|error| format!("OAuth listener lỗi: {error}"))?;
 
     let (mut stream, _) = accept_result;
@@ -332,7 +332,7 @@ async fn ensure_access_token() -> Result<String, String> {
         .clone()
         .ok_or_else(|| "Google token đã hết hạn, cần đăng nhập lại.".to_string())?;
     let config = load_config()
-        .ok_or_else(|| "Google sync chưa được bật trong bản build này.".to_string())?;
+        .ok_or_else(|| "Chưa bật đồng bộ Google trong bản build này.".to_string())?;
     let mut form = vec![
         ("client_id", config.desktop_client_id.as_str()),
         ("refresh_token", refresh_token.as_str()),
