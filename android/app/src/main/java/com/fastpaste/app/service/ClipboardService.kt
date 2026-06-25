@@ -14,7 +14,7 @@ import androidx.core.app.NotificationCompat
 import com.fastpaste.app.FastPasteApp
 import com.fastpaste.app.MainActivity
 import com.fastpaste.app.R
-import com.fastpaste.app.data.ClipboardEntry
+import com.fastpaste.app.data.ClipboardRepository
 import com.fastpaste.app.sync.DeletedHistoryStore
 import com.fastpaste.app.websocket.ConnectionState
 import com.fastpaste.app.websocket.WebSocketClient
@@ -30,6 +30,8 @@ class ClipboardService : Service() {
     private lateinit var clipboardManager: ClipboardManager
     private var wsClient: WebSocketClient? = null
     private var lastSyncedText = ""
+    private val dao by lazy { (application as FastPasteApp).database.clipboardDao() }
+    private val historyRepository by lazy { ClipboardRepository(dao) }
     private val deletedHistoryStore by lazy { DeletedHistoryStore(applicationContext) }
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
@@ -142,11 +144,7 @@ class ClipboardService : Service() {
     private fun sendHistorySync(client: WebSocketClient) {
         scope.launch {
             try {
-                val entries = (application as FastPasteApp)
-                    .database
-                    .clipboardDao()
-                    .getRecentOnce(MAX_HISTORY_ITEMS)
-                val dao = (application as FastPasteApp).database.clipboardDao()
+                val entries = dao.getRecentOnce(MAX_HISTORY_ITEMS)
                 val seen = mutableSetOf<String>()
                 val history = JSONArray()
                 entries.forEach { entry ->
@@ -174,9 +172,11 @@ class ClipboardService : Service() {
                     !deletedHistoryStore.hasMarker(currentText)
                 ) {
                     val timestamp = System.currentTimeMillis()
-                    if (dao.countByContent(currentText) == 0) {
-                        dao.insert(ClipboardEntry(content = currentText, source = "LOCAL", timestamp = timestamp))
-                    }
+                    historyRepository.mergeEntry(
+                        content = currentText,
+                        source = "LOCAL",
+                        timestamp = timestamp
+                    )
                     history.put(JSONObject()
                         .put("text", currentText)
                         .put("timestamp", timestamp)
@@ -198,8 +198,6 @@ class ClipboardService : Service() {
     }
 
     private suspend fun mergeHistorySync(entries: JSONArray) {
-        val db = (application as FastPasteApp).database
-        val dao = db.clipboardDao()
         val latestLocalTimestamp = dao.getLatestOnce()?.timestamp ?: 0L
         var newestIncomingText: String? = null
         var newestIncomingTimestamp = 0L
@@ -215,30 +213,21 @@ class ClipboardService : Service() {
 
             val source = if (item.optString("source") == "ANDROID") "LOCAL" else "REMOTE"
             val pinned = item.optBoolean("pinned", false)
-            val folder = cleanFolderName(item.optString("folder", ""))
+            val folder = ClipboardRepository.cleanFolderName(item.optString("folder", ""))
             if (timestamp > newestIncomingTimestamp) {
                 newestIncomingTimestamp = timestamp
                 newestIncomingText = text
             }
 
-            val existing = dao.getByContent(text)
-            if (existing == null) {
-                dao.insert(
-                    ClipboardEntry(
-                        content = text,
-                        source = source,
-                        timestamp = timestamp,
-                        pinned = pinned,
-                        folder = folder
-                    )
-                )
+            val mergeResult = historyRepository.mergeEntry(
+                content = text,
+                source = source,
+                timestamp = timestamp,
+                pinned = pinned,
+                folder = folder
+            )
+            if (mergeResult.inserted) {
                 inserted++
-            } else {
-                dao.updateMetadataByContent(
-                    content = text,
-                    pinned = existing.pinned || pinned,
-                    folder = existing.folder.ifBlank { folder }
-                )
             }
         }
 
@@ -258,16 +247,15 @@ class ClipboardService : Service() {
     private fun saveToHistory(text: String, source: String) {
         scope.launch {
             try {
-                val db = (application as FastPasteApp).database
-                db.clipboardDao().insert(ClipboardEntry(content = text, source = source))
+                historyRepository.mergeEntry(
+                    content = text,
+                    source = source,
+                    promoteExisting = true
+                )
             } catch (e: Exception) {
                 Log.e(TAG, "Save history failed: ${e.message}")
             }
         }
-    }
-
-    private fun cleanFolderName(folder: String): String {
-        return folder.trim().replace(Regex("\\s+"), " ").take(48)
     }
 
     private fun buildNotification(text: String): Notification {

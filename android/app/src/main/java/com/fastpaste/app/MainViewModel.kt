@@ -11,6 +11,7 @@ import com.fastpaste.app.cloud.GoogleDriveCloudSync
 import com.fastpaste.app.discovery.DiscoveredServer
 import com.fastpaste.app.discovery.ServiceDiscovery
 import com.fastpaste.app.data.ClipboardEntry
+import com.fastpaste.app.data.ClipboardRepository
 import com.fastpaste.app.service.ClipboardService
 import com.fastpaste.app.sync.DeletedHistoryStore
 import com.fastpaste.app.websocket.ConnectionState
@@ -46,6 +47,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as FastPasteApp
     private val discovery = ServiceDiscovery(application)
     private val dao = app.database.clipboardDao()
+    private val historyRepository = ClipboardRepository(dao)
     private val updateClient = OkHttpClient()
     private val googleDriveCloudSync = GoogleDriveCloudSync()
     private val deletedHistoryStore = DeletedHistoryStore(application)
@@ -91,9 +93,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            dao.getRecent(MAX_HISTORY_ITEMS).collect { history ->
-                _uiState.update { it.copy(clipboardHistory = history) }
-            }
+            dao.getRecent(MAX_HISTORY_ITEMS)
+                .distinctUntilChanged()
+                .collect { history ->
+                    _uiState.update { it.copy(clipboardHistory = history) }
+                }
         }
 
         viewModelScope.launch {
@@ -306,12 +310,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 var inserted = 0
                 result.entriesToInsert.forEach { entry ->
-                    if (
-                        !deletedHistoryStore.isDeleted(entry.content, entry.timestamp) &&
-                        dao.countByContent(entry.content) == 0
-                    ) {
-                        dao.insert(entry)
-                        inserted++
+                    if (!deletedHistoryStore.isDeleted(entry.content, entry.timestamp)) {
+                        val mergeResult = historyRepository.mergeEntry(
+                            content = entry.content,
+                            source = entry.source,
+                            timestamp = entry.timestamp,
+                            pinned = entry.pinned,
+                            folder = entry.folder
+                        )
+                        if (mergeResult.inserted) {
+                            inserted++
+                        }
                     }
                 }
                 inserted to result.mergedCount

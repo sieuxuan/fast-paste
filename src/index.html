@@ -516,6 +516,14 @@
       text-transform:uppercase;
     }
     .history-list { display:grid; gap:9px; }
+    .history-more {
+      display:flex;
+      justify-content:center;
+      padding:12px 8px 2px;
+      color:var(--txf);
+      font-size:12px;
+      font-weight:800;
+    }
     .hi {
       position:relative;
       display:grid;
@@ -1372,6 +1380,8 @@
     const listen = tauriApi.event.listen;
     const APP_VERSION = '2.2.1';
     const UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/sieuxuan/fast-paste/master/update.json';
+    const HISTORY_PAGE_SIZE = 160;
+    const HISTORY_LOAD_AHEAD_PX = 420;
     const I18N = {
       vi: {
         navClipboard: 'Lịch sử',
@@ -1435,6 +1445,7 @@
         noClipboardDesc: 'Sao chép nội dung trên PC hoặc kết nối Android để bắt đầu.',
         noResultTitle: 'Không tìm thấy kết quả',
         noResultDesc: 'Thử từ khóa khác hoặc đổi bộ lọc nhãn.',
+        moreHistory: count => `Còn ${count} mục, cuộn để tải thêm`,
         pinBadge: 'Ghim',
         copyTitle: 'Sao chép',
         unpinTitle: 'Bỏ ghim',
@@ -1557,6 +1568,7 @@
         noClipboardDesc: 'Copy something on PC or connect Android to begin.',
         noResultTitle: 'No results found',
         noResultDesc: 'Try another keyword or tag filter.',
+        moreHistory: count => `${count} more item${count === 1 ? '' : 's'}, scroll to load`,
         pinBadge: 'Pinned',
         copyTitle: 'Copy',
         unpinTitle: 'Unpin',
@@ -1626,11 +1638,16 @@
       query: '',
       folderFilter: 'all',
       currentHistory: [],
+      historyVisibleLimit: HISTORY_PAGE_SIZE,
       hoveredHistoryIndex: null,
       editingEntryId: null,
       editorDraft: { initial: '', last: '', undo: [], redo: [], applying: false },
       pinnedPalette: { items: [], selectedIndex: 0 },
-      updateUrl: 'https://github.com/sieuxuan/fast-paste/releases/latest'
+      updateUrl: 'https://github.com/sieuxuan/fast-paste/releases/latest',
+      renderCache: {
+        historyViewSignature: '',
+        folderFilterSignature: ''
+      }
     };
 
     const els = {
@@ -1943,7 +1960,45 @@
       return Array.from(folders).sort((a, b) => a.localeCompare(b, currentLocale()));
     }
 
+    function textFingerprint(value) {
+      const text = String(value || '');
+      let hash = 0;
+      for (let index = 0; index < text.length; index += 1) {
+        hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+      }
+      return `${text.length}:${hash}`;
+    }
+
+    function historyDataSignature(items) {
+      return items.map(item => [
+        item.id || '',
+        item.timestamp || '',
+        item.source || '',
+        item.pinned ? 1 : 0,
+        item.quick_slot || '',
+        cleanFolderName(item.folder),
+        textFingerprint(item.text)
+      ].join('~')).join('|');
+    }
+
+    function resetHistoryViewport() {
+      state.historyVisibleLimit = HISTORY_PAGE_SIZE;
+      state.hoveredHistoryIndex = null;
+      state.renderCache.historyViewSignature = '';
+      els.historyContainer.scrollTop = 0;
+    }
+
+    function renderHistoryChrome(allItems) {
+      els.clearHistory.disabled = allItems.length === 0;
+      els.clearSearch.hidden = !state.query;
+      renderFolderFilters();
+    }
+
     function renderFolderFilters() {
+      const folderSignature = `${state.language}|${state.folderFilter}|${getFolders().join('\u0001')}`;
+      if (state.renderCache.folderFilterSignature === folderSignature) return;
+      state.renderCache.folderFilterSignature = folderSignature;
+
       const filters = [
         { key: 'all', label: t('allTags') },
         { key: 'pinned', label: t('pinned') },
@@ -1981,7 +2036,7 @@
         : `<span class="badge b-pc">${icon('i-devices')}PC</span>`;
     }
 
-    function renderHistory() {
+    function renderHistory({ force = false } = {}) {
       const allItems = state.data?.history || [];
       const query = state.query.trim().toLowerCase();
       const filtered = allItems.filter(item => {
@@ -1989,11 +2044,25 @@
         const folder = String(item.folder || '').toLowerCase();
         return applyFolderFilter(item) && (!query || text.includes(query) || folder.includes(query));
       });
+      const visibleItems = filtered.slice(0, state.historyVisibleLimit);
+      const historySignature = [
+        state.language,
+        state.folderFilter,
+        state.query,
+        state.historyVisibleLimit,
+        historyDataSignature(allItems)
+      ].join('\u0002');
 
       state.currentHistory = filtered;
-      renderFolderFilters();
-      els.clearHistory.disabled = allItems.length === 0;
-      els.clearSearch.hidden = !state.query;
+      renderHistoryChrome(allItems);
+
+      if (!force && state.renderCache.historyViewSignature === historySignature) {
+        return;
+      }
+      state.renderCache.historyViewSignature = historySignature;
+
+      const previousScrollTop = els.historyContainer.scrollTop;
+      const shouldKeepScroll = previousScrollTop > 8;
 
       if (!allItems.length) {
         els.historyContainer.innerHTML = `<div class="empty"><div><strong>${escapeHtml(t('noClipboardTitle'))}</strong><span>${escapeHtml(t('noClipboardDesc'))}</span></div></div>`;
@@ -2006,11 +2075,12 @@
       }
 
       const groups = new Map();
-      filtered.forEach((item, index) => {
+      visibleItems.forEach((item, index) => {
         const dateLabel = formatDate(item.timestamp);
         if (!groups.has(dateLabel)) groups.set(dateLabel, []);
         groups.get(dateLabel).push({ ...item, index });
       });
+      const remaining = filtered.length - visibleItems.length;
 
       els.historyContainer.innerHTML = Array.from(groups.entries()).map(([dateLabel, items]) => `
         <div class="date-group">
@@ -2043,7 +2113,15 @@
             }).join('')}
           </div>
         </div>
-      `).join('');
+      `).join('') + (remaining > 0
+        ? `<div class="history-more">${escapeHtml(t('moreHistory', remaining))}</div>`
+        : '');
+
+      if (shouldKeepScroll) {
+        requestAnimationFrame(() => {
+          els.historyContainer.scrollTop = previousScrollTop;
+        });
+      }
     }
 
     function renderDevices() {
@@ -2140,9 +2218,8 @@
       els.folderOptions.innerHTML = getFolders().map(folder => `<option value="${escapeHtml(folder)}"></option>`).join('');
     }
 
-    function render() {
-      applyLanguage();
-      renderHistory();
+    function render({ forceHistory = false } = {}) {
+      renderHistory({ force: forceHistory });
       renderSettings();
       renderDevices();
       updateSidebar();
@@ -2601,7 +2678,9 @@
         state.language = event.target.value === 'en' ? 'en' : 'vi';
         localStorage.setItem('fp-language', state.language);
         applyLanguage();
-        render();
+        state.renderCache.folderFilterSignature = '';
+        resetHistoryViewport();
+        render({ forceHistory: true });
         if (!els.editorBackdrop.hidden) {
           updateEditorCount();
           const entry = state.currentHistory.find(item => item.id === state.editingEntryId);
@@ -2620,12 +2699,14 @@
 
       els.historySearch.addEventListener('input', event => {
         state.query = event.target.value;
-        renderHistory();
+        resetHistoryViewport();
+        renderHistory({ force: true });
       });
       els.clearSearch.addEventListener('click', () => {
         state.query = '';
         els.historySearch.value = '';
-        renderHistory();
+        resetHistoryViewport();
+        renderHistory({ force: true });
       });
       els.clearHistory.addEventListener('click', () => {
         els.clearHistoryRow.hidden = false;
@@ -2639,7 +2720,16 @@
         const chip = event.target.closest('[data-filter]');
         if (!chip) return;
         state.folderFilter = chip.dataset.filter;
-        renderHistory();
+        resetHistoryViewport();
+        renderHistory({ force: true });
+      });
+
+      els.historyContainer.addEventListener('scroll', () => {
+        if (state.currentHistory.length <= state.historyVisibleLimit) return;
+        const remaining = els.historyContainer.scrollHeight - els.historyContainer.scrollTop - els.historyContainer.clientHeight;
+        if (remaining > HISTORY_LOAD_AHEAD_PX) return;
+        state.historyVisibleLimit += HISTORY_PAGE_SIZE;
+        renderHistory({ force: true });
       });
 
       els.historyContainer.addEventListener('click', event => {
@@ -2809,7 +2899,8 @@
           els.clearHistoryRow.hidden = true;
           state.query = '';
           els.historySearch.value = '';
-          renderHistory();
+          resetHistoryViewport();
+          renderHistory({ force: true });
         }
       });
     }
