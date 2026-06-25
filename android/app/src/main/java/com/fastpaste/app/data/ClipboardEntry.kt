@@ -8,5 +8,7 @@ data class ClipboardEntry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val content: String,
     val source: String,   // "LOCAL" or "REMOTE"
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val pinned: Boolean = false,
+    val folder: String = ""
 )

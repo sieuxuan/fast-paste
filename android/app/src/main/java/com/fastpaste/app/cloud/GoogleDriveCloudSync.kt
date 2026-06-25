@@ -50,7 +50,9 @@ class GoogleDriveCloudSync(
                     ClipboardEntry(
                         content = it.text,
                         source = if (it.source == SOURCE_ANDROID) "LOCAL" else "REMOTE",
-                        timestamp = it.timestamp
+                        timestamp = it.timestamp,
+                        pinned = it.pinned,
+                        folder = it.folder
                     )
                 }
 
@@ -99,6 +101,8 @@ class GoogleDriveCloudSync(
                             .put("text", entry.text)
                             .put("timestamp", entry.timestamp)
                             .put("source", entry.source)
+                            .put("pinned", entry.pinned)
+                            .put("folder", entry.folder)
                     )
                 }
             })
@@ -201,7 +205,9 @@ class GoogleDriveCloudSync(
             parsed += CloudEntry(
                 text = text,
                 timestamp = item.optLong("timestamp", System.currentTimeMillis()),
-                source = item.optString("source", SOURCE_PC)
+                source = item.optString("source", SOURCE_PC),
+                pinned = item.optBoolean("pinned", false),
+                folder = cleanFolderName(item.optString("folder", ""))
             )
         }
         return parsed
@@ -210,7 +216,12 @@ class GoogleDriveCloudSync(
     private fun mergeEntries(entries: List<CloudEntry>): List<CloudEntry> {
         return entries
             .groupBy { it.text }
-            .map { (_, duplicates) -> duplicates.maxBy { it.timestamp } }
+            .map { (_, duplicates) ->
+                val newest = duplicates.maxBy { it.timestamp }
+                val pinned = duplicates.any { it.pinned }
+                val folder = duplicates.firstOrNull { it.folder.isNotBlank() }?.folder.orEmpty()
+                newest.copy(pinned = pinned, folder = newest.folder.ifBlank { folder })
+            }
             .sortedByDescending { it.timestamp }
             .take(MAX_CLOUD_ITEMS)
     }
@@ -219,8 +230,14 @@ class GoogleDriveCloudSync(
         return CloudEntry(
             text = content,
             timestamp = timestamp,
-            source = if (source == "LOCAL") SOURCE_ANDROID else SOURCE_PC
+            source = if (source == "LOCAL") SOURCE_ANDROID else SOURCE_PC,
+            pinned = pinned,
+            folder = folder
         )
+    }
+
+    private fun cleanFolderName(folder: String): String {
+        return folder.trim().replace(Regex("\\s+"), " ").take(48)
     }
 
     private fun shouldRetryUpload(code: Int): Boolean {
@@ -236,7 +253,9 @@ class GoogleDriveCloudSync(
     private data class CloudEntry(
         val text: String,
         val timestamp: Long,
-        val source: String
+        val source: String,
+        val pinned: Boolean = false,
+        val folder: String = ""
     )
 
     companion object {

@@ -11,8 +11,10 @@
     "windows": [
       {
         "title": "FastPaste",
-        "width": 800,
-        "height": 600,
+        "width": 960,
+        "height": 720,
+        "minWidth": 760,
+        "minHeight": 560,
         "visible": false
       }
     ],
