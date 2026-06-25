@@ -4,824 +4,1088 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FastPaste</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #f5f7fa;
-      --surface: #ffffff;
-      --surface-soft: #f9fafb;
-      --text: #27313f;
-      --muted: #697586;
-      --faint: #98a2b3;
-      --line: #e3e8ef;
-      --line-strong: #cdd5df;
-      --primary: #2563eb;
-      --primary-soft: #eff6ff;
-      --green: #0f766e;
-      --green-soft: #e6f6f3;
-      --orange: #f97316;
-      --orange-soft: #fff4e8;
-      --red: #dc2626;
-      --red-soft: #fef2f2;
-      --radius: 8px;
-      --shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+      --bg:#070a13; --bg2:#0e1426; --bg3:#141d33;
+      --g:rgba(255,255,255,.045); --g2:rgba(255,255,255,.08); --g3:rgba(255,255,255,.13);
+      --bd:rgba(255,255,255,.08); --bd2:rgba(255,255,255,.16);
+      --tx:#e9ecf7; --txd:#9098b4; --txf:#646c8a;
+      --ac:#38bdf8; --ac2:#818cf8; --acg:rgba(56,189,248,.18);
+      --red:#f87171; --redb:rgba(248,113,113,.15);
+      --grn:#34d399; --grnb:rgba(52,211,153,.15);
+      --yw:#fbbf24; --ywb:rgba(251,191,36,.15);
+      --r:10px; --sw:248px;
+      --font:'Outfit','Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+      --mono:'JetBrains Mono',Consolas,monospace;
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
+    body.light {
+      --bg:#edf3fb; --bg2:#f8fbff; --bg3:#ffffff;
+      --g:rgba(15,23,42,.045); --g2:rgba(15,23,42,.075); --g3:rgba(15,23,42,.11);
+      --bd:rgba(15,23,42,.09); --bd2:rgba(15,23,42,.16);
+      --tx:#172033; --txd:#556078; --txf:#788198;
+      --ac:#0284c7; --ac2:#4f46e5; --acg:rgba(2,132,199,.12);
+      --red:#dc2626; --redb:rgba(220,38,38,.1);
+      --grn:#059669; --grnb:rgba(5,150,105,.11);
+      --yw:#b45309; --ywb:rgba(180,83,9,.12);
     }
 
+    * { box-sizing:border-box; margin:0; padding:0; }
+    html, body { width:100%; height:100%; }
     body {
-      height: 100vh;
-      overflow: hidden;
-      background: var(--bg);
-      color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
-      user-select: none;
-      -webkit-font-smoothing: antialiased;
+      overflow:hidden;
+      background:
+        radial-gradient(circle at 15% 15%, rgba(56,189,248,.18), transparent 28%),
+        radial-gradient(circle at 86% 10%, rgba(129,140,248,.16), transparent 30%),
+        linear-gradient(135deg, var(--bg), var(--bg2) 46%, var(--bg));
+      color:var(--tx);
+      font-family:var(--font);
+      font-size:14px;
+      user-select:none;
+      -webkit-font-smoothing:antialiased;
     }
 
-    button,
-    input {
-      font: inherit;
+    button, input, textarea {
+      font:inherit;
+      -webkit-app-region:no-drag;
+    }
+    button { border:0; }
+    input, textarea { user-select:text; }
+    svg { width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+    [hidden] { display:none !important; }
+
+    @keyframes fpPulse {
+      0%, 100% { box-shadow:0 0 0 0 currentColor; opacity:1; }
+      50% { box-shadow:0 0 0 6px transparent; opacity:.72; }
+    }
+    @keyframes fpSpin { to { transform:rotate(360deg); } }
+    @keyframes fpIn {
+      from { opacity:0; transform:translateY(8px); }
+      to { opacity:1; transform:translateY(0); }
+    }
+    @keyframes fpOverlay { from { opacity:0; } to { opacity:1; } }
+    @keyframes fpModal {
+      from { opacity:0; transform:translateY(12px) scale(.985); }
+      to { opacity:1; transform:translateY(0) scale(1); }
+    }
+    @keyframes fpPop {
+      0% { transform:scale(.96); }
+      60% { transform:scale(1.03); }
+      100% { transform:scale(1); }
     }
 
-    button {
-      border: 0;
+    .app { display:flex; height:100vh; min-width:0; }
+
+    .sidebar {
+      width:var(--sw);
+      flex:0 0 var(--sw);
+      display:flex;
+      flex-direction:column;
+      min-height:0;
+      padding:14px 12px;
+      border-right:1px solid var(--bd);
+      background:linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.025));
+      backdrop-filter:blur(24px);
     }
 
-    .app {
-      height: 100vh;
-      display: grid;
-      grid-template-rows: auto auto 1fr;
-      background: var(--bg);
+    .sb-logo {
+      -webkit-app-region:drag;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-height:48px;
+      padding:4px 4px 14px;
     }
-
-    .topbar {
-      -webkit-app-region: drag;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 14px 18px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--line);
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      min-width: 0;
-      gap: 11px;
-    }
-
     .mark {
-      width: 32px;
-      height: 32px;
-      display: grid;
-      place-items: center;
-      border-radius: 8px;
-      background: #111827;
-      color: #fff;
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: 0;
-      flex: 0 0 auto;
+      width:36px;
+      height:36px;
+      display:grid;
+      place-items:center;
+      border:1px solid rgba(255,255,255,.2);
+      border-radius:10px;
+      background:linear-gradient(135deg, var(--ac), var(--ac2));
+      color:#fff;
+      font-weight:800;
+      letter-spacing:0;
+      box-shadow:0 16px 38px rgba(56,189,248,.24);
+    }
+    .brand-text {
+      position:relative;
+      color:transparent;
+      background:linear-gradient(135deg, #fff, var(--ac), var(--ac2));
+      -webkit-background-clip:text;
+      background-clip:text;
+      font-size:18px;
+      font-weight:800;
+      line-height:1;
+    }
+    body.light .brand-text { background:linear-gradient(135deg, #172033, var(--ac), var(--ac2)); -webkit-background-clip:text; background-clip:text; }
+    .pulse-dot {
+      width:8px;
+      height:8px;
+      margin-left:auto;
+      border-radius:50%;
+      background:var(--grn);
+      color:rgba(52,211,153,.48);
+      animation:fpPulse 1.8s infinite;
     }
 
-    .brand-copy {
-      min-width: 0;
+    .sb-nav {
+      -webkit-app-region:no-drag;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      padding:4px 0 12px;
     }
-
-    .title {
-      color: #111827;
-      font-size: 15px;
-      font-weight: 750;
-      line-height: 1.2;
+    .nav-btn, .pinned-launch {
+      width:100%;
+      height:42px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:0 10px;
+      border:1px solid transparent;
+      border-radius:var(--r);
+      background:transparent;
+      color:var(--txd);
+      cursor:pointer;
+      font-weight:700;
+      text-align:left;
+      transition:background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
     }
-
-    .subtitle {
-      margin-top: 2px;
-      color: var(--muted);
-      font-size: 12px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 390px;
+    .nav-btn:hover, .pinned-launch:hover { background:var(--g2); color:var(--tx); }
+    .nav-btn.active {
+      border-color:var(--bd2);
+      background:var(--g3);
+      color:var(--ac);
     }
-
-    .top-actions {
-      -webkit-app-region: no-drag;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex: 0 0 auto;
+    .nav-btn span:nth-child(2), .pinned-launch span:nth-child(2) { min-width:0; flex:1; }
+    .sb-nav-count {
+      min-width:24px;
+      height:22px;
+      display:inline-grid;
+      place-items:center;
+      padding:0 7px;
+      border:1px solid var(--bd);
+      border-radius:999px;
+      background:var(--g);
+      color:var(--txd);
+      font-size:11px;
+      font-weight:800;
     }
-
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      min-height: 30px;
-      padding: 5px 9px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--surface-soft);
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 600;
-      white-space: nowrap;
+    .divider { height:1px; margin:4px 0 12px; background:var(--bd); }
+    .pinned-launch {
+      border-color:var(--bd);
+      background:var(--g);
+      color:var(--tx);
     }
-
-    .status-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--green);
-      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
-    }
-
-    .hotkey-pill {
-      color: var(--text);
-    }
+    .pinned-launch svg { color:var(--yw); }
 
     kbd {
-      min-width: 22px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 2px 6px;
-      border: 1px solid var(--line-strong);
-      border-bottom-color: #aeb9c7;
-      border-radius: 5px;
-      background: #fff;
-      color: #111827;
-      font-size: 11px;
-      font-weight: 700;
-      line-height: 1.25;
-      box-shadow: inset 0 -1px 0 rgba(15, 23, 42, 0.08);
+      min-width:22px;
+      min-height:22px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:2px 6px;
+      border:1px solid var(--bd2);
+      border-bottom-color:rgba(255,255,255,.24);
+      border-radius:6px;
+      background:var(--g2);
+      color:var(--tx);
+      font-family:var(--mono);
+      font-size:11px;
+      font-weight:500;
+      line-height:1;
     }
 
-    .tabs {
-      display: flex;
-      gap: 4px;
-      padding: 8px 18px 0;
-      background: var(--surface);
-      border-bottom: 1px solid var(--line);
+    .sb-glance {
+      display:flex;
+      align-items:center;
+      gap:9px;
+      min-height:40px;
+      margin-top:12px;
+      padding:9px 10px;
+      border:1px solid var(--bd);
+      border-radius:var(--r);
+      background:var(--g);
+      color:var(--txd);
+      font-size:12px;
+      font-weight:700;
+    }
+    .dot {
+      width:8px;
+      height:8px;
+      flex:0 0 auto;
+      border-radius:50%;
+      background:var(--txf);
+      color:rgba(144,152,180,.5);
+    }
+    .dot.ok { background:var(--grn); color:rgba(52,211,153,.5); animation:fpPulse 1.8s infinite; }
+    .dot.syncing { background:var(--ac); color:rgba(56,189,248,.5); animation:fpPulse 1.2s infinite; }
+    .spacer { flex:1; }
+    .sb-bottom {
+      -webkit-app-region:no-drag;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding-top:12px;
+      border-top:1px solid var(--bd);
+    }
+    .hotkey-keys {
+      display:flex;
+      align-items:center;
+      flex-wrap:wrap;
+      gap:4px;
+      min-width:0;
     }
 
-    .tab {
-      height: 38px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 0 14px;
-      border-radius: 8px 8px 0 0;
-      background: transparent;
-      color: var(--muted);
-      border-bottom: 2px solid transparent;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 700;
-      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    .icon-btn {
+      width:36px;
+      height:36px;
+      display:inline-grid;
+      place-items:center;
+      flex:0 0 auto;
+      border:1px solid var(--bd);
+      border-radius:var(--r);
+      background:var(--g);
+      color:var(--txd);
+      cursor:pointer;
+      transition:background .16s ease, border-color .16s ease, color .16s ease;
     }
+    .icon-btn:hover { border-color:var(--bd2); background:var(--g2); color:var(--tx); }
+    .icon-btn.danger:hover { border-color:rgba(248,113,113,.4); background:var(--redb); color:var(--red); }
 
-    .tab:hover {
-      background: var(--surface-soft);
-      color: var(--text);
+    .main {
+      position:relative;
+      flex:1;
+      min-width:0;
+      height:100vh;
+      overflow:hidden;
     }
-
-    .tab.active {
-      color: var(--primary);
-      border-bottom-color: var(--primary);
-    }
-
-    .content {
-      min-height: 0;
-      overflow: auto;
-      padding: 16px 18px 18px;
-    }
-
-    .content::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    .content::-webkit-scrollbar-thumb {
-      border: 2px solid var(--bg);
-      border-radius: 999px;
-      background: #cbd5e1;
-    }
-
     .panel {
-      display: none;
+      position:absolute;
+      inset:0;
+      display:none;
+      flex-direction:column;
+      min-width:0;
+      min-height:0;
+      animation:fpIn .2s ease;
     }
+    .panel.active { display:flex; }
 
-    .panel.active {
-      display: block;
+    .phead {
+      -webkit-app-region:drag;
+      position:relative;
+      z-index:2;
+      padding:18px 22px 14px;
+      border-bottom:1px solid var(--bd);
+      background:rgba(14,20,38,.86);
+      backdrop-filter:blur(18px);
     }
-
+    body.light .phead { background:rgba(248,251,255,.88); }
+    .phead-row {
+      -webkit-app-region:no-drag;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+      min-width:0;
+    }
+    h1 {
+      color:var(--tx);
+      font-size:28px;
+      font-weight:800;
+      line-height:1.05;
+      letter-spacing:0;
+    }
     .toolbar {
-      display: grid;
-      grid-template-columns: 1fr minmax(180px, 280px) auto;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 12px;
+      display:flex;
+      align-items:center;
+      gap:9px;
+      min-width:0;
+    }
+    .search-wrap {
+      position:relative;
+      width:min(42vw, 380px);
+      min-width:220px;
+    }
+    .search-wrap svg {
+      position:absolute;
+      left:12px;
+      top:50%;
+      width:17px;
+      height:17px;
+      transform:translateY(-50%);
+      color:var(--txf);
+      pointer-events:none;
+    }
+    .search-wrap input, .tinput, .editor-folder, .editor-text {
+      width:100%;
+      border:1px solid var(--bd);
+      border-radius:var(--r);
+      background:var(--g);
+      color:var(--tx);
+      outline:none;
+      transition:border-color .16s ease, box-shadow .16s ease, background .16s ease;
+    }
+    .search-wrap input {
+      height:40px;
+      padding:0 42px 0 38px;
+    }
+    .search-wrap input:focus, .tinput:focus, .editor-folder:focus, .editor-text:focus {
+      border-color:rgba(56,189,248,.55);
+      box-shadow:0 0 0 4px var(--acg);
+      background:var(--g2);
+    }
+    .clear-search {
+      position:absolute;
+      right:5px;
+      top:50%;
+      transform:translateY(-50%);
+      width:30px;
+      height:30px;
     }
 
-    .section-title {
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-      min-width: 0;
+    .btn {
+      height:40px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      padding:0 13px;
+      border:1px solid var(--bd);
+      border-radius:var(--r);
+      background:var(--g);
+      color:var(--tx);
+      cursor:pointer;
+      font-weight:800;
+      white-space:nowrap;
+      transition:background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+    }
+    .btn:hover { border-color:var(--bd2); background:var(--g2); }
+    .btn:active { transform:translateY(1px); }
+    .btn.primary {
+      border-color:rgba(56,189,248,.36);
+      background:linear-gradient(135deg, rgba(56,189,248,.92), rgba(129,140,248,.88));
+      color:#fff;
+      box-shadow:0 16px 34px rgba(56,189,248,.18);
+    }
+    .btn.ghost { background:transparent; }
+    .btn.danger { border-color:rgba(248,113,113,.36); background:var(--redb); color:var(--red); }
+    .btn:disabled { opacity:.55; cursor:default; transform:none; }
+
+    .confirm-row {
+      -webkit-app-region:no-drag;
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:10px;
+      margin-top:12px;
+      padding:10px;
+      border:1px solid rgba(248,113,113,.24);
+      border-radius:var(--r);
+      background:var(--redb);
+      color:var(--tx);
+      font-weight:700;
+      animation:fpPop .18s ease;
     }
 
-    .section-title h1 {
-      color: #111827;
-      font-size: 16px;
-      line-height: 1.2;
-      font-weight: 800;
+    .chip-row {
+      -webkit-app-region:no-drag;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      overflow-x:auto;
+      padding:12px 22px;
+      border-bottom:1px solid var(--bd);
+      background:rgba(7,10,19,.24);
+    }
+    body.light .chip-row { background:rgba(255,255,255,.42); }
+    .chip-row::-webkit-scrollbar { height:0; }
+    .chip {
+      height:32px;
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      padding:0 11px;
+      border:1px solid var(--bd);
+      border-radius:999px;
+      background:var(--g);
+      color:var(--txd);
+      cursor:pointer;
+      font-size:12px;
+      font-weight:800;
+      white-space:nowrap;
+    }
+    .chip.active {
+      border-color:var(--ac);
+      background:var(--acg);
+      color:var(--ac);
     }
 
-    .section-title span {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 650;
+    .scroll {
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding:18px 22px 22px;
     }
-
-    .search {
-      width: 100%;
-      height: 36px;
-      padding: 0 12px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--surface);
-      color: var(--text);
-      outline: none;
-    }
-
-    .search:focus,
-    .text-input:focus {
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    .scroll::-webkit-scrollbar { width:10px; height:10px; }
+    .scroll::-webkit-scrollbar-thumb {
+      border:3px solid transparent;
+      border-radius:999px;
+      background:var(--bd2);
+      background-clip:padding-box;
     }
 
     .empty {
-      min-height: 260px;
-      display: grid;
-      place-items: center;
-      padding: 36px 20px;
-      border: 1px dashed var(--line-strong);
-      border-radius: var(--radius);
-      background: var(--surface);
-      color: var(--muted);
-      text-align: center;
+      min-height:280px;
+      display:grid;
+      place-items:center;
+      padding:38px 20px;
+      border:1px dashed var(--bd2);
+      border-radius:var(--r);
+      background:var(--g);
+      color:var(--txd);
+      text-align:center;
+      line-height:1.55;
     }
-
-    .empty strong {
-      display: block;
-      margin-bottom: 5px;
-      color: var(--text);
-      font-size: 14px;
-    }
-
-    .date-group {
-      margin-bottom: 16px;
-    }
-
+    .empty strong { display:block; margin-bottom:4px; color:var(--tx); font-size:15px; }
+    .date-group { margin-bottom:18px; }
     .date-header {
-      margin: 0 0 8px;
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
+      margin:0 0 9px;
+      color:var(--txf);
+      font-size:11px;
+      font-weight:800;
+      letter-spacing:.08em;
+      text-transform:uppercase;
     }
-
-    .history-list {
-      display: grid;
-      gap: 8px;
+    .history-list { display:grid; gap:9px; }
+    .hi {
+      position:relative;
+      padding:12px 52px 12px 13px;
+      border:1px solid var(--bd);
+      border-radius:var(--r);
+      background:linear-gradient(135deg, rgba(255,255,255,.07), rgba(255,255,255,.035));
+      box-shadow:0 18px 55px rgba(0,0,0,.12);
+      cursor:pointer;
+      animation:fpIn .18s ease both;
+      transition:border-color .16s ease, background .16s ease, transform .16s ease;
     }
-
-    .history-item {
-      width: 100%;
-      display: grid;
-      grid-template-columns: 1fr auto;
-      align-items: start;
-      gap: 12px;
-      padding: 12px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--surface);
-      color: inherit;
-      text-align: left;
-      transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+    .hi:hover {
+      border-color:rgba(56,189,248,.32);
+      background:linear-gradient(135deg, rgba(255,255,255,.1), rgba(255,255,255,.05));
+      transform:translateY(-1px);
     }
-
-    .history-item:hover {
-      border-color: #9bb9ff;
-      box-shadow: var(--shadow);
-      transform: translateY(-1px);
+    body.light .hi { box-shadow:0 15px 42px rgba(15,23,42,.06); }
+    .hmeta {
+      display:flex;
+      align-items:center;
+      gap:7px;
+      min-width:0;
+      margin-bottom:8px;
     }
-
-    .history-item:active {
-      transform: translateY(0);
-    }
-
-    .history-main {
-      min-width: 0;
-    }
-
-    .history-copy {
-      width: 100%;
-      min-width: 0;
-      display: block;
-      background: transparent;
-      color: inherit;
-      text-align: left;
-      cursor: pointer;
-    }
-
-    .history-actions {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .history-meta {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 7px;
-      margin-bottom: 6px;
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 700;
-    }
-
     .badge {
-      display: inline-flex;
-      align-items: center;
-      min-height: 21px;
-      padding: 2px 7px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 800;
+      min-height:22px;
+      display:inline-flex;
+      align-items:center;
+      gap:5px;
+      max-width:180px;
+      padding:3px 8px;
+      border:1px solid var(--bd);
+      border-radius:999px;
+      background:var(--g);
+      color:var(--txd);
+      font-size:11px;
+      font-weight:800;
+      line-height:1;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
     }
-
-    .badge.pc {
-      background: var(--primary-soft);
-      color: #1d4ed8;
+    .badge svg { width:13px; height:13px; }
+    .b-pc { border-color:rgba(56,189,248,.28); background:var(--acg); color:var(--ac); }
+    .b-android { border-color:rgba(52,211,153,.28); background:var(--grnb); color:var(--grn); }
+    .b-pin { border-color:rgba(251,191,36,.34); background:var(--ywb); color:var(--yw); }
+    .b-url { border-color:rgba(129,140,248,.32); background:rgba(129,140,248,.14); color:var(--ac2); }
+    .time {
+      margin-left:auto;
+      color:var(--txf);
+      font-family:var(--mono);
+      font-size:11px;
+      white-space:nowrap;
     }
-
-    .badge.android {
-      background: var(--green-soft);
-      color: var(--green);
+    .htext {
+      max-height:72px;
+      overflow:hidden;
+      color:var(--tx);
+      font-size:14px;
+      line-height:1.48;
+      white-space:pre-wrap;
+      word-break:break-all;
     }
-
-    .history-text {
-      color: #111827;
-      font-size: 13px;
-      line-height: 1.45;
-      word-break: break-word;
-      white-space: pre-wrap;
+    .color-preview {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      margin-top:10px;
+      color:var(--txd);
+      font-family:var(--mono);
+      font-size:12px;
     }
-
-    .copy-hint {
-      color: var(--faint);
-      font-size: 12px;
-      font-weight: 700;
-      white-space: nowrap;
+    .swatch {
+      width:26px;
+      height:26px;
+      border:1px solid var(--bd2);
+      border-radius:8px;
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,.18);
     }
-
-    .icon-button {
-      width: 32px;
-      height: 32px;
-      display: inline-grid;
-      place-items: center;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--surface-soft);
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 16px;
-      line-height: 1;
+    .hactions {
+      position:absolute;
+      right:9px;
+      top:50%;
+      display:flex;
+      flex-direction:column;
+      gap:5px;
+      opacity:0;
+      pointer-events:none;
+      transform:translateY(-50%) translateX(4px);
+      transition:opacity .16s ease, transform .16s ease;
     }
-
-    .icon-button:hover {
-      border-color: #fecaca;
-      background: var(--red-soft);
-      color: var(--red);
+    .hi:hover .hactions, .hi.keyboard-hover .hactions {
+      opacity:1;
+      pointer-events:auto;
+      transform:translateY(-50%) translateX(0);
     }
+    .hactions .icon-btn { width:30px; height:30px; border-radius:8px; background:rgba(7,10,19,.66); }
+    body.light .hactions .icon-btn { background:rgba(255,255,255,.88); }
 
-    .settings-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.1fr) minmax(240px, 0.9fr);
-      gap: 14px;
-      align-items: start;
+    .grid {
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:14px;
+      align-items:start;
     }
-
     .card {
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--surface);
-      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      border:1px solid var(--bd);
+      border-radius:var(--r);
+      background:linear-gradient(135deg, rgba(255,255,255,.072), rgba(255,255,255,.035));
+      box-shadow:0 18px 55px rgba(0,0,0,.12);
     }
-
-    .card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-      padding: 13px 14px;
-      border-bottom: 1px solid var(--line);
+    body.light .card { box-shadow:0 15px 42px rgba(15,23,42,.06); }
+    .card-pad { padding:16px; }
+    .section-label {
+      margin:20px 0 9px;
+      color:var(--txf);
+      font-size:11px;
+      font-weight:800;
+      letter-spacing:.08em;
+      text-transform:uppercase;
     }
-
-    .card-title {
-      color: #111827;
-      font-size: 13px;
-      font-weight: 800;
+    .srv-top, .cloud-top, .device-item, .auto-row {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      min-width:0;
     }
-
-    .card-body {
-      padding: 14px;
+    .srv-title, .cloud-title {
+      display:flex;
+      align-items:center;
+      gap:9px;
+      min-width:0;
+      color:var(--tx);
+      font-weight:800;
     }
-
-    .setting-stack {
-      display: grid;
-      gap: 12px;
+    .tag {
+      display:inline-flex;
+      align-items:center;
+      min-height:24px;
+      padding:3px 8px;
+      border:1px solid var(--bd);
+      border-radius:999px;
+      background:var(--g);
+      color:var(--txd);
+      font-family:var(--mono);
+      font-size:11px;
+      font-weight:500;
     }
-
-    .setting-row {
-      display: grid;
-      grid-template-columns: 1fr;
-      align-items: start;
-      gap: 10px;
+    .ip-row {
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      margin:14px 0 12px;
     }
-
-    .label {
-      display: grid;
-      gap: 3px;
-      min-width: 0;
+    .muted { color:var(--txd); }
+    .faint { color:var(--txf); }
+    .mono { font-family:var(--mono); }
+    .device-list { display:grid; gap:9px; }
+    .device-item {
+      min-height:48px;
+      padding:11px 12px;
+      border:1px solid var(--bd);
+      border-radius:var(--r);
+      background:var(--g);
     }
+    .device-left {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+      font-weight:800;
+    }
+    .device-left svg { color:var(--grn); }
 
+    .cloud-card .button-row { margin-top:14px; }
+    .button-row { display:flex; flex-wrap:wrap; gap:8px; }
+    .settings-wrap {
+      max-width:980px;
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+    }
+    .setting-card h2 {
+      margin-bottom:12px;
+      color:var(--tx);
+      font-size:15px;
+      font-weight:800;
+      letter-spacing:0;
+    }
+    .hotkey-row {
+      display:grid;
+      grid-template-columns:minmax(160px, .8fr) minmax(240px, 1fr) minmax(140px, .6fr);
+      gap:12px;
+      align-items:start;
+      padding:12px 0;
+      border-top:1px solid var(--bd);
+    }
+    .hotkey-row:first-of-type { border-top:0; padding-top:0; }
     .label strong {
-      color: #111827;
-      font-size: 13px;
-      font-weight: 750;
+      display:block;
+      color:var(--tx);
+      font-size:13px;
+      font-weight:800;
     }
-
     .label span {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.35;
+      display:block;
+      margin-top:3px;
+      color:var(--txd);
+      font-size:12px;
+      line-height:1.4;
     }
-
-    .input-group {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-      width: 100%;
+    .input-line {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-width:0;
     }
-
-    .text-input {
-      width: 100%;
-      min-width: 0;
-      flex: 1;
-      height: 36px;
-      padding: 0 10px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--surface-soft);
-      color: var(--text);
-      outline: none;
-      user-select: text;
+    .tinput {
+      height:38px;
+      min-width:0;
+      padding:0 10px;
+      font-family:var(--mono);
+      font-size:12px;
     }
-
-    .primary-button {
-      height: 36px;
-      padding: 0 13px;
-      border-radius: 8px;
-      background: var(--primary);
-      color: #fff;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 800;
-      white-space: nowrap;
-    }
-
-    .primary-button:hover {
-      background: #1d4ed8;
-    }
-
-    .primary-button:disabled {
-      opacity: 0.55;
-      cursor: default;
-    }
-
-    .secondary-button {
-      height: 36px;
-      padding: 0 13px;
-      border: 1px solid var(--line-strong);
-      border-radius: 8px;
-      background: var(--surface);
-      color: var(--text);
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 800;
-      white-space: nowrap;
-    }
-
-    .secondary-button:hover {
-      border-color: var(--primary);
-      color: var(--primary);
-    }
-
-    .danger-button {
-      height: 36px;
-      padding: 0 12px;
-      border: 1px solid #fecaca;
-      border-radius: 8px;
-      background: var(--red-soft);
-      color: var(--red);
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 800;
-      white-space: nowrap;
-    }
-
-    .danger-button:hover {
-      border-color: var(--red);
-    }
-
-    .danger-button:disabled {
-      opacity: 0.45;
-      cursor: default;
-    }
-
-    .button-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 12px;
-    }
-
     .preview-line {
-      min-height: 29px;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 5px;
-      color: var(--muted);
-      font-size: 12px;
+      min-height:28px;
+      display:flex;
+      align-items:center;
+      flex-wrap:wrap;
+      gap:5px;
+      color:var(--txd);
+      font-size:12px;
     }
-
-    .save-status {
-      min-height: 18px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.35;
+    .status-line {
+      min-height:18px;
+      margin-top:7px;
+      color:var(--txd);
+      font-size:12px;
+      line-height:1.35;
     }
+    .status-line.ok { color:var(--grn); font-weight:700; }
+    .status-line.error { color:var(--red); font-weight:700; }
 
-    .save-status.ok {
-      color: var(--green);
-      font-weight: 700;
+    .toggle-btn {
+      position:relative;
+      width:52px;
+      height:30px;
+      flex:0 0 auto;
+      border:1px solid var(--bd2);
+      border-radius:999px;
+      background:var(--g2);
+      cursor:pointer;
+      transition:background .16s ease, border-color .16s ease;
     }
-
-    .save-status.error {
-      color: var(--red);
-      font-weight: 700;
+    .toggle-btn .tthumb {
+      position:absolute;
+      top:3px;
+      left:3px;
+      width:22px;
+      height:22px;
+      border-radius:50%;
+      background:var(--txd);
+      box-shadow:0 4px 14px rgba(0,0,0,.24);
+      transition:transform .18s ease, background .18s ease;
     }
-
-    .toggle {
-      position: relative;
-      width: 46px;
-      height: 26px;
-      display: inline-flex;
-      cursor: pointer;
+    .toggle-btn[data-on="true"] {
+      border-color:rgba(52,211,153,.35);
+      background:var(--grnb);
     }
-
-    .toggle input {
-      width: 0;
-      height: 0;
-      opacity: 0;
+    .toggle-btn[data-on="true"] .tthumb {
+      transform:translateX(22px);
+      background:var(--grn);
     }
+    .auto-row { align-items:center; }
 
-    .toggle span {
-      position: absolute;
-      inset: 0;
-      border-radius: 999px;
-      background: #cdd5df;
-      transition: background 0.18s ease;
+    .overlay {
+      position:fixed;
+      inset:0;
+      z-index:20;
+      display:grid;
+      place-items:center;
+      padding:22px;
+      background:rgba(0,0,0,.42);
+      backdrop-filter:blur(16px);
+      animation:fpOverlay .16s ease;
     }
-
-    .toggle span::after {
-      content: "";
-      position: absolute;
-      top: 3px;
-      left: 3px;
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.22);
-      transition: transform 0.18s ease;
+    .emodal, .pmodal {
+      width:min(100%, 580px);
+      max-height:min(92vh, 760px);
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      border:1px solid var(--bd2);
+      border-radius:14px;
+      background:linear-gradient(145deg, rgba(14,20,38,.96), rgba(20,29,51,.93));
+      box-shadow:0 30px 95px rgba(0,0,0,.46);
+      animation:fpModal .18s ease;
     }
-
-    .toggle input:checked + span {
-      background: var(--green);
+    body.light .emodal, body.light .pmodal { background:linear-gradient(145deg, rgba(248,251,255,.98), rgba(237,243,251,.95)); box-shadow:0 26px 80px rgba(15,23,42,.18); }
+    .modal-head, .modal-foot {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:14px 16px;
+      border-bottom:1px solid var(--bd);
     }
-
-    .toggle input:checked + span::after {
-      transform: translateX(20px);
+    .modal-foot { border-top:1px solid var(--bd); border-bottom:0; }
+    .modal-title { min-width:0; }
+    .modal-title strong {
+      display:block;
+      color:var(--tx);
+      font-size:16px;
+      font-weight:800;
     }
-
-    .list {
-      display: grid;
-      gap: 8px;
+    .modal-title span {
+      display:block;
+      margin-top:3px;
+      color:var(--txd);
+      font-size:12px;
     }
-
-    .list-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      min-height: 36px;
-      padding: 8px 10px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--surface-soft);
-      color: var(--text);
-      font-size: 13px;
+    .emodal-body {
+      min-height:0;
+      overflow:auto;
+      padding:14px 16px;
     }
-
-    .mono {
-      font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
-      font-size: 12px;
-      user-select: text;
+    .efmt {
+      display:flex;
+      flex-wrap:wrap;
+      gap:7px;
+      margin-bottom:12px;
     }
-
-    .muted {
-      color: var(--muted);
+    .fmt-btn {
+      min-height:30px;
+      padding:0 9px;
+      border:1px solid var(--bd);
+      border-radius:8px;
+      background:var(--g);
+      color:var(--txd);
+      cursor:pointer;
+      font-size:12px;
+      font-weight:800;
     }
-
-    .small-pill {
-      display: inline-flex;
-      align-items: center;
-      padding: 2px 7px;
-      border-radius: 999px;
-      background: var(--orange-soft);
-      color: #c2410c;
-      font-size: 11px;
-      font-weight: 800;
+    .fmt-btn:hover { border-color:var(--bd2); color:var(--tx); background:var(--g2); }
+    .editor-text {
+      min-height:150px;
+      max-height:40vh;
+      resize:vertical;
+      padding:11px;
+      font-family:var(--mono);
+      font-size:13px;
+      line-height:1.52;
     }
+    .editor-count {
+      margin-top:7px;
+      color:var(--txf);
+      font-family:var(--mono);
+      font-size:11px;
+      text-align:right;
+    }
+    .form-row {
+      display:grid;
+      grid-template-columns:95px 1fr;
+      gap:10px;
+      align-items:center;
+      margin-top:12px;
+    }
+    .form-row label { color:var(--txd); font-size:12px; font-weight:800; }
+    .editor-folder { height:38px; padding:0 10px; }
+    .mini-toggle-row {
+      display:flex;
+      align-items:center;
+      gap:9px;
+      margin-top:12px;
+      color:var(--txd);
+      font-size:13px;
+      font-weight:700;
+    }
+    .mini-toggle-row .toggle-btn { width:44px; height:26px; }
+    .mini-toggle-row .toggle-btn .tthumb { width:18px; height:18px; }
+    .mini-toggle-row .toggle-btn[data-on="true"] .tthumb { transform:translateX(18px); }
+    .foot-left, .foot-right { display:flex; align-items:center; gap:8px; }
 
-    @media (max-width: 680px) {
-      .topbar {
-        align-items: flex-start;
-        flex-direction: column;
-      }
+    .pmodal {
+      align-self:start;
+      width:min(100%, 700px);
+      margin-top:8vh;
+    }
+    .pinned-hint {
+      color:var(--txd);
+      font-family:var(--mono);
+      font-size:12px;
+      white-space:nowrap;
+    }
+    .pinned-list {
+      display:grid;
+      grid-template-columns:repeat(3, 1fr);
+      gap:8px;
+      padding:14px;
+      overflow:auto;
+    }
+    .pitem {
+      min-height:112px;
+      display:grid;
+      grid-template-rows:auto 1fr auto;
+      gap:8px;
+      padding:10px;
+      border:1px solid var(--bd);
+      border-radius:var(--r);
+      background:var(--g);
+      color:var(--tx);
+      cursor:pointer;
+      text-align:left;
+    }
+    .pitem.active {
+      border-color:var(--ac);
+      background:var(--acg);
+    }
+    .pidx {
+      width:24px;
+      height:24px;
+      display:grid;
+      place-items:center;
+      border:1px solid var(--bd);
+      border-radius:7px;
+      background:var(--g2);
+      color:var(--tx);
+      font-family:var(--mono);
+      font-size:11px;
+      font-weight:500;
+    }
+    .ptext {
+      display:-webkit-box;
+      overflow:hidden;
+      color:var(--tx);
+      font-size:13px;
+      line-height:1.35;
+      white-space:pre-wrap;
+      word-break:break-word;
+      -webkit-line-clamp:3;
+      -webkit-box-orient:vertical;
+    }
+    .pmeta { color:var(--txf); font-size:11px; font-weight:700; }
 
-      .top-actions {
-        width: 100%;
-        justify-content: space-between;
-      }
-
-      .toolbar,
-      .settings-grid,
-      .setting-row {
-        grid-template-columns: 1fr;
-      }
-
-      .input-group {
-        width: 100%;
-      }
-
-      .text-input {
-        width: 100%;
-      }
+    @media (max-width: 900px) {
+      :root { --sw:82px; }
+      .sidebar { padding:12px 8px; }
+      .brand-text, .nav-btn span:nth-child(2), .pinned-launch span:nth-child(2), .sb-glance, .hotkey-keys { display:none; }
+      .pulse-dot { margin-left:0; }
+      .sb-logo { justify-content:center; }
+      .nav-btn, .pinned-launch { justify-content:center; padding:0; }
+      .sb-nav-count { position:absolute; transform:translate(16px,-13px); min-width:18px; height:18px; padding:0 5px; font-size:10px; }
+      .grid { grid-template-columns:1fr; }
+      .hotkey-row { grid-template-columns:1fr; }
+      .phead-row { align-items:flex-start; flex-direction:column; }
+      .toolbar { width:100%; }
+      .search-wrap { flex:1; width:auto; min-width:0; }
+      .pinned-list { grid-template-columns:1fr; }
     }
   </style>
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></symbol>
+    <symbol id="i-devices" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/><path d="M12 16v4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9L4.2 7A2 2 0 1 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 1 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8-6.2-3.3L5.8 21 7 14.2 2 9.3l6.9-1L12 2Z"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6 18 20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H8a6 6 0 1 1 1.2-11.9A7 7 0 0 1 22 11.5 4.5 4.5 0 0 1 17.5 19Z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 7.5A9 9 0 1 1 12 3Z"/></symbol>
+    <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v7h-7"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1 0l-2 2a5 5 0 0 0 7.1 7.1l1.1-1.1"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-1"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h1"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M5 13a10 10 0 0 1 14 0"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M12 20h.01"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></symbol>
+  </svg>
+
   <div class="app">
-    <header class="topbar">
-      <div class="brand">
+    <aside class="sidebar">
+      <div class="sb-logo">
         <div class="mark">FP</div>
-        <div class="brand-copy">
-          <div class="title">FastPaste</div>
-          <div id="app-subtitle" class="subtitle">Clipboard sync đang chạy nền</div>
-        </div>
+        <div class="brand-text">FastPaste</div>
+        <span class="pulse-dot"></span>
       </div>
 
-      <div class="top-actions">
-        <div id="connection-pill" class="pill"><span class="status-dot"></span><span>Đang chạy</span></div>
+      <nav class="sb-nav" aria-label="Điều hướng">
+        <button id="nav-history" class="nav-btn active" type="button" data-panel="history"><svg><use href="#i-clipboard"></use></svg><span>Clipboard</span><span id="history-count" class="sb-nav-count">0</span></button>
+        <button id="nav-devices" class="nav-btn" type="button" data-panel="devices"><svg><use href="#i-devices"></use></svg><span>Devices</span><span id="device-online-count" class="sb-nav-count">0</span></button>
+        <button id="nav-settings" class="nav-btn" type="button" data-panel="settings"><svg><use href="#i-settings"></use></svg><span>Settings</span></button>
+      </nav>
+
+      <div class="divider"></div>
+
+      <button id="pinned-launch" class="pinned-launch" type="button"><svg><use href="#i-star"></use></svg><span>Pinned Palette</span><kbd>Alt</kbd><kbd>1</kbd></button>
+
+      <div class="sb-glance">
+        <span id="sidebar-cloud-dot" class="dot"></span>
+        <span id="sidebar-cloud-text">Cloud chưa sẵn sàng</span>
       </div>
-    </header>
 
-    <nav class="tabs" aria-label="Điều hướng">
-      <button class="tab active" data-tab="history" type="button">Lịch sử</button>
-      <button class="tab" data-tab="settings" type="button">Cài đặt</button>
-    </nav>
+      <div class="spacer"></div>
 
-    <main class="content">
+      <div class="sb-bottom">
+        <div id="sidebar-hotkey-keys" class="hotkey-keys"></div>
+        <button id="theme-btn" class="icon-btn" type="button" title="Đổi giao diện"><svg><use href="#i-moon"></use></svg></button>
+      </div>
+    </aside>
+
+    <main class="main">
       <section id="panel-history" class="panel active">
-        <div class="toolbar">
-          <div class="section-title">
-            <h1>Lịch sử clipboard</h1>
-            <span id="history-count">0 mục</span>
+        <header class="phead">
+          <div class="phead-row">
+            <h1>Clipboard</h1>
+            <div class="toolbar">
+              <div class="search-wrap">
+                <svg><use href="#i-search"></use></svg>
+                <input id="history-search" type="search" placeholder="Tìm lịch sử clipboard" spellcheck="false">
+                <button id="clear-search" class="icon-btn clear-search" type="button" title="Xóa tìm kiếm"><svg><use href="#i-x"></use></svg></button>
+              </div>
+              <button id="add-new" class="btn primary" type="button"><svg><use href="#i-plus"></use></svg><span>Thêm</span></button>
+              <button id="clear-history" class="btn ghost" type="button" title="Xóa lịch sử"><svg><use href="#i-trash"></use></svg></button>
+            </div>
           </div>
-          <input id="history-search" class="search" type="search" placeholder="Tìm trong lịch sử">
-          <button id="clear-history" class="danger-button" type="button">Xóa tất cả</button>
+          <div id="clear-history-row" class="confirm-row" hidden>
+            <span>Xóa toàn bộ lịch sử clipboard?</span>
+            <button id="confirm-clear" class="btn danger" type="button">Xóa</button>
+            <button id="cancel-clear" class="btn ghost" type="button">Hủy</button>
+          </div>
+        </header>
+        <div id="folder-filters" class="chip-row"></div>
+        <div id="history-container" class="scroll"></div>
+      </section>
+
+      <section id="panel-devices" class="panel">
+        <header class="phead"><div class="phead-row"><h1>Devices</h1></div></header>
+        <div class="scroll">
+          <div class="srv-card card card-pad">
+            <div class="srv-top">
+              <div class="srv-title"><span class="dot ok"></span><span>WebSocket Server</span></div>
+              <span class="tag">:4567</span>
+            </div>
+            <div id="device-server-ip" class="ip-row"></div>
+            <div id="srv-clients" class="muted">Chưa có kết nối</div>
+          </div>
+
+          <div class="section-label">Thiết bị kết nối</div>
+          <div id="devices-list" class="device-list"></div>
+
+          <div class="section-label">Google Drive Sync</div>
+          <div class="cloud-card card card-pad">
+            <div class="cloud-top">
+              <div class="cloud-title"><svg><use href="#i-cloud"></use></svg><span id="cloud-title">Google sync</span></div>
+              <span id="cloud-badge" class="badge">Off</span>
+            </div>
+            <div id="cloud-status" class="muted" style="margin-top:9px;">Đang chờ trạng thái.</div>
+            <div id="cloud-account" class="faint" style="margin-top:5px;"></div>
+            <div class="button-row">
+              <button id="google-sign-in" class="btn primary" type="button">Đăng nhập Google</button>
+              <button id="google-sync" class="btn" type="button" hidden><svg><use href="#i-rotate"></use></svg><span>Đồng bộ ngay</span></button>
+              <button id="google-sign-out" class="btn ghost" type="button" hidden>Đăng xuất</button>
+            </div>
+          </div>
         </div>
-        <div id="history-container"></div>
       </section>
 
       <section id="panel-settings" class="panel">
-        <div class="settings-grid">
-          <div class="setting-stack">
-            <div class="card">
-              <div class="card-header">
-                <div class="card-title">Hotkey ẩn/hiện</div>
-              </div>
-              <div class="card-body setting-stack">
-                <div class="setting-row">
-                  <div class="label">
-                    <strong>Tổ hợp phím</strong>
-                    <span>Dùng dạng Ctrl+Alt+Z hoặc CommandOrControl+Alt+Z.</span>
-                  </div>
-                  <div class="input-group">
-                    <input id="hotkey-input" class="text-input" type="text" spellcheck="false" value="CommandOrControl+Alt+Z">
-                    <button id="save-hotkey" class="primary-button" type="button">Lưu</button>
-                  </div>
+        <header class="phead"><div class="phead-row"><h1>Settings</h1></div></header>
+        <div class="scroll sbody">
+          <div class="settings-wrap">
+            <div class="setting-card card card-pad">
+              <h2>Global Hotkeys</h2>
+              <div class="hotkey-row">
+                <div class="label"><strong>Mở cửa sổ chính</strong><span>Hiện hoặc ẩn FastPaste.</span></div>
+                <div>
+                  <div class="input-line"><input id="hotkey-input" class="tinput" type="text" spellcheck="false"><button id="save-hotkey" class="btn" type="button">Lưu</button></div>
+                  <div id="hotkey-status" class="status-line"></div>
                 </div>
                 <div id="hotkey-preview" class="preview-line"></div>
-                <div id="hotkey-status" class="save-status"></div>
+              </div>
+              <div class="hotkey-row">
+                <div class="label"><strong>Sửa mục gần nhất</strong><span>Mở editor cho clipboard hiện tại.</span></div>
+                <div>
+                  <div class="input-line"><input id="edit-hotkey-input" class="tinput" type="text" spellcheck="false"><button id="save-edit-hotkey" class="btn" type="button">Lưu</button></div>
+                  <div id="edit-hotkey-status" class="status-line"></div>
+                </div>
+                <div id="edit-hotkey-preview" class="preview-line"></div>
+              </div>
+              <div class="hotkey-row">
+                <div class="label"><strong>Mở Pinned Palette</strong><span>Chọn nhanh các mục đã ghim.</span></div>
+                <div>
+                  <div class="input-line"><input id="pinned-hotkey-input" class="tinput" type="text" spellcheck="false"><button id="save-pinned-hotkey" class="btn" type="button">Lưu</button></div>
+                  <div id="pinned-hotkey-status" class="status-line"></div>
+                </div>
+                <div id="pinned-hotkey-preview" class="preview-line"></div>
               </div>
             </div>
 
-            <div class="card">
-              <div class="card-header">
-                <div class="card-title">Khởi động cùng Windows</div>
-                <label class="toggle" title="Tự chạy cùng Windows">
-                  <input id="autostart-checkbox" type="checkbox">
-                  <span></span>
-                </label>
+            <div class="setting-card card card-pad">
+              <div class="auto-row">
+                <div class="label"><strong id="autostart-title">Đang tắt</strong><span id="autostart-copy">FastPaste chỉ chạy khi bạn mở thủ công.</span></div>
+                <button id="autostart-toggle" class="toggle-btn" type="button" data-on="false" aria-label="Khởi động cùng Windows"><span class="tthumb"></span></button>
               </div>
-              <div class="card-body">
-                <div class="label">
-                  <strong id="autostart-title">Đang tắt</strong>
-                  <span id="autostart-copy">FastPaste chỉ chạy khi bạn mở thủ công.</span>
-                </div>
-                <div id="autostart-status" class="save-status" style="margin-top: 10px;"></div>
-              </div>
+              <div id="autostart-status" class="status-line"></div>
             </div>
-          </div>
 
-          <div class="setting-stack">
-            <div class="card">
-              <div class="card-header">
-                <div class="card-title">Google Drive sync</div>
-                <span id="cloud-badge" class="small-pill">Drive</span>
-              </div>
-              <div class="card-body">
-                <div class="label">
-                  <strong id="cloud-title">Chưa đăng nhập</strong>
-                  <span id="cloud-status">Đăng nhập Google để bật tự đồng bộ.</span>
-                </div>
-                <div id="cloud-account" class="preview-line"></div>
+            <div class="setting-card card card-pad">
+              <div class="auto-row">
+                <div class="label"><strong id="version-title">FastPaste 2.2.0</strong><span id="update-status">Chưa kiểm tra cập nhật.</span></div>
                 <div class="button-row">
-                  <button id="google-sign-in" class="primary-button" type="button">Đăng nhập Google</button>
-                  <button id="google-sync" class="secondary-button" type="button">Đồng bộ ngay</button>
-                  <button id="google-sign-out" class="secondary-button" type="button">Đăng xuất</button>
-                </div>
-              </div>
-            </div>
-
-            <div class="card">
-              <div class="card-header">
-                <div class="card-title">Địa chỉ mạng</div>
-              </div>
-              <div class="card-body">
-                <div id="ips" class="list"></div>
-              </div>
-            </div>
-
-            <div class="card">
-              <div class="card-header">
-                <div class="card-title">Phiên bản</div>
-              </div>
-              <div class="card-body">
-                <div class="label">
-                  <strong id="version-title">FastPaste 2.2.0</strong>
-                  <span id="update-status">Chưa kiểm tra cập nhật.</span>
-                </div>
-                <div class="button-row">
-                  <button id="check-update" class="secondary-button" type="button">Kiểm tra</button>
-                  <button id="open-update" class="primary-button" type="button" hidden>Tải bản mới</button>
+                  <button id="check-update" class="btn" type="button"><svg><use href="#i-rotate"></use></svg><span>Kiểm tra</span></button>
+                  <button id="open-update" class="btn primary" type="button" hidden><svg><use href="#i-download"></use></svg><span>Tải bản mới</span></button>
                 </div>
               </div>
             </div>
@@ -831,56 +1095,156 @@
     </main>
   </div>
 
+  <div id="editor-backdrop" class="overlay" hidden>
+    <div class="emodal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+      <div class="modal-head">
+        <div class="modal-title"><strong id="editor-title">Sửa clipboard</strong><span id="editor-meta">Mục lịch sử</span></div>
+        <button id="editor-close" class="icon-btn" type="button" title="Đóng"><svg><use href="#i-x"></use></svg></button>
+      </div>
+      <div class="emodal-body">
+        <div class="efmt">
+          <button class="fmt-btn" type="button" data-format="trim">Trim</button>
+          <button class="fmt-btn" type="button" data-format="lowercase">lower</button>
+          <button class="fmt-btn" type="button" data-format="uppercase">UPPER</button>
+          <button class="fmt-btn" type="button" data-format="titlecase">Title</button>
+          <button class="fmt-btn" type="button" data-format="one-line">One line</button>
+          <button class="fmt-btn" type="button" data-format="collapse-spaces">Spaces</button>
+          <button class="fmt-btn" type="button" data-format="remove-spaces">No spaces</button>
+          <button class="fmt-btn" type="button" data-format="bullets">Bullets</button>
+          <button class="fmt-btn" type="button" data-format="numbers">Numbers</button>
+          <button class="fmt-btn" type="button" data-format="quote">Quote</button>
+          <button class="fmt-btn" type="button" data-format="code">Code</button>
+          <button class="fmt-btn" type="button" data-format="json">JSON</button>
+        </div>
+        <textarea id="editor-text" class="editor-text" spellcheck="false"></textarea>
+        <div id="editor-count" class="editor-count">0 ký tự · 1 dòng</div>
+        <div class="form-row"><label for="editor-folder">Folder</label><input id="editor-folder" class="editor-folder" list="folder-options" type="text" spellcheck="false" placeholder="Ví dụ: Work"><datalist id="folder-options"></datalist></div>
+        <div class="mini-toggle-row"><button id="editor-autocopy-btn" class="toggle-btn" type="button" data-on="true"><span class="tthumb"></span></button><span>Copy sau khi lưu</span></div>
+        <div id="editor-status" class="status-line"></div>
+      </div>
+      <div class="modal-foot">
+        <div class="foot-left">
+          <button id="editor-undo" class="btn ghost" type="button"><svg><use href="#i-undo"></use></svg></button>
+          <button id="editor-redo" class="btn ghost" type="button"><svg><use href="#i-redo"></use></svg></button>
+          <button id="editor-reset" class="btn ghost" type="button">Reset</button>
+        </div>
+        <div class="foot-right">
+          <button id="editor-cancel" class="btn ghost" type="button">Hủy</button>
+          <button id="editor-save" class="btn primary" type="button">Lưu</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="pinned-backdrop" class="overlay" hidden>
+    <div class="pmodal" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <div class="modal-title"><strong>Pinned Palette</strong><span class="pinned-hint">↑↓ · Enter · Alt+1-9</span></div>
+        <button id="pinned-close" class="icon-btn" type="button" title="Đóng"><svg><use href="#i-x"></use></svg></button>
+      </div>
+      <div id="pinned-list" class="pinned-list"></div>
+    </div>
+  </div>
+
   <script>
-    const invoke = window.__TAURI__.core.invoke;
-    const listen = window.__TAURI__.event.listen;
+    const invoke = window.TAURI.core.invoke;
+    const listen = window.TAURI.event.listen;
     const APP_VERSION = '2.2.0';
     const UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/sieuxuan/fast-paste/master/update.json';
 
     const state = {
       data: null,
-      activeTab: 'history',
+      activePanel: 'history',
       query: '',
+      folderFilter: 'all',
       currentHistory: [],
+      hoveredHistoryIndex: null,
+      editingEntryId: null,
+      editorDraft: { initial: '', last: '', undo: [], redo: [], applying: false },
+      pinnedPalette: { items: [], selectedIndex: 0 },
       updateUrl: 'https://github.com/sieuxuan/fast-paste/releases/latest'
     };
 
     const els = {
-      subtitle: document.getElementById('app-subtitle'),
-      connection: document.getElementById('connection-pill'),
+      navButtons: document.querySelectorAll('.nav-btn'),
+      panels: document.querySelectorAll('.panel'),
       historyCount: document.getElementById('history-count'),
+      deviceOnlineCount: document.getElementById('device-online-count'),
+      sidebarHotkeyKeys: document.getElementById('sidebar-hotkey-keys'),
+      sidebarCloudDot: document.getElementById('sidebar-cloud-dot'),
+      sidebarCloudText: document.getElementById('sidebar-cloud-text'),
+      themeBtn: document.getElementById('theme-btn'),
+      pinnedLaunch: document.getElementById('pinned-launch'),
       historySearch: document.getElementById('history-search'),
+      clearSearch: document.getElementById('clear-search'),
+      addNew: document.getElementById('add-new'),
       clearHistory: document.getElementById('clear-history'),
+      clearHistoryRow: document.getElementById('clear-history-row'),
+      confirmClear: document.getElementById('confirm-clear'),
+      cancelClear: document.getElementById('cancel-clear'),
+      folderFilters: document.getElementById('folder-filters'),
       historyContainer: document.getElementById('history-container'),
-      hotkeyInput: document.getElementById('hotkey-input'),
-      hotkeyPreview: document.getElementById('hotkey-preview'),
-      hotkeyStatus: document.getElementById('hotkey-status'),
-      saveHotkey: document.getElementById('save-hotkey'),
-      autostartCheckbox: document.getElementById('autostart-checkbox'),
-      autostartTitle: document.getElementById('autostart-title'),
-      autostartCopy: document.getElementById('autostart-copy'),
-      autostartStatus: document.getElementById('autostart-status'),
-      ips: document.getElementById('ips'),
-      versionTitle: document.getElementById('version-title'),
-      updateStatus: document.getElementById('update-status'),
-      checkUpdate: document.getElementById('check-update'),
-      openUpdate: document.getElementById('open-update'),
+      deviceServerIp: document.getElementById('device-server-ip'),
+      srvClients: document.getElementById('srv-clients'),
+      devicesList: document.getElementById('devices-list'),
       cloudBadge: document.getElementById('cloud-badge'),
       cloudTitle: document.getElementById('cloud-title'),
       cloudStatus: document.getElementById('cloud-status'),
       cloudAccount: document.getElementById('cloud-account'),
       googleSignIn: document.getElementById('google-sign-in'),
       googleSync: document.getElementById('google-sync'),
-      googleSignOut: document.getElementById('google-sign-out')
+      googleSignOut: document.getElementById('google-sign-out'),
+      hotkeyInput: document.getElementById('hotkey-input'),
+      saveHotkey: document.getElementById('save-hotkey'),
+      hotkeyPreview: document.getElementById('hotkey-preview'),
+      hotkeyStatus: document.getElementById('hotkey-status'),
+      editHotkeyInput: document.getElementById('edit-hotkey-input'),
+      saveEditHotkey: document.getElementById('save-edit-hotkey'),
+      editHotkeyPreview: document.getElementById('edit-hotkey-preview'),
+      editHotkeyStatus: document.getElementById('edit-hotkey-status'),
+      pinnedHotkeyInput: document.getElementById('pinned-hotkey-input'),
+      savePinnedHotkey: document.getElementById('save-pinned-hotkey'),
+      pinnedHotkeyPreview: document.getElementById('pinned-hotkey-preview'),
+      pinnedHotkeyStatus: document.getElementById('pinned-hotkey-status'),
+      autostartTitle: document.getElementById('autostart-title'),
+      autostartCopy: document.getElementById('autostart-copy'),
+      autostartStatus: document.getElementById('autostart-status'),
+      autostartToggle: document.getElementById('autostart-toggle'),
+      versionTitle: document.getElementById('version-title'),
+      updateStatus: document.getElementById('update-status'),
+      checkUpdate: document.getElementById('check-update'),
+      openUpdate: document.getElementById('open-update'),
+      editorBackdrop: document.getElementById('editor-backdrop'),
+      editorTitle: document.getElementById('editor-title'),
+      editorMeta: document.getElementById('editor-meta'),
+      editorClose: document.getElementById('editor-close'),
+      editorText: document.getElementById('editor-text'),
+      editorCount: document.getElementById('editor-count'),
+      editorFolder: document.getElementById('editor-folder'),
+      folderOptions: document.getElementById('folder-options'),
+      editorAutocopyBtn: document.getElementById('editor-autocopy-btn'),
+      editorStatus: document.getElementById('editor-status'),
+      editorUndo: document.getElementById('editor-undo'),
+      editorRedo: document.getElementById('editor-redo'),
+      editorReset: document.getElementById('editor-reset'),
+      editorCancel: document.getElementById('editor-cancel'),
+      editorSave: document.getElementById('editor-save'),
+      pinnedBackdrop: document.getElementById('pinned-backdrop'),
+      pinnedList: document.getElementById('pinned-list'),
+      pinnedClose: document.getElementById('pinned-close')
     };
 
     function escapeHtml(value) {
-      return String(value)
+      return String(value ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+    }
+
+    function icon(id) {
+      return `<svg><use href="#${id}"></use></svg>`;
     }
 
     function normalizeKeyToken(token) {
@@ -919,8 +1283,8 @@
         .map(normalizeKeyToken)
         .filter(Boolean);
 
-      if (!parts.length) return '<span class="muted">Chưa đặt hotkey</span>';
-      return parts.map(part => `<kbd>${escapeHtml(part)}</kbd>`).join(' <span class="muted">+</span> ');
+      if (!parts.length) return '<span class="muted">Chưa đặt</span>';
+      return parts.map(part => `<kbd>${escapeHtml(part)}</kbd>`).join(' <span class="faint">+</span> ');
     }
 
     function hotkeyInputText(raw) {
@@ -950,7 +1314,7 @@
 
     function setStatus(element, message, type = '') {
       element.textContent = message;
-      element.className = `save-status ${type}`.trim();
+      element.className = `status-line ${type}`.trim();
     }
 
     function compareVersions(left, right) {
@@ -966,14 +1330,8 @@
       return 0;
     }
 
-    function switchTab(tabId) {
-      state.activeTab = tabId;
-      document.querySelectorAll('.tab').forEach(tab => {
-        tab.classList.toggle('active', tab.dataset.tab === tabId);
-      });
-      document.querySelectorAll('.panel').forEach(panel => {
-        panel.classList.toggle('active', panel.id === `panel-${tabId}`);
-      });
+    function cleanFolderName(value) {
+      return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 64);
     }
 
     function formatDate(isoString) {
@@ -1001,56 +1359,138 @@
       return date.toLocaleString('vi-VN', {
         day: '2-digit',
         month: '2-digit',
+        year: 'numeric',
         hour: '2-digit',
         minute: '2-digit'
       });
     }
 
-    function sourceMeta(source) {
-      return source === 'PC'
-        ? { className: 'pc', label: 'PC' }
-        : { className: 'android', label: 'Android' };
+    function getToggle(btn) {
+      return btn.dataset.on === 'true';
+    }
+
+    function setToggle(btn, val) {
+      btn.dataset.on = val ? 'true' : 'false';
+      btn.setAttribute('aria-pressed', val ? 'true' : 'false');
+    }
+
+    function isTypingTarget(target) {
+      return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+    }
+
+    function switchPanel(id) {
+      state.activePanel = id;
+      els.navButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.panel === id));
+      els.panels.forEach(panel => panel.classList.toggle('active', panel.id === `panel-${id}`));
+    }
+
+    function toggleTheme() {
+      const light = !document.body.classList.contains('light');
+      document.body.classList.toggle('light', light);
+      localStorage.setItem('fp-theme', light ? 'light' : 'dark');
+      els.themeBtn.innerHTML = light ? '<svg><use href="#i-sun"></use></svg>' : '<svg><use href="#i-moon"></use></svg>';
+    }
+
+    function updateSidebar() {
+      const settings = state.data?.settings || {};
+      const history = state.data?.history || [];
+      const clients = state.data?.clients || [];
+      const cloud = state.data?.cloud || {};
+
+      els.sidebarHotkeyKeys.innerHTML = displayHotkey(settings.hotkey || 'CommandOrControl+Alt+Z');
+      els.historyCount.textContent = String(history.length);
+      els.deviceOnlineCount.textContent = String(clients.length);
+
+      els.sidebarCloudDot.className = 'dot';
+      if (cloud.syncing) {
+        els.sidebarCloudDot.classList.add('syncing');
+        els.sidebarCloudText.textContent = 'Cloud đang sync';
+      } else if (cloud.signed_in) {
+        els.sidebarCloudDot.classList.add('ok');
+        els.sidebarCloudText.textContent = cloud.account_email || 'Cloud đã đăng nhập';
+      } else if (cloud.configured) {
+        els.sidebarCloudText.textContent = 'Cloud sẵn sàng';
+      } else {
+        els.sidebarCloudText.textContent = 'Cloud đang tắt';
+      }
+    }
+
+    function getFolders() {
+      const folders = new Set();
+      (state.data?.history || []).forEach(item => {
+        const folder = cleanFolderName(item.folder);
+        if (folder) folders.add(folder);
+      });
+      return Array.from(folders).sort((a, b) => a.localeCompare(b, 'vi'));
+    }
+
+    function renderFolderFilters() {
+      const filters = [
+        { key: 'all', label: 'Tất cả' },
+        { key: 'pinned', label: 'Đã ghim' },
+        { key: 'none', label: 'Chưa folder' },
+        ...getFolders().map(folder => ({ key: `folder:${folder}`, label: folder, folder }))
+      ];
+
+      els.folderFilters.innerHTML = filters.map(filter => `
+        <button class="chip ${state.folderFilter === filter.key ? 'active' : ''}" type="button" data-filter="${escapeHtml(filter.key)}">
+          ${filter.folder ? icon('i-folder') : ''}<span>${escapeHtml(filter.label)}</span>
+        </button>
+      `).join('');
+    }
+
+    function applyFolderFilter(item) {
+      const folder = cleanFolderName(item.folder);
+      if (state.folderFilter === 'all') return true;
+      if (state.folderFilter === 'pinned') return Boolean(item.pinned);
+      if (state.folderFilter === 'none') return !folder;
+      if (state.folderFilter.startsWith('folder:')) return folder === state.folderFilter.slice(7);
+      return true;
+    }
+
+    function isUrl(text) {
+      return /^https?:\/\//i.test(String(text || '').trim());
+    }
+
+    function isHexColor(text) {
+      return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(text || '').trim());
+    }
+
+    function sourceBadge(item) {
+      return item.source === 'Android'
+        ? `<span class="badge b-android">${icon('i-phone')}Android</span>`
+        : `<span class="badge b-pc">${icon('i-devices')}PC</span>`;
     }
 
     function renderHistory() {
       const allItems = state.data?.history || [];
       const query = state.query.trim().toLowerCase();
-      const filtered = query
-        ? allItems.filter(item => String(item.text || '').toLowerCase().includes(query))
-        : allItems;
+      const filtered = allItems.filter(item => {
+        const text = String(item.text || '').toLowerCase();
+        const folder = String(item.folder || '').toLowerCase();
+        return applyFolderFilter(item) && (!query || text.includes(query) || folder.includes(query));
+      });
 
-      state.currentHistory = allItems;
-      els.historyCount.textContent = `${allItems.length} mục`;
+      state.currentHistory = filtered;
+      renderFolderFilters();
       els.clearHistory.disabled = allItems.length === 0;
+      els.clearSearch.hidden = !state.query;
 
       if (!allItems.length) {
-        els.historyContainer.innerHTML = `
-          <div class="empty">
-            <div>
-              <strong>Chưa có dữ liệu clipboard</strong>
-              <span>Copy nội dung trên PC hoặc kết nối điện thoại.</span>
-            </div>
-          </div>`;
+        els.historyContainer.innerHTML = '<div class="empty"><div><strong>Chưa có dữ liệu clipboard</strong><span>Copy nội dung trên PC hoặc kết nối Android để bắt đầu.</span></div></div>';
         return;
       }
 
       if (!filtered.length) {
-        els.historyContainer.innerHTML = `
-          <div class="empty">
-            <div>
-              <strong>Không tìm thấy kết quả</strong>
-              <span>Thử từ khóa ngắn hơn.</span>
-            </div>
-          </div>`;
+        els.historyContainer.innerHTML = '<div class="empty"><div><strong>Không tìm thấy kết quả</strong><span>Thử từ khóa khác hoặc đổi folder filter.</span></div></div>';
         return;
       }
 
       const groups = new Map();
-      filtered.forEach(item => {
-        const originalIndex = allItems.indexOf(item);
+      filtered.forEach((item, index) => {
         const dateLabel = formatDate(item.timestamp);
         if (!groups.has(dateLabel)) groups.set(dateLabel, []);
-        groups.get(dateLabel).push({ ...item, originalIndex });
+        groups.get(dateLabel).push({ ...item, index });
       });
 
       els.historyContainer.innerHTML = Array.from(groups.entries()).map(([dateLabel, items]) => `
@@ -1058,86 +1498,55 @@
           <div class="date-header">${escapeHtml(dateLabel)}</div>
           <div class="history-list">
             ${items.map(item => {
-              const meta = sourceMeta(item.source);
               const text = String(item.text || '');
-              const displayText = text.length > 260 ? `${text.slice(0, 260)}...` : text;
+              const displayText = text.length > 240 ? `${text.slice(0, 240)}...` : text;
+              const folder = cleanFolderName(item.folder);
               return `
-                <div class="history-item">
-                  <button class="history-copy" type="button" data-index="${item.originalIndex}" title="Copy">
-                    <span class="history-main">
-                      <span class="history-meta">
-                        <span class="badge ${meta.className}">${meta.label}</span>
-                        <span>${formatTime(item.timestamp)}</span>
-                      </span>
-                      <span class="history-text">${escapeHtml(displayText)}</span>
-                    </span>
-                  </button>
-                  <span class="history-actions">
-                    <span class="copy-hint">Copy</span>
-                    <button class="icon-button" type="button" data-delete-index="${item.originalIndex}" title="Xóa">×</button>
-                  </span>
-                </div>`;
+                <article class="hi ${state.hoveredHistoryIndex === item.index ? 'keyboard-hover' : ''}" data-hover-index="${item.index}" data-index="${item.index}">
+                  <div class="hmeta">
+                    ${sourceBadge(item)}
+                    ${item.pinned ? `<span class="badge b-pin">${icon('i-star')}Ghim</span>` : ''}
+                    ${isUrl(text) ? `<span class="badge b-url">${icon('i-link')}URL</span>` : ''}
+                    ${folder ? `<span class="badge">${icon('i-folder')}${escapeHtml(folder)}</span>` : ''}
+                    <span class="time">${escapeHtml(formatTime(item.timestamp))}</span>
+                  </div>
+                  <div class="htext">${escapeHtml(displayText)}</div>
+                  ${isHexColor(text) ? `<div class="color-preview"><span class="swatch" style="background:${escapeHtml(text.trim())}"></span><span>${escapeHtml(text.trim().toUpperCase())}</span></div>` : ''}
+                  <div class="hactions">
+                    <button class="icon-btn" type="button" data-index="${item.index}" title="Copy">${icon('i-copy')}</button>
+                    <button class="icon-btn" type="button" data-pin-index="${item.index}" title="${item.pinned ? 'Bỏ ghim' : 'Ghim'}">${icon('i-star')}</button>
+                    <button class="icon-btn" type="button" data-edit-index="${item.index}" title="Sửa">${icon('i-pencil')}</button>
+                    <button class="icon-btn danger" type="button" data-delete-index="${item.index}" title="Xóa">${icon('i-trash')}</button>
+                  </div>
+                </article>`;
             }).join('')}
           </div>
         </div>
       `).join('');
     }
 
-    async function deleteHistoryItem(index) {
-      const entry = state.currentHistory[index];
-      if (!entry) return;
-
-      try {
-        await invoke('delete_history_item', { id: entry.id });
-      } catch (error) {
-        console.error(error);
-      }
-    }
-
-    async function clearHistory() {
-      const allItems = state.data?.history || [];
-      if (!allItems.length) return;
-      if (!confirm('Xóa toàn bộ lịch sử clipboard?')) return;
-
-      els.clearHistory.disabled = true;
-      try {
-        await invoke('clear_history');
-      } catch (error) {
-        console.error(error);
-      } finally {
-        els.clearHistory.disabled = false;
-      }
-    }
-
-    function renderSettings() {
-      const settings = state.data?.settings || {};
+    function renderDevices() {
       const ips = state.data?.ips || [];
-      const hotkey = settings.hotkey || 'CommandOrControl+Alt+Z';
+      const clients = state.data?.clients || [];
 
-      els.versionTitle.textContent = `FastPaste ${APP_VERSION}`;
-      if (document.activeElement !== els.hotkeyInput) {
-        els.hotkeyInput.value = hotkeyInputText(hotkey);
-      }
-      els.hotkeyPreview.innerHTML = `Hiển thị: ${displayHotkey(els.hotkeyInput.value)}`;
+      els.deviceServerIp.innerHTML = ips.length
+        ? ips.map(ip => `<span class="tag">${escapeHtml(ip)}:4567</span>`).join('')
+        : '<span class="tag">Không tìm thấy IP LAN</span>';
 
-      els.autostartCheckbox.checked = Boolean(settings.auto_start);
-      els.autostartTitle.textContent = settings.auto_start ? 'Đang bật' : 'Đang tắt';
-      els.autostartCopy.textContent = settings.auto_start
-        ? 'Khi đăng nhập Windows, FastPaste chạy ẩn trong tray.'
-        : 'FastPaste chỉ chạy khi bạn mở thủ công.';
+      els.srvClients.textContent = clients.length
+        ? `${clients.length} thiết bị đang kết nối`
+        : 'Chưa có kết nối';
 
-      els.connection.innerHTML = '<span class="status-dot"></span><span>Đang chạy</span>';
-      els.subtitle.textContent = 'Clipboard sync đang chạy nền';
+      els.devicesList.innerHTML = clients.length
+        ? clients.map(ip => `
+          <div class="device-item">
+            <div class="device-left">${icon('i-phone')}<span class="mono">${escapeHtml(ip)}</span></div>
+            <span class="badge b-android">Android</span>
+          </div>
+        `).join('')
+        : '<div class="empty"><div><strong>Chưa có Android kết nối</strong><span>Mở app Android và dùng cùng mạng LAN với PC.</span></div></div>';
 
       renderCloudSettings();
-
-      els.ips.innerHTML = ips.length
-        ? ips.map(ip => `
-          <div class="list-item">
-            <span class="mono">${escapeHtml(ip)}:4567</span>
-            <span class="small-pill">LAN</span>
-          </div>`).join('')
-        : '<div class="list-item muted">Chưa tìm thấy địa chỉ mạng</div>';
     }
 
     function renderCloudSettings() {
@@ -1147,87 +1556,312 @@
       const syncing = Boolean(cloud.syncing);
       const account = cloud.account_email || '';
       const statusText = cloud.status || '';
-      const hasError = statusText.toLowerCase().includes('lỗi') || statusText.toLowerCase().includes('cần đăng nhập');
+      const hasError = statusText.toLowerCase().includes('lỗi') || statusText.toLowerCase().includes('error') || statusText.toLowerCase().includes('cần đăng nhập');
 
       els.cloudBadge.textContent = syncing ? 'Syncing' : signedIn ? 'Auto' : configured ? 'Ready' : 'Off';
+      els.cloudBadge.className = `badge ${syncing ? 'b-pc' : signedIn ? 'b-android' : ''}`.trim();
       els.cloudTitle.textContent = signedIn
-        ? (account || 'Đã đăng nhập Google')
+        ? 'Google Drive Sync'
         : configured
-          ? 'Đăng nhập để bật tự đồng bộ'
+          ? 'Đăng nhập Google'
           : 'Google sync chưa bật';
       els.cloudStatus.textContent = statusText || (
         configured
           ? 'Đăng nhập Google để bật tự đồng bộ.'
-          : 'Bản cài đặt này chưa bật Google sync.'
+          : 'Bản cài đặt này chưa cấu hình Google sync.'
       );
       els.cloudAccount.textContent = signedIn
-        ? `Lần đồng bộ: ${cloud.last_sync_at ? formatDateTime(cloud.last_sync_at) : 'chưa có'}`
+        ? `${account || 'Đã đăng nhập'} · Lần sync: ${cloud.last_sync_at ? formatDateTime(cloud.last_sync_at) : 'chưa có'}`
         : configured
           ? 'FastPaste sẽ tự sync khi mở app và khi có clipboard mới.'
           : 'Cần dùng bản release đã cấu hình Google sync.';
 
       els.googleSignIn.hidden = signedIn;
-      els.googleSignOut.hidden = !signedIn;
       els.googleSync.hidden = !signedIn;
-      els.googleSync.textContent = (hasError || syncing) ? 'Thử lại' : 'Đồng bộ ngay';
+      els.googleSignOut.hidden = !signedIn;
+      els.googleSync.innerHTML = `${syncing ? '<svg style="animation:fpSpin .8s linear infinite"><use href="#i-rotate"></use></svg>' : icon('i-rotate')}<span>${hasError ? 'Thử lại' : 'Đồng bộ ngay'}</span>`;
 
       els.googleSignIn.disabled = !configured || syncing;
-      els.googleSync.disabled = !configured || !signedIn;
+      els.googleSync.disabled = !configured || !signedIn || syncing;
       els.googleSignOut.disabled = syncing;
     }
 
-    function render() {
-      renderSettings();
-      renderHistory();
+    function renderSettings() {
+      const settings = state.data?.settings || {};
+      const mainHotkey = settings.hotkey || 'CommandOrControl+Alt+Z';
+      const editHotkey = settings.edit_hotkey || 'CommandOrControl+Alt+E';
+      const pinnedHotkey = settings.pinned_hotkey || 'Alt+1';
+
+      els.versionTitle.textContent = `FastPaste ${APP_VERSION}`;
+
+      if (document.activeElement !== els.hotkeyInput) els.hotkeyInput.value = hotkeyInputText(mainHotkey);
+      if (document.activeElement !== els.editHotkeyInput) els.editHotkeyInput.value = hotkeyInputText(editHotkey);
+      if (document.activeElement !== els.pinnedHotkeyInput) els.pinnedHotkeyInput.value = hotkeyInputText(pinnedHotkey);
+
+      els.hotkeyPreview.innerHTML = displayHotkey(els.hotkeyInput.value || mainHotkey);
+      els.editHotkeyPreview.innerHTML = displayHotkey(els.editHotkeyInput.value || editHotkey);
+      els.pinnedHotkeyPreview.innerHTML = displayHotkey(els.pinnedHotkeyInput.value || pinnedHotkey);
+
+      setToggle(els.autostartToggle, Boolean(settings.auto_start));
+      els.autostartTitle.textContent = settings.auto_start ? 'Đang bật autostart' : 'Đang tắt autostart';
+      els.autostartCopy.textContent = settings.auto_start
+        ? 'FastPaste chạy ẩn trong tray khi đăng nhập Windows.'
+        : 'FastPaste chỉ chạy khi bạn mở thủ công.';
+
+      els.folderOptions.innerHTML = getFolders().map(folder => `<option value="${escapeHtml(folder)}"></option>`).join('');
     }
 
-    async function saveHotkey() {
-      const canonical = toTauriHotkey(els.hotkeyInput.value);
-      if (!canonical) {
-        setStatus(els.hotkeyStatus, 'Hotkey không được để trống.', 'error');
+    function render() {
+      renderHistory();
+      renderSettings();
+      renderDevices();
+      updateSidebar();
+      renderPinnedPalette();
+    }
+
+    async function copyHistoryItem(index) {
+      const entry = state.currentHistory[index];
+      if (!entry) return;
+      try {
+        await invoke('copy_text', { text: entry.text || '' });
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function deleteHistoryItem(index) {
+      const entry = state.currentHistory[index];
+      if (!entry) return;
+      try {
+        await invoke('delete_history_item', { id: entry.id });
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function toggleHistoryPin(index) {
+      const entry = state.currentHistory[index];
+      if (!entry) return;
+      try {
+        await invoke('toggle_history_pin', { id: entry.id, pinned: !entry.pinned });
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    function openEditor(entry) {
+      const isNew = !entry || entry.id === 'new';
+      state.editingEntryId = isNew ? 'new' : entry.id;
+      state.editorDraft = {
+        initial: isNew ? '' : String(entry.text || ''),
+        last: isNew ? '' : String(entry.text || ''),
+        undo: [],
+        redo: [],
+        applying: false
+      };
+      els.editorTitle.textContent = isNew ? 'Thêm clipboard' : 'Sửa clipboard';
+      els.editorMeta.textContent = isNew ? 'Mục mới' : `${entry.source || 'PC'} · ${formatDateTime(entry.timestamp)}`;
+      els.editorText.value = state.editorDraft.last;
+      els.editorFolder.value = cleanFolderName(entry?.folder);
+      setToggle(els.editorAutocopyBtn, true);
+      setStatus(els.editorStatus, '');
+      updateEditorCount();
+      updateEditorButtons();
+      els.editorBackdrop.hidden = false;
+      requestAnimationFrame(() => els.editorText.focus());
+    }
+
+    function openNewItem() {
+      state.editingEntryId = 'new';
+      openEditor({ id: 'new', text: '', folder: '', source: 'PC', timestamp: new Date().toISOString() });
+    }
+
+    function closeEditor() {
+      els.editorBackdrop.hidden = true;
+      state.editingEntryId = null;
+    }
+
+    function updateEditorCount() {
+      const text = els.editorText.value;
+      const lines = text.length ? text.split(/\r\n|\r|\n/).length : 1;
+      els.editorCount.textContent = `${text.length} ký tự · ${lines} dòng`;
+    }
+
+    function updateEditorButtons() {
+      els.editorUndo.disabled = !state.editorDraft.undo.length;
+      els.editorRedo.disabled = !state.editorDraft.redo.length;
+    }
+
+    function trackEditorDraft() {
+      if (state.editorDraft.applying) return;
+      const current = els.editorText.value;
+      if (current === state.editorDraft.last) return;
+      state.editorDraft.undo.push(state.editorDraft.last);
+      if (state.editorDraft.undo.length > 80) state.editorDraft.undo.shift();
+      state.editorDraft.last = current;
+      state.editorDraft.redo = [];
+      setStatus(els.editorStatus, '');
+      updateEditorCount();
+      updateEditorButtons();
+    }
+
+    function replaceEditorText(nextText) {
+      if (nextText === els.editorText.value) return;
+      state.editorDraft.undo.push(els.editorText.value);
+      state.editorDraft.redo = [];
+      state.editorDraft.last = nextText;
+      state.editorDraft.applying = true;
+      els.editorText.value = nextText;
+      state.editorDraft.applying = false;
+      updateEditorCount();
+      updateEditorButtons();
+    }
+
+    function editorUndo() {
+      if (!state.editorDraft.undo.length) return;
+      const current = els.editorText.value;
+      const previous = state.editorDraft.undo.pop();
+      state.editorDraft.redo.push(current);
+      state.editorDraft.last = previous;
+      state.editorDraft.applying = true;
+      els.editorText.value = previous;
+      state.editorDraft.applying = false;
+      updateEditorCount();
+      updateEditorButtons();
+    }
+
+    function editorRedo() {
+      if (!state.editorDraft.redo.length) return;
+      const current = els.editorText.value;
+      const next = state.editorDraft.redo.pop();
+      state.editorDraft.undo.push(current);
+      state.editorDraft.last = next;
+      state.editorDraft.applying = true;
+      els.editorText.value = next;
+      state.editorDraft.applying = false;
+      updateEditorCount();
+      updateEditorButtons();
+    }
+
+    function editorReset() {
+      replaceEditorText(state.editorDraft.initial);
+    }
+
+    function formatLines(text, formatter) {
+      return text.split(/\r\n|\r|\n/).map((line, index) => formatter(line, index)).join('\n');
+    }
+
+    function applyFormat(format) {
+      const text = els.editorText.value;
+      let next = text;
+
+      if (format === 'trim') next = text.trim();
+      if (format === 'lowercase') next = text.toLowerCase();
+      if (format === 'uppercase') next = text.toUpperCase();
+      if (format === 'titlecase') next = text.toLowerCase().replace(/(^|\s)(\S)/g, (match, space, char) => `${space}${char.toUpperCase()}`);
+      if (format === 'one-line') next = text.replace(/\s*\r?\n\s*/g, ' ').trim();
+      if (format === 'collapse-spaces') next = text.replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n');
+      if (format === 'remove-spaces') next = text.replace(/\s+/g, '');
+      if (format === 'bullets') next = formatLines(text, line => line.trim() ? `- ${line.replace(/^[-*]\s+|\d+\.\s+|>\s?/, '').trim()}` : '');
+      if (format === 'numbers') {
+        let n = 0;
+        next = formatLines(text, line => {
+          const clean = line.replace(/^[-*]\s+|\d+\.\s+|>\s?/, '').trim();
+          if (!clean) return '';
+          n += 1;
+          return `${n}. ${clean}`;
+        });
+      }
+      if (format === 'quote') next = formatLines(text, line => line ? `> ${line.replace(/^>\s?/, '')}` : '>');
+      if (format === 'code') next = text.startsWith('```') && text.endsWith('```') ? text.replace(/^```\n?/, '').replace(/\n?```$/, '') : `\`\`\`\n${text}\n\`\`\``;
+      if (format === 'json') {
+        try {
+          next = JSON.stringify(JSON.parse(text), null, 2);
+        } catch (error) {
+          setStatus(els.editorStatus, 'JSON không hợp lệ.', 'error');
+          return;
+        }
+      }
+
+      replaceEditorText(next);
+    }
+
+    async function saveEditedItem() {
+      const text = els.editorText.value;
+      const folder = cleanFolderName(els.editorFolder.value);
+      const copyAfterSave = getToggle(els.editorAutocopyBtn);
+
+      if (!text.trim()) {
+        setStatus(els.editorStatus, 'Nội dung không được để trống.', 'error');
         return;
       }
 
-      els.saveHotkey.disabled = true;
-      setStatus(els.hotkeyStatus, 'Đang lưu...');
+      els.editorSave.disabled = true;
+      setStatus(els.editorStatus, 'Đang lưu...');
 
       try {
-        await invoke('save_hotkey', { hotkey: canonical });
-        els.hotkeyInput.value = hotkeyInputText(canonical);
-        els.hotkeyPreview.innerHTML = `Hiển thị: ${displayHotkey(canonical)}`;
-        setStatus(els.hotkeyStatus, 'Đã lưu hotkey.', 'ok');
+        if (state.editingEntryId === 'new') {
+          await invoke('add_history_item', { text, folder, copyAfterSave });
+        } else {
+          await invoke('update_history_item', { id: state.editingEntryId, text, folder, copyAfterSave });
+        }
+        setStatus(els.editorStatus, 'Đã lưu.', 'ok');
+        closeEditor();
       } catch (error) {
-        setStatus(els.hotkeyStatus, String(error), 'error');
+        setStatus(els.editorStatus, String(error), 'error');
       } finally {
-        els.saveHotkey.disabled = false;
+        els.editorSave.disabled = false;
+      }
+    }
+
+    async function clearHistoryConfirmed() {
+      els.confirmClear.disabled = true;
+      try {
+        await invoke('clear_history');
+        els.clearHistoryRow.hidden = true;
+      } catch (error) {
+        console.error(error);
+      } finally {
+        els.confirmClear.disabled = false;
+      }
+    }
+
+    async function saveHotkeySetting(input, statusEl, commandName, argName, previewEl) {
+      const canonical = toTauriHotkey(input.value);
+      if (!canonical) {
+        setStatus(statusEl, 'Hotkey không được để trống.', 'error');
+        return;
+      }
+      setStatus(statusEl, 'Đang lưu...');
+      try {
+        await invoke(commandName, { [argName]: canonical });
+        input.value = hotkeyInputText(canonical);
+        previewEl.innerHTML = displayHotkey(canonical);
+        setStatus(statusEl, 'Đã lưu hotkey.', 'ok');
+      } catch (error) {
+        setStatus(statusEl, String(error), 'error');
       }
     }
 
     async function saveAutoStart() {
-      const nextValue = els.autostartCheckbox.checked;
-      els.autostartCheckbox.disabled = true;
+      const nextValue = !getToggle(els.autostartToggle);
+      setToggle(els.autostartToggle, nextValue);
+      els.autostartToggle.disabled = true;
       setStatus(els.autostartStatus, 'Đang lưu...');
-
       try {
         await invoke('save_autostart', { autostart: nextValue });
-        setStatus(
-          els.autostartStatus,
-          nextValue ? 'Đã bật tự khởi động ẩn.' : 'Đã tắt tự khởi động.',
-          'ok'
-        );
+        setStatus(els.autostartStatus, nextValue ? 'Đã bật tự khởi động ẩn.' : 'Đã tắt tự khởi động.', 'ok');
       } catch (error) {
-        els.autostartCheckbox.checked = !nextValue;
+        setToggle(els.autostartToggle, !nextValue);
         setStatus(els.autostartStatus, String(error), 'error');
       } finally {
-        els.autostartCheckbox.disabled = false;
+        els.autostartToggle.disabled = false;
       }
     }
 
     async function checkForUpdates(silent = false) {
       els.checkUpdate.disabled = true;
-      if (!silent) {
-        els.updateStatus.textContent = 'Đang kiểm tra cập nhật...';
-      }
+      if (!silent) els.updateStatus.textContent = 'Đang kiểm tra cập nhật...';
 
       try {
         const response = await fetch(`${UPDATE_MANIFEST_URL}?t=${Date.now()}`, { cache: 'no-store' });
@@ -1247,9 +1881,7 @@
           els.openUpdate.hidden = true;
         }
       } catch (error) {
-        if (!silent) {
-          els.updateStatus.textContent = `Không kiểm tra được cập nhật: ${error.message || error}`;
-        }
+        if (!silent) els.updateStatus.textContent = `Không kiểm tra được cập nhật: ${error.message || error}`;
       } finally {
         els.checkUpdate.disabled = false;
       }
@@ -1292,55 +1924,262 @@
       }
     }
 
+    function renderPinnedPalette() {
+      if (els.pinnedBackdrop.hidden) return;
+      const items = state.pinnedPalette.items;
+      els.pinnedList.innerHTML = items.length
+        ? items.map((item, index) => {
+          const text = String(item.text || '');
+          const badge = index < 9 ? String(index + 1) : icon('i-star');
+          return `
+            <button class="pitem ${index === state.pinnedPalette.selectedIndex ? 'active' : ''}" type="button" data-pinned-index="${index}">
+              <span class="pidx">${badge}</span>
+              <span class="ptext">${escapeHtml(text)}</span>
+              <span class="pmeta">${escapeHtml(cleanFolderName(item.folder) || item.source || 'Pinned')} · ${escapeHtml(formatTime(item.timestamp))}</span>
+            </button>`;
+        }).join('')
+        : '<div class="empty" style="grid-column:1/-1"><div><strong>Chưa có mục ghim</strong><span>Ghim vài clipboard để mở nhanh bằng Alt+1-9.</span></div></div>';
+    }
+
+    function openPinnedPalette(items) {
+      const pinned = items || (state.data?.history || []).filter(item => item.pinned);
+      state.pinnedPalette.items = pinned;
+      state.pinnedPalette.selectedIndex = 0;
+      els.pinnedBackdrop.hidden = false;
+      renderPinnedPalette();
+    }
+
+    function closePinnedPalette() {
+      els.pinnedBackdrop.hidden = true;
+    }
+
+    function movePinnedPalette(delta) {
+      const count = state.pinnedPalette.items.length;
+      if (!count) return;
+      state.pinnedPalette.selectedIndex = (state.pinnedPalette.selectedIndex + delta + count) % count;
+      renderPinnedPalette();
+    }
+
+    async function copyPinnedPalette(index = state.pinnedPalette.selectedIndex) {
+      const entry = state.pinnedPalette.items[index];
+      if (!entry) return;
+      try {
+        await invoke('copy_text', { text: entry.text || '' });
+        closePinnedPalette();
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function copyPinnedSlot(slot) {
+      const items = (state.data?.history || []).filter(item => item.pinned);
+      const entry = items[slot - 1];
+      if (!entry) return;
+      try {
+        await invoke('copy_text', { text: entry.text || '' });
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    function editCurrentHover() {
+      const entry = state.currentHistory[state.hoveredHistoryIndex];
+      if (entry) openEditor(entry);
+    }
+
+    function deleteCurrentHover() {
+      if (state.hoveredHistoryIndex !== null) deleteHistoryItem(state.hoveredHistoryIndex);
+    }
+
     function bindEvents() {
-      document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-      });
+      els.navButtons.forEach(btn => btn.addEventListener('click', () => switchPanel(btn.dataset.panel)));
+      els.themeBtn.addEventListener('click', toggleTheme);
+      els.pinnedLaunch.addEventListener('click', () => openPinnedPalette());
+      els.addNew.addEventListener('click', openNewItem);
 
       els.historySearch.addEventListener('input', event => {
         state.query = event.target.value;
         renderHistory();
       });
+      els.clearSearch.addEventListener('click', () => {
+        state.query = '';
+        els.historySearch.value = '';
+        renderHistory();
+      });
+      els.clearHistory.addEventListener('click', () => {
+        els.clearHistoryRow.hidden = false;
+      });
+      els.cancelClear.addEventListener('click', () => {
+        els.clearHistoryRow.hidden = true;
+      });
+      els.confirmClear.addEventListener('click', clearHistoryConfirmed);
+
+      els.folderFilters.addEventListener('click', event => {
+        const chip = event.target.closest('[data-filter]');
+        if (!chip) return;
+        state.folderFilter = chip.dataset.filter;
+        renderHistory();
+      });
 
       els.historyContainer.addEventListener('click', event => {
         const deleteButton = event.target.closest('[data-delete-index]');
+        const editButton = event.target.closest('[data-edit-index]');
+        const pinButton = event.target.closest('[data-pin-index]');
+        const copyButton = event.target.closest('[data-index]');
+
         if (deleteButton) {
           deleteHistoryItem(Number(deleteButton.dataset.deleteIndex));
           return;
         }
+        if (editButton) {
+          const entry = state.currentHistory[Number(editButton.dataset.editIndex)];
+          if (entry) openEditor(entry);
+          return;
+        }
+        if (pinButton) {
+          toggleHistoryPin(Number(pinButton.dataset.pinIndex));
+          return;
+        }
+        if (copyButton) copyHistoryItem(Number(copyButton.dataset.index));
+      });
 
-        const item = event.target.closest('[data-index]');
+      els.historyContainer.addEventListener('pointerover', event => {
+        const item = event.target.closest('[data-hover-index]');
         if (!item) return;
-
-        const index = Number(item.dataset.index);
-        const entry = state.currentHistory[index];
-        if (entry) invoke('copy_text', { text: entry.text });
+        state.hoveredHistoryIndex = Number(item.dataset.hoverIndex);
+      });
+      els.historyContainer.addEventListener('pointerout', event => {
+        const item = event.target.closest('[data-hover-index]');
+        if (!item || item.contains(event.relatedTarget)) return;
+        state.hoveredHistoryIndex = null;
       });
 
-      els.hotkeyInput.addEventListener('input', () => {
-        els.hotkeyPreview.innerHTML = `Hiển thị: ${displayHotkey(els.hotkeyInput.value)}`;
-        setStatus(els.hotkeyStatus, '');
+      [
+        [els.hotkeyInput, els.hotkeyPreview, els.hotkeyStatus],
+        [els.editHotkeyInput, els.editHotkeyPreview, els.editHotkeyStatus],
+        [els.pinnedHotkeyInput, els.pinnedHotkeyPreview, els.pinnedHotkeyStatus]
+      ].forEach(([input, preview, status]) => {
+        input.addEventListener('input', () => {
+          preview.innerHTML = displayHotkey(input.value);
+          setStatus(status, '');
+        });
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Enter') event.target.closest('.input-line').querySelector('button').click();
+        });
       });
 
-      els.hotkeyInput.addEventListener('keydown', event => {
-        if (event.key === 'Enter') saveHotkey();
-      });
+      els.saveHotkey.addEventListener('click', () => saveHotkeySetting(els.hotkeyInput, els.hotkeyStatus, 'save_hotkey', 'hotkey', els.hotkeyPreview));
+      els.saveEditHotkey.addEventListener('click', () => saveHotkeySetting(els.editHotkeyInput, els.editHotkeyStatus, 'save_edit_hotkey', 'hotkey', els.editHotkeyPreview));
+      els.savePinnedHotkey.addEventListener('click', () => saveHotkeySetting(els.pinnedHotkeyInput, els.pinnedHotkeyStatus, 'save_pinned_hotkey', 'hotkey', els.pinnedHotkeyPreview));
+      els.autostartToggle.addEventListener('click', saveAutoStart);
 
-      els.saveHotkey.addEventListener('click', saveHotkey);
-      els.autostartCheckbox.addEventListener('change', saveAutoStart);
-      els.clearHistory.addEventListener('click', clearHistory);
       els.checkUpdate.addEventListener('click', () => checkForUpdates(false));
       els.openUpdate.addEventListener('click', openUpdate);
       els.googleSignIn.addEventListener('click', googleSignIn);
       els.googleSync.addEventListener('click', googleSyncNow);
       els.googleSignOut.addEventListener('click', googleSignOut);
+
+      els.editorClose.addEventListener('click', closeEditor);
+      els.editorCancel.addEventListener('click', closeEditor);
+      els.editorSave.addEventListener('click', saveEditedItem);
+      els.editorText.addEventListener('input', trackEditorDraft);
+      els.editorUndo.addEventListener('click', editorUndo);
+      els.editorRedo.addEventListener('click', editorRedo);
+      els.editorReset.addEventListener('click', editorReset);
+      els.editorAutocopyBtn.addEventListener('click', () => setToggle(els.editorAutocopyBtn, !getToggle(els.editorAutocopyBtn)));
+      document.querySelectorAll('[data-format]').forEach(btn => btn.addEventListener('click', () => applyFormat(btn.dataset.format)));
+
+      els.pinnedClose.addEventListener('click', closePinnedPalette);
+      els.pinnedList.addEventListener('click', event => {
+        const item = event.target.closest('[data-pinned-index]');
+        if (!item) return;
+        copyPinnedPalette(Number(item.dataset.pinnedIndex));
+      });
+      els.editorBackdrop.addEventListener('click', event => {
+        if (event.target === els.editorBackdrop) closeEditor();
+      });
+      els.pinnedBackdrop.addEventListener('click', event => {
+        if (event.target === els.pinnedBackdrop) closePinnedPalette();
+      });
+
+      document.addEventListener('keydown', event => {
+        const altNumber = event.altKey && /^[1-9]$/.test(event.key);
+        if (altNumber) {
+          event.preventDefault();
+          copyPinnedSlot(Number(event.key));
+          return;
+        }
+
+        if (!els.pinnedBackdrop.hidden) {
+          if (event.key === 'Escape') closePinnedPalette();
+          if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+            event.preventDefault();
+            movePinnedPalette(1);
+          }
+          if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+            event.preventDefault();
+            movePinnedPalette(-1);
+          }
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            copyPinnedPalette();
+          }
+          return;
+        }
+
+        if (!els.editorBackdrop.hidden) {
+          if (event.key === 'Escape') closeEditor();
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+            event.preventDefault();
+            event.shiftKey ? editorRedo() : editorUndo();
+          }
+          if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+            event.preventDefault();
+            saveEditedItem();
+          }
+          return;
+        }
+
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+          event.preventDefault();
+          switchPanel('history');
+          els.historySearch.focus();
+          return;
+        }
+
+        if (isTypingTarget(event.target)) return;
+
+        if (event.key.toLowerCase() === 'e') editCurrentHover();
+        if (event.key === 'Delete') deleteCurrentHover();
+        if (event.key === 'Escape') {
+          els.clearHistoryRow.hidden = true;
+          state.query = '';
+          els.historySearch.value = '';
+          renderHistory();
+        }
+      });
+    }
+
+    function initTheme() {
+      const light = localStorage.getItem('fp-theme') === 'light';
+      document.body.classList.toggle('light', light);
+      els.themeBtn.innerHTML = light ? '<svg><use href="#i-sun"></use></svg>' : '<svg><use href="#i-moon"></use></svg>';
     }
 
     bindEvents();
+    initTheme();
+
     listen('update_state', event => {
       state.data = event.payload;
       render();
     });
+    listen('edit_history_item', event => {
+      openEditor(event.payload);
+    });
+    listen('open_pinned_list', event => {
+      openPinnedPalette(event.payload || []);
+    });
+
     invoke('request_state');
     checkForUpdates(true);
   </script>
