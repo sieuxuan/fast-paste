@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.2 - 2026-07-06
+
+- Cập nhật cấu hình và bật đồng bộ Google Drive.
+
 ## 2.2.1 - 2026-06-25
 
 - Polished Vietnamese labels and status messages across desktop and Android.

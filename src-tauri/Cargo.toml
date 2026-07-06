@@ -1,6 +1,6 @@
 [package]
 name = "fast-paste"
-version = "2.2.1"
+version = "2.2.2"
 description = "Ultra-lightweight clipboard sync — Tauri + Rust"
 authors = ["Xuan"]
 edition = "2021"
