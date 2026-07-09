@@ -1294,7 +1294,15 @@
 
             <div class="setting-card card card-pad">
               <div class="auto-row">
-                <div class="label"><strong id="version-title">FastPaste 2.2.2</strong><span id="update-status">Chưa kiểm tra cập nhật.</span></div>
+                <div class="label"><strong id="always-on-top-title">Đang bật luôn nổi</strong><span id="always-on-top-copy">Hotkey sẽ đưa FastPaste lên trên các cửa sổ khác.</span></div>
+                <button id="always-on-top-toggle" class="toggle-btn" type="button" data-on="true" aria-label="Luôn nổi khi mở bằng hotkey" data-i18n-aria-label="alwaysOnTopAria"><span class="tthumb"></span></button>
+              </div>
+              <div id="always-on-top-status" class="status-line"></div>
+            </div>
+
+            <div class="setting-card card card-pad">
+              <div class="auto-row">
+                <div class="label"><strong id="version-title">FastPaste 2.2.3</strong><span id="update-status">Chưa kiểm tra cập nhật.</span></div>
                 <div class="button-row">
                   <button id="check-update" class="btn" type="button"><svg><use href="#i-rotate"></use></svg><span data-i18n="checkUpdate">Kiểm tra</span></button>
                   <button id="open-update" class="btn primary" type="button" hidden><svg><use href="#i-download"></use></svg><span data-i18n="downloadUpdate">Tải bản mới</span></button>
@@ -1378,7 +1386,7 @@
     }
     const invoke = tauriApi.core.invoke;
     const listen = tauriApi.event.listen;
-    const APP_VERSION = '2.2.2';
+    const APP_VERSION = '2.2.3';
     const UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/sieuxuan/fast-paste/master/update.json';
     const HISTORY_PAGE_SIZE = 160;
     const HISTORY_LOAD_AHEAD_PX = 420;
@@ -1418,6 +1426,7 @@
         quickSlotHotkeyDesc: 'Phím trước số cho các vị trí đã ghim.',
         save: 'Lưu',
         autostartAria: 'Khởi động cùng Windows',
+        alwaysOnTopAria: 'Luôn nổi khi mở bằng hotkey',
         checkUpdate: 'Kiểm tra',
         downloadUpdate: 'Tải bản mới',
         close: 'Đóng',
@@ -1479,6 +1488,10 @@
         autostartOff: 'Đang tắt tự khởi động',
         autostartOnDesc: 'FastPaste chạy ẩn trong tray khi đăng nhập Windows.',
         autostartOffDesc: 'FastPaste chỉ chạy khi bạn mở thủ công.',
+        alwaysOnTopOn: 'Đang bật luôn nổi',
+        alwaysOnTopOff: 'Đang tắt luôn nổi',
+        alwaysOnTopOnDesc: 'Hotkey sẽ đưa FastPaste lên trên các cửa sổ khác.',
+        alwaysOnTopOffDesc: 'FastPaste mở bình thường, không giữ trên cùng.',
         editorAddTitle: 'Thêm clipboard',
         editorEditTitle: 'Sửa clipboard',
         editorNewMeta: 'Mục mới',
@@ -1491,6 +1504,8 @@
         hotkeySaved: 'Đã lưu hotkey.',
         autostartSavedOn: 'Đã bật tự khởi động ẩn.',
         autostartSavedOff: 'Đã tắt tự khởi động.',
+        alwaysOnTopSavedOn: 'Đã bật luôn nổi khi mở.',
+        alwaysOnTopSavedOff: 'Đã tắt luôn nổi.',
         checkingUpdate: 'Đang kiểm tra cập nhật...',
         updateAvailable: version => `Có bản mới ${version}. Bấm tải để mở GitHub.`,
         updateLatest: 'Đang dùng bản mới nhất.',
@@ -1541,6 +1556,7 @@
         quickSlotHotkeyDesc: 'Prefix before the pinned slot number.',
         save: 'Save',
         autostartAria: 'Start with Windows',
+        alwaysOnTopAria: 'Keep FastPaste on top when opened by hotkey',
         checkUpdate: 'Check',
         downloadUpdate: 'Download update',
         close: 'Close',
@@ -1602,6 +1618,10 @@
         autostartOff: 'Autostart is off',
         autostartOnDesc: 'FastPaste runs hidden in tray when Windows starts.',
         autostartOffDesc: 'FastPaste only runs when you open it manually.',
+        alwaysOnTopOn: 'Always on top is on',
+        alwaysOnTopOff: 'Always on top is off',
+        alwaysOnTopOnDesc: 'The hotkey brings FastPaste above other windows.',
+        alwaysOnTopOffDesc: 'FastPaste opens normally without staying above other windows.',
         editorAddTitle: 'Add clipboard',
         editorEditTitle: 'Edit clipboard',
         editorNewMeta: 'New item',
@@ -1614,6 +1634,8 @@
         hotkeySaved: 'Hotkey saved.',
         autostartSavedOn: 'Hidden autostart enabled.',
         autostartSavedOff: 'Autostart disabled.',
+        alwaysOnTopSavedOn: 'Always on top enabled.',
+        alwaysOnTopSavedOff: 'Always on top disabled.',
         checkingUpdate: 'Checking for updates...',
         updateAvailable: version => `Version ${version} is available. Click download to open GitHub.`,
         updateLatest: 'You are on the latest version.',
@@ -1696,6 +1718,10 @@
       autostartCopy: document.getElementById('autostart-copy'),
       autostartStatus: document.getElementById('autostart-status'),
       autostartToggle: document.getElementById('autostart-toggle'),
+      alwaysOnTopTitle: document.getElementById('always-on-top-title'),
+      alwaysOnTopCopy: document.getElementById('always-on-top-copy'),
+      alwaysOnTopStatus: document.getElementById('always-on-top-status'),
+      alwaysOnTopToggle: document.getElementById('always-on-top-toggle'),
       versionTitle: document.getElementById('version-title'),
       updateStatus: document.getElementById('update-status'),
       checkUpdate: document.getElementById('check-update'),
@@ -2215,6 +2241,13 @@
         ? t('autostartOnDesc')
         : t('autostartOffDesc');
 
+      const alwaysOnTop = settings.always_on_top !== false;
+      setToggle(els.alwaysOnTopToggle, alwaysOnTop);
+      els.alwaysOnTopTitle.textContent = alwaysOnTop ? t('alwaysOnTopOn') : t('alwaysOnTopOff');
+      els.alwaysOnTopCopy.textContent = alwaysOnTop
+        ? t('alwaysOnTopOnDesc')
+        : t('alwaysOnTopOffDesc');
+
       els.folderOptions.innerHTML = getFolders().map(folder => `<option value="${escapeHtml(folder)}"></option>`).join('');
     }
 
@@ -2492,6 +2525,22 @@
         setStatus(els.autostartStatus, String(error), 'error');
       } finally {
         els.autostartToggle.disabled = false;
+      }
+    }
+
+    async function saveAlwaysOnTop() {
+      const nextValue = !getToggle(els.alwaysOnTopToggle);
+      setToggle(els.alwaysOnTopToggle, nextValue);
+      els.alwaysOnTopToggle.disabled = true;
+      setStatus(els.alwaysOnTopStatus, t('saving'));
+      try {
+        await invoke('save_always_on_top', { alwaysOnTop: nextValue });
+        setStatus(els.alwaysOnTopStatus, nextValue ? t('alwaysOnTopSavedOn') : t('alwaysOnTopSavedOff'), 'ok');
+      } catch (error) {
+        setToggle(els.alwaysOnTopToggle, !nextValue);
+        setStatus(els.alwaysOnTopStatus, String(error), 'error');
+      } finally {
+        els.alwaysOnTopToggle.disabled = false;
       }
     }
 
@@ -2795,6 +2844,7 @@
       els.savePinnedHotkey.addEventListener('click', () => savePinnedHotkeyFrom(els.pinnedHotkeyInput, els.pinnedHotkeyStatus));
       els.savePaletteHotkey.addEventListener('click', saveQuickSlotHotkey);
       els.autostartToggle.addEventListener('click', saveAutoStart);
+      els.alwaysOnTopToggle.addEventListener('click', saveAlwaysOnTop);
 
       els.checkUpdate.addEventListener('click', () => checkForUpdates(false));
       els.openUpdate.addEventListener('click', openUpdate);

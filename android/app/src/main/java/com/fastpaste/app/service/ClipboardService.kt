@@ -19,6 +19,7 @@ import com.fastpaste.app.sync.DeletedHistoryStore
 import com.fastpaste.app.websocket.ConnectionState
 import com.fastpaste.app.websocket.WebSocketClient
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import org.json.JSONArray
@@ -89,6 +90,12 @@ class ClipboardService : Service() {
                 }
             }
 
+            scope.launch {
+                client.events.collect { event ->
+                    connectionEvents.tryEmit(event)
+                }
+            }
+
             // Update notification with connection status
             scope.launch {
                 client.state.collectLatest { state ->
@@ -97,6 +104,7 @@ class ClipboardService : Service() {
                         ConnectionState.CONNECTED -> {
                             sendHistorySync(client)
                             Log.d(TAG, "Connected; exchanging clipboard history")
+                            connectionEvents.tryEmit("Đã kết nối tới $host:$port")
                             "Đã kết nối tới $host"
                         }
                         ConnectionState.CONNECTING -> "Đang kết nối tới $host..."
@@ -191,8 +199,10 @@ class ClipboardService : Service() {
                     .put("type", "history_sync")
                     .put("entries", history)
                 client.send(payload.toString())
+                connectionEvents.tryEmit("Đã gửi ${history.length()} mục lịch sử sang PC")
             } catch (e: Exception) {
                 Log.e(TAG, "History sync send failed: ${e.message}")
+                connectionEvents.tryEmit("Gửi lịch sử lỗi: ${e.message ?: "không rõ"}")
             }
         }
     }
@@ -242,6 +252,7 @@ class ClipboardService : Service() {
         }
 
         Log.d(TAG, "Merged history sync: $inserted new items")
+        connectionEvents.tryEmit("Đã nhận đồng bộ từ PC: thêm $inserted mục mới")
     }
 
     private fun saveToHistory(text: String, source: String) {
@@ -301,5 +312,6 @@ class ClipboardService : Service() {
         const val EXTRA_PORT = "port"
         const val EXTRA_TEXT = "text"
         val connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
+        val connectionEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
     }
 }

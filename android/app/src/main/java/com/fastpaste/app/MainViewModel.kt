@@ -22,6 +22,14 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+data class ConnectionLogEntry(
+    val time: String,
+    val message: String
+)
 
 data class UiState(
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
@@ -39,7 +47,11 @@ data class UiState(
     val updateMessage: String = "FastPaste ${BuildConfig.VERSION_NAME}",
     val cloudSyncing: Boolean = false,
     val cloudSignedIn: Boolean = false,
-    val cloudMessage: String = "Đăng nhập Google để bật tự đồng bộ"
+    val cloudMessage: String = "Đăng nhập Google để bật tự đồng bộ",
+    val lastSyncText: String = "Chưa đồng bộ",
+    val connectionLogs: List<ConnectionLogEntry> = listOf(
+        ConnectionLogEntry("Bây giờ", "Đang khởi động và tìm PC cùng mạng.")
+    )
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -54,6 +66,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val cloudPrefs =
         application.getSharedPreferences("fastpaste_cloud", Context.MODE_PRIVATE)
     private var autoConnectEnabled = true
+    private val loggedServers = mutableSetOf<String>()
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
@@ -73,6 +86,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             discovery.servers.collect { servers ->
                 _uiState.update { it.copy(discoveredServers = servers) }
+                servers.forEach { server ->
+                    val key = "${server.host}:${server.port}"
+                    if (loggedServers.add(key)) {
+                        addConnectionLog("Tìm thấy PC ${server.name} tại $key")
+                    }
+                }
 
                 // Auto-connect to first discovered server if currently disconnected
                 if (
@@ -89,6 +108,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             discovery.isScanning.collect { scanning ->
                 _uiState.update { it.copy(isScanning = scanning) }
+                if (scanning) {
+                    addConnectionLog("Đang quét PC trong mạng Wi-Fi.")
+                }
             }
         }
 
@@ -125,6 +147,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+
+        viewModelScope.launch {
+            ClipboardService.connectionEvents.collect { event ->
+                addConnectionLog(event)
+                if (event.contains("đồng bộ", ignoreCase = true)) {
+                    _uiState.update { it.copy(lastSyncText = "Vừa xong") }
+                }
+            }
+        }
     }
 
     fun connectToServer(host: String, port: Int) {
@@ -146,6 +177,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 connectionMessage = "Đang kết nối tới $host:$port"
             )
         }
+        addConnectionLog("Bắt đầu kết nối tới $host:$port")
     }
 
     fun disconnectFromServer() {
@@ -162,6 +194,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 connectionMessage = "Đã ngắt kết nối. Bấm quét lại hoặc nhập IP để kết nối."
             )
         }
+        addConnectionLog("Đã ngắt kết nối theo yêu cầu.")
     }
 
     fun updateManualIp(ip: String) {
@@ -182,6 +215,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 connectionMessage = "Đang quét PC cùng mạng Wi-Fi"
             )
         }
+        addConnectionLog("Quét lại PC cùng mạng.")
     }
 
     fun connectManual() {
@@ -325,27 +359,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 inserted to result.mergedCount
             }
-                .onSuccess { (inserted, mergedCount) ->
-                    if (rememberLogin) {
-                        cloudPrefs.edit().putBoolean(CLOUD_SYNC_ENABLED, true).apply()
-                    }
-                    _uiState.update {
-                        it.copy(
-                            cloudSyncing = false,
-                            cloudSignedIn = true,
-                            cloudMessage = "Tự đồng bộ Google Drive: $mergedCount mục, tải về $inserted mục mới"
-                        )
-                    }
+            .onSuccess { (inserted, mergedCount) ->
+                if (rememberLogin) {
+                    cloudPrefs.edit().putBoolean(CLOUD_SYNC_ENABLED, true).apply()
                 }
-                .onFailure { error ->
-                    _uiState.update {
-                        it.copy(
-                            cloudSyncing = false,
-                            cloudMessage = "Đồng bộ Google lỗi: ${error.message ?: "không rõ"}"
-                        )
-                    }
+                val syncTime = formatClock()
+                _uiState.update {
+                    it.copy(
+                        cloudSyncing = false,
+                        cloudSignedIn = true,
+                        cloudMessage = "Tự đồng bộ Google Drive: $mergedCount mục, tải về $inserted mục mới",
+                        lastSyncText = syncTime
+                    )
                 }
+                addConnectionLog("Google Drive sync lúc $syncTime: $mergedCount mục, tải về $inserted mục mới.")
+            }
+            .onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        cloudSyncing = false,
+                        cloudMessage = "Đồng bộ Google lỗi: ${error.message ?: "không rõ"}"
+                    )
+                }
+                addConnectionLog("Google Drive sync lỗi: ${error.message ?: "không rõ"}")
+            }
         }
+    }
+
+    private fun addConnectionLog(message: String) {
+        _uiState.update { state ->
+            val next = listOf(ConnectionLogEntry(formatClock(), message)) + state.connectionLogs
+            state.copy(connectionLogs = next.take(MAX_CONNECTION_LOGS))
+        }
+    }
+
+    private fun formatClock(): String {
+        return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
     }
 
     override fun onCleared() {
@@ -359,6 +408,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val FALLBACK_RELEASE_URL =
             "https://github.com/sieuxuan/fast-paste/releases/latest"
         private const val MAX_HISTORY_ITEMS = 500
+        private const val MAX_CONNECTION_LOGS = 12
         private const val CLOUD_SYNC_ENABLED = "cloud_sync_enabled"
     }
 }

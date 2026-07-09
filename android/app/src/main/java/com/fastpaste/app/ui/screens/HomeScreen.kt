@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -105,19 +106,33 @@ fun HomeScreen(
 ) {
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
-    val visibleHistory = remember(state.clipboardHistory, searchQuery) {
+    var historyFilter by rememberSaveable { mutableStateOf(HISTORY_FILTER_ALL) }
+    val folders = remember(state.clipboardHistory) {
+        state.clipboardHistory
+            .map { it.folder.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sortedWith(String.CASE_INSENSITIVE_ORDER)
+    }
+    val visibleHistory = remember(state.clipboardHistory, searchQuery, historyFilter) {
         val query = searchQuery.trim()
         val filtered = if (query.isEmpty()) {
             state.clipboardHistory
         } else {
             state.clipboardHistory.filter { entry ->
-                entry.content.contains(query, ignoreCase = true)
+                entry.content.contains(query, ignoreCase = true) ||
+                    entry.folder.contains(query, ignoreCase = true)
             }
         }
-        filtered.sortedWith(
-            compareByDescending<ClipboardEntry> { it.pinned }
-                .thenByDescending { it.timestamp }
-        )
+        filtered.filter { entry ->
+            when {
+                historyFilter == HISTORY_FILTER_PINNED -> entry.pinned
+                historyFilter == HISTORY_FILTER_UNTAGGED -> entry.folder.isBlank()
+                historyFilter.startsWith(HISTORY_FILTER_FOLDER_PREFIX) ->
+                    entry.folder == historyFilter.removePrefix(HISTORY_FILTER_FOLDER_PREFIX)
+                else -> true
+            }
+        }
     }
 
     Scaffold(
@@ -202,6 +217,15 @@ fun HomeScreen(
             }
 
             item {
+                HistoryFilters(
+                    history = state.clipboardHistory,
+                    folders = folders,
+                    selected = historyFilter,
+                    onSelect = { historyFilter = it }
+                )
+            }
+
+            item {
                 StatusStrip(state = state, onOpenMenu = { menuOpen = true })
             }
 
@@ -253,15 +277,12 @@ private fun SettingsSheet(
         modifier = Modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text(
-            "Trình đơn",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
+        SettingsHeader(state = state)
 
+        SettingSectionTitle("Kết nối PC", "Tự tìm PC trong LAN hoặc nhập IP thủ công.")
         ConnectionPanel(
             state = state,
             onConnectServer = onConnectServer,
@@ -272,18 +293,110 @@ private fun SettingsSheet(
             onRefreshDiscovery = onRefreshDiscovery
         )
 
+        SettingSectionTitle("Đồng bộ đám mây", "Lưu lịch sử riêng trong Google Drive app data.")
         CloudSyncPanel(
             state = state,
             onGoogleSync = onGoogleSync
         )
 
+        SettingSectionTitle("Cập nhật", "Kiểm tra bản Android mới trên GitHub.")
         UpdatePanel(
             state = state,
             onCheckUpdate = onCheckUpdate,
             onOpenUpdate = onOpenUpdate
         )
 
+        SettingSectionTitle("Nhật ký gần đây", "Theo dõi discover, reconnect và lần sync mới nhất.")
+        ConnectionLogPanel(state = state)
+
         Spacer(Modifier.height(20.dp))
+    }
+}
+
+@Composable
+private fun SettingsHeader(state: UiState) {
+    val connection = connectionUi(state.connectionState)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("FP", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Black)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("FastPaste Control", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(
+                        state.connectionMessage,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f)
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SummaryPill(
+                    label = connection.title,
+                    value = state.connectedServer ?: "LAN",
+                    color = connection.color,
+                    modifier = Modifier.weight(1f)
+                )
+                SummaryPill(
+                    label = "Lịch sử",
+                    value = "${state.clipboardHistory.size} mục",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                SummaryPill(
+                    label = "Sync",
+                    value = state.lastSyncText,
+                    color = if (state.cloudSignedIn) GreenConnected else OrangeConnecting,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryPill(
+    label: String,
+    value: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = color, fontWeight = FontWeight.Bold)
+            Text(value, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f))
+        }
+    }
+}
+
+@Composable
+private fun SettingSectionTitle(title: String, subtitle: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
+        )
     }
 }
 
@@ -319,6 +432,11 @@ private fun CloudSyncPanel(
                         state.cloudMessage,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                    )
+                    Text(
+                        "Lần sync: ${state.lastSyncText}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f)
                     )
                 }
             }
@@ -371,6 +489,38 @@ private fun UpdatePanel(
             if (state.updateAvailable) {
                 Button(onClick = onOpenUpdate, modifier = Modifier.fillMaxWidth()) {
                     Text("Tải bản mới từ GitHub")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionLogPanel(state: UiState) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            state.connectionLogs.forEach { entry ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        entry.time,
+                        modifier = Modifier.width(58.dp),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        entry.message,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+                    )
                 }
             }
         }
@@ -624,6 +774,78 @@ private fun HistorySearch(
 }
 
 @Composable
+private fun HistoryFilters(
+    history: List<ClipboardEntry>,
+    folders: List<String>,
+    selected: String,
+    onSelect: (String) -> Unit
+) {
+    val filters = remember(history, folders) {
+        val pinnedCount = history.count { it.pinned }
+        val untaggedCount = history.count { it.folder.isBlank() }
+        listOf(
+            HistoryFilterOption(HISTORY_FILTER_ALL, "Tất cả", history.size),
+            HistoryFilterOption(HISTORY_FILTER_PINNED, "Ghim", pinnedCount),
+            HistoryFilterOption(HISTORY_FILTER_UNTAGGED, "Chưa nhãn", untaggedCount)
+        ) + folders.map { folder ->
+            HistoryFilterOption("$HISTORY_FILTER_FOLDER_PREFIX$folder", folder, history.count { it.folder == folder })
+        }
+    }
+
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(filters, key = { it.key }) { filter ->
+            FilterChip(
+                option = filter,
+                selected = selected == filter.key,
+                onClick = { onSelect(filter.key) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun FilterChip(
+    option: HistoryFilterOption,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+    Surface(
+        modifier = Modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(50),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+        }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                option.label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontSize = 12.sp,
+                color = color,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                option.count.toString(),
+                fontSize = 11.sp,
+                color = color.copy(alpha = 0.68f),
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
 private fun StatusStrip(
     state: UiState,
     onOpenMenu: () -> Unit
@@ -870,6 +1092,12 @@ private fun SourceBadge(text: String, color: Color) {
     }
 }
 
+private data class HistoryFilterOption(
+    val key: String,
+    val label: String,
+    val count: Int
+)
+
 private data class ConnectionUi(
     val title: String,
     val color: Color,
@@ -900,6 +1128,11 @@ private fun connectionUi(state: ConnectionState): ConnectionUi {
         )
     }
 }
+
+private const val HISTORY_FILTER_ALL = "all"
+private const val HISTORY_FILTER_PINNED = "pinned"
+private const val HISTORY_FILTER_UNTAGGED = "untagged"
+private const val HISTORY_FILTER_FOLDER_PREFIX = "folder:"
 
 private fun historyGroups(entries: List<ClipboardEntry>): Map<String, List<ClipboardEntry>> {
     val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())

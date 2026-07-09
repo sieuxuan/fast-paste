@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.3 - 2026-07-09
+
+- Added a desktop Always on top setting, enabled by default for hotkey opens.
+- Added Android history filters for all, pinned, untagged, and folder/tag views.
+- Added Android connection logs for discovery, reconnect attempts, and sync activity.
+- Refined the Android settings sheet with clearer status sections and last-sync context.
+
 ## 2.2.2 - 2026-07-06
 
 - Cập nhật cấu hình và bật đồng bộ Google Drive.

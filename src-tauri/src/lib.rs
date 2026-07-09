@@ -37,12 +37,17 @@ fn default_quick_slot_hotkey() -> String {
     "Alt".to_string()
 }
 
+fn default_always_on_top() -> bool {
+    true
+}
+
 fn default_settings() -> AppSettings {
     AppSettings {
         hotkey: default_hotkey(),
         edit_hotkey: default_edit_hotkey(),
         pinned_hotkey: default_pinned_hotkey(),
         quick_slot_hotkey: default_quick_slot_hotkey(),
+        always_on_top: default_always_on_top(),
         auto_start: false,
     }
 }
@@ -196,6 +201,8 @@ struct AppSettings {
     pinned_hotkey: String,
     #[serde(default = "default_quick_slot_hotkey")]
     quick_slot_hotkey: String,
+    #[serde(default = "default_always_on_top")]
+    always_on_top: bool,
     #[serde(default)]
     auto_start: bool,
 }
@@ -429,6 +436,19 @@ fn save_autostart(
     drop(data);
     broadcast_state(&app);
     Ok(())
+}
+
+#[tauri::command]
+fn save_always_on_top(always_on_top: bool, state: State<'_, AppState>, app: AppHandle) {
+    let mut data = state.0.lock().unwrap();
+    data.settings.always_on_top = always_on_top;
+    save_state(&data);
+    drop(data);
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_always_on_top(always_on_top);
+    }
+    broadcast_state(&app);
 }
 
 #[tauri::command]
@@ -763,6 +783,12 @@ fn toggle_window(app: &AppHandle) {
 
 fn show_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        let always_on_top = app
+            .try_state::<AppState>()
+            .map(|state| state.0.lock().unwrap().settings.always_on_top)
+            .unwrap_or_else(default_always_on_top);
+        let _ = window.set_always_on_top(always_on_top);
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -1772,6 +1798,7 @@ pub fn run() {
             save_pinned_hotkey,
             save_quick_slot_hotkey,
             save_autostart,
+            save_always_on_top,
             copy_text,
             update_history_item,
             toggle_history_pin,
