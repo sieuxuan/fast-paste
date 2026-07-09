@@ -2554,7 +2554,7 @@
 
         const manifest = await response.json();
         const latestVersion = manifest?.desktop?.version || manifest?.version;
-        const updateUrl = manifest?.desktop?.downloadUrl || manifest?.releaseUrl || state.updateUrl;
+        const updateUrl = manifest?.desktop?.installerUrl || manifest?.desktop?.downloadUrl || manifest?.releaseUrl || state.updateUrl;
 
         if (latestVersion && compareVersions(latestVersion, APP_VERSION) > 0) {
           state.updateUrl = updateUrl;

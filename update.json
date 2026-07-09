@@ -4,7 +4,8 @@
   "notes": "Adds configurable always-on-top behavior, Android history filters, connection logs, and a friendlier Android settings sheet.",
   "desktop": {
     "version": "2.2.3",
-    "downloadUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.3/FastPaste-Portable.exe",
+    "downloadUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.3/FastPaste_2.2.3_x64-setup.exe",
+    "portableUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.3/FastPaste-Portable.exe",
     "installerUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.3/FastPaste_2.2.3_x64-setup.exe"
   },
   "android": {
