@@ -1122,7 +1122,7 @@ dependencies = [
 
 [[package]]
 name = "fast-paste"
-version = "2.2.3"
+version = "2.2.4"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1146,6 +1146,7 @@ dependencies = [
  "tokio-tungstenite",
  "url",
  "urlencoding",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

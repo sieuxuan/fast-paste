@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.4 - 2026-07-09
+
+- Fixed quick paste hotkeys by moving the default slot combo to Ctrl+Alt/Command+Alt and sending paste after the clipboard update.
+- Added Windows source app/window metadata for clipboard items, with sync, search, and filter support on desktop and Android.
+- Redesigned Android settings as a separate screen and reduced count-heavy UI labels to avoid scroll/layout issues.
+
 ## 2.2.3 - 2026-07-09
 
 - Added a desktop Always on top setting, enabled by default for hotkey opens.

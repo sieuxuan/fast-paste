@@ -34,7 +34,7 @@ fn default_pinned_hotkey() -> String {
 }
 
 fn default_quick_slot_hotkey() -> String {
-    "Alt".to_string()
+    "CommandOrControl+Alt".to_string()
 }
 
 fn default_always_on_top() -> bool {
@@ -69,6 +69,10 @@ fn normalize_settings(settings: &mut AppSettings) -> bool {
     changed |= normalize_hotkey_setting(&mut settings.pinned_hotkey, default_pinned_hotkey());
 
     if validate_quick_slot_prefix(&settings.quick_slot_hotkey).is_err() {
+        settings.quick_slot_hotkey = default_quick_slot_hotkey();
+        changed = true;
+    }
+    if normalize_hotkey_text(&settings.quick_slot_hotkey) == "alt" {
         settings.quick_slot_hotkey = default_quick_slot_hotkey();
         changed = true;
     }
@@ -120,7 +124,7 @@ fn is_quick_slot_hotkey(hotkey: &str, prefix: &str) -> bool {
 fn validate_quick_slot_prefix(prefix: &str) -> Result<String, String> {
     let prefix = prefix.trim().trim_end_matches('+').trim().to_string();
     if prefix.is_empty() {
-        return Err("Phím dán nhanh không được để trống. Ví dụ: Alt hoặc Ctrl+Alt.".to_string());
+        return Err("Phím dán nhanh không được để trống. Ví dụ: CommandOrControl+Alt.".to_string());
     }
 
     let has_slot_number = prefix.split('+').any(|part| {
@@ -132,12 +136,12 @@ fn validate_quick_slot_prefix(prefix: &str) -> Result<String, String> {
                 .is_some_and(|ch| ('1'..='9').contains(&ch))
     });
     if has_slot_number {
-        return Err("Chỉ nhập phần phím trước số. Ví dụ: Alt hoặc Ctrl+Alt.".to_string());
+        return Err("Chỉ nhập phần phím trước số. Ví dụ: CommandOrControl+Alt.".to_string());
     }
 
     quick_slot_hotkey(&prefix, 1)
         .parse::<Shortcut>()
-        .map_err(|_| "Phím dán nhanh không hợp lệ. Ví dụ: Alt hoặc Ctrl+Alt.".to_string())?;
+        .map_err(|_| "Phím dán nhanh không hợp lệ. Ví dụ: CommandOrControl+Alt.".to_string())?;
 
     Ok(prefix)
 }
@@ -213,6 +217,10 @@ struct HistoryItem {
     text: String,
     timestamp: String,
     source: String,
+    #[serde(default, rename = "sourceApp", alias = "source_app")]
+    source_app: String,
+    #[serde(default, rename = "sourceTitle", alias = "source_title")]
+    source_title: String,
     #[serde(default)]
     pinned: bool,
     #[serde(default)]
@@ -226,6 +234,10 @@ struct SyncEntry {
     text: String,
     timestamp: i64,
     source: String,
+    #[serde(default, rename = "sourceApp", alias = "source_app")]
+    source_app: String,
+    #[serde(default, rename = "sourceTitle", alias = "source_title")]
+    source_title: String,
     #[serde(default)]
     pinned: bool,
     #[serde(default)]
@@ -829,26 +841,28 @@ fn open_pinned_clipboard_list(app: &AppHandle) {
 fn copy_pinned_slot(app: &AppHandle, slot: usize) {
     let result = app.try_state::<AppState>().and_then(|state| {
         let mut data = state.0.lock().ok()?;
-        let text = data
+        let index = data
             .history
             .iter()
-            .find(|item| item.pinned && item.quick_slot == Some(slot as u8))
-            .map(|item| item.text.clone());
-        let changed = text
-            .as_deref()
-            .map(|text| {
-                let changed = promote_or_insert_history(&mut data, text, "PC");
-                if changed {
-                    save_state(&data);
-                }
-                changed
-            })
-            .unwrap_or(false);
-        text.map(|text| (text, changed))
+            .position(|item| item.pinned && item.quick_slot == Some(slot as u8))?;
+        let text = data.history[index].text.clone();
+        let changed = if index == 0 {
+            false
+        } else {
+            let mut item = data.history.remove(index);
+            item.timestamp = chrono::Utc::now().to_rfc3339();
+            data.history.insert(0, item);
+            true
+        };
+        if changed {
+            save_state(&data);
+        }
+        Some((text, changed))
     });
 
     if let Some((text, history_changed)) = result {
         let _ = app.clipboard().write_text(text.clone());
+        paste_clipboard_after_hotkey();
         if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
             let _ = tx.send(text);
         }
@@ -886,6 +900,26 @@ fn register_quick_paste_slots(app: &AppHandle, prefix: &str) -> Result<(), Strin
 
     Ok(())
 }
+
+#[cfg(windows)]
+fn paste_clipboard_after_hotkey() {
+    std::thread::spawn(|| {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+            keybd_event, KEYEVENTF_KEYUP, VK_CONTROL,
+        };
+
+        std::thread::sleep(Duration::from_millis(120));
+        unsafe {
+            keybd_event(VK_CONTROL as u8, 0, 0, 0);
+            keybd_event(b'V', 0, 0, 0);
+            keybd_event(b'V', 0, KEYEVENTF_KEYUP, 0);
+            keybd_event(VK_CONTROL as u8, 0, KEYEVENTF_KEYUP, 0);
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn paste_clipboard_after_hotkey() {}
 
 fn should_start_hidden() -> bool {
     std::env::args().any(|arg| arg == AUTOSTART_HIDDEN_ARG)
@@ -1004,10 +1038,25 @@ fn get_local_ips() -> Vec<String> {
 }
 
 fn make_history_item(text: &str, source: &str) -> HistoryItem {
-    make_history_item_at(text, source, chrono::Utc::now().timestamp_millis())
+    let metadata = if source == "PC" {
+        capture_source_metadata()
+    } else {
+        SourceMetadata::default()
+    };
+    make_history_item_at(
+        text,
+        source,
+        chrono::Utc::now().timestamp_millis(),
+        metadata,
+    )
 }
 
-fn make_history_item_at(text: &str, source: &str, timestamp_millis: i64) -> HistoryItem {
+fn make_history_item_at(
+    text: &str,
+    source: &str,
+    timestamp_millis: i64,
+    metadata: SourceMetadata,
+) -> HistoryItem {
     let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp_millis)
         .unwrap_or_else(chrono::Utc::now)
         .to_rfc3339();
@@ -1016,6 +1065,8 @@ fn make_history_item_at(text: &str, source: &str, timestamp_millis: i64) -> Hist
         text: text.to_string(),
         timestamp,
         source: source.to_string(),
+        source_app: metadata.app,
+        source_title: metadata.title,
         pinned: false,
         quick_slot: None,
         folder: String::new(),
@@ -1023,14 +1074,30 @@ fn make_history_item_at(text: &str, source: &str, timestamp_millis: i64) -> Hist
 }
 
 fn make_history_item_from_sync(entry: &SyncEntry) -> HistoryItem {
-    let mut item = make_history_item_at(&entry.text, &entry.source, entry.timestamp);
+    let mut item = make_history_item_at(
+        &entry.text,
+        &entry.source,
+        entry.timestamp,
+        SourceMetadata {
+            app: entry.source_app.clone(),
+            title: entry.source_title.clone(),
+        },
+    );
     item.pinned = entry.pinned;
     item.folder = clean_folder_name(&entry.folder);
     item
 }
 
 fn make_history_item_from_cloud(entry: &cloud::CloudEntry) -> HistoryItem {
-    let mut item = make_history_item_at(&entry.text, &entry.source, entry.timestamp);
+    let mut item = make_history_item_at(
+        &entry.text,
+        &entry.source,
+        entry.timestamp,
+        SourceMetadata {
+            app: entry.source_app.clone(),
+            title: entry.source_title.clone(),
+        },
+    );
     item.pinned = entry.pinned;
     item.folder = clean_folder_name(&entry.folder);
     item
@@ -1038,35 +1105,65 @@ fn make_history_item_from_cloud(entry: &cloud::CloudEntry) -> HistoryItem {
 
 fn promote_or_insert_history(data: &mut AppStateData, text: &str, source: &str) -> bool {
     let now = chrono::Utc::now();
+    let metadata = if source == "PC" {
+        capture_source_metadata()
+    } else {
+        SourceMetadata::default()
+    };
     if let Some(index) = data.history.iter().position(|item| item.text == text) {
-        if index == 0 && data.history[index].source == source {
+        if index == 0
+            && data.history[index].source == source
+            && data.history[index].source_app == metadata.app
+            && data.history[index].source_title == metadata.title
+        {
             return false;
         }
         let mut item = data.history.remove(index);
         item.timestamp = now.to_rfc3339();
         item.source = source.to_string();
+        if source == "PC" {
+            item.source_app = metadata.app;
+            item.source_title = metadata.title;
+        }
         data.history.insert(0, item);
     } else {
         data.history.insert(
             0,
-            make_history_item_at(text, source, now.timestamp_millis()),
+            make_history_item_at(text, source, now.timestamp_millis(), metadata),
         );
     }
     trim_history(&mut data.history);
     true
 }
 
-fn apply_sync_metadata(item: &mut HistoryItem, pinned: bool, folder: &str) -> bool {
+fn apply_sync_metadata(
+    item: &mut HistoryItem,
+    pinned: bool,
+    folder: &str,
+    source_app: &str,
+    source_title: &str,
+) -> bool {
     let before_pinned = item.pinned;
     let before_folder = item.folder.clone();
+    let before_source_app = item.source_app.clone();
+    let before_source_title = item.source_title.clone();
 
     item.pinned = item.pinned || pinned;
     let folder = clean_folder_name(folder);
     if !folder.is_empty() {
         item.folder = folder;
     }
+    if !source_app.trim().is_empty() {
+        item.source_app = source_app.trim().chars().take(96).collect();
+    }
+    if !source_title.trim().is_empty() {
+        item.source_title = source_title.trim().chars().take(160).collect();
+    }
 
-    item.pinned != before_pinned || item.folder != before_folder
+    item.pinned != before_pinned
+        || item.folder != before_folder
+        || item.source_app != before_source_app
+        || item.source_title != before_source_title
 }
 
 fn clean_folder_name(folder: &str) -> String {
@@ -1078,6 +1175,78 @@ fn clean_folder_name(folder: &str) -> String {
         .chars()
         .take(48)
         .collect()
+}
+
+#[derive(Default)]
+struct SourceMetadata {
+    app: String,
+    title: String,
+}
+
+#[cfg(windows)]
+fn capture_source_metadata() -> SourceMetadata {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+    };
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return SourceMetadata::default();
+        }
+
+        let title_len = GetWindowTextLengthW(hwnd);
+        let title = if title_len > 0 {
+            let mut buffer = vec![0u16; title_len as usize + 1];
+            let copied = GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32);
+            String::from_utf16_lossy(&buffer[..copied as usize])
+                .trim()
+                .chars()
+                .take(160)
+                .collect()
+        } else {
+            String::new()
+        };
+
+        let mut process_id = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut process_id);
+        let app = if process_id == 0 {
+            String::new()
+        } else {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id);
+            if handle.is_null() {
+                String::new()
+            } else {
+                let mut buffer = vec![0u16; 32768];
+                let mut size = buffer.len() as u32;
+                let app =
+                    if QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size) != 0 {
+                        std::path::Path::new(&String::from_utf16_lossy(&buffer[..size as usize]))
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                            .chars()
+                            .take(96)
+                            .collect()
+                    } else {
+                        String::new()
+                    };
+                CloseHandle(handle);
+                app
+            }
+        };
+
+        SourceMetadata { app, title }
+    }
+}
+
+#[cfg(not(windows))]
+fn capture_source_metadata() -> SourceMetadata {
+    SourceMetadata::default()
 }
 
 fn trim_history(history: &mut Vec<HistoryItem>) {
@@ -1176,6 +1345,8 @@ fn make_history_sync_payload(
             text: item.text.clone(),
             timestamp: timestamp_to_millis(&item.timestamp),
             source: item.source.clone(),
+            source_app: item.source_app.clone(),
+            source_title: item.source_title.clone(),
             pinned: item.pinned,
             folder: item.folder.clone(),
         })
@@ -1198,6 +1369,8 @@ fn history_to_cloud_entries(history: &[HistoryItem]) -> Vec<cloud::CloudEntry> {
             text: item.text.clone(),
             timestamp: timestamp_to_millis(&item.timestamp),
             source: item.source.clone(),
+            source_app: item.source_app.clone(),
+            source_title: item.source_title.clone(),
             pinned: item.pinned,
             folder: item.folder.clone(),
         })
@@ -1220,7 +1393,13 @@ fn merge_cloud_entries_into_history(
         }
 
         if let Some(existing) = data.history.iter_mut().find(|item| item.text == entry.text) {
-            changed |= apply_sync_metadata(existing, entry.pinned, &entry.folder);
+            changed |= apply_sync_metadata(
+                existing,
+                entry.pinned,
+                &entry.folder,
+                &entry.source_app,
+                &entry.source_title,
+            );
             if entry.timestamp > timestamp_to_millis(&existing.timestamp) {
                 existing.timestamp =
                     chrono::DateTime::<chrono::Utc>::from_timestamp_millis(entry.timestamp)
@@ -1669,6 +1848,8 @@ pub fn run() {
                                                             existing,
                                                             entry.pinned,
                                                             &entry.folder,
+                                                            &entry.source_app,
+                                                            &entry.source_title,
                                                         );
                                                         if entry.timestamp
                                                             > timestamp_to_millis(

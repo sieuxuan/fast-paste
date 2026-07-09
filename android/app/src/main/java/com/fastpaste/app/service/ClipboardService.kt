@@ -164,6 +164,8 @@ class ClipboardService : Service() {
                         .put("text", entry.content)
                         .put("timestamp", entry.timestamp)
                         .put("source", if (entry.source == "REMOTE") "PC" else "ANDROID")
+                        .put("sourceApp", entry.sourceApp)
+                        .put("sourceTitle", entry.sourceTitle)
                         .put("pinned", entry.pinned)
                         .put("folder", entry.folder)
                     )
@@ -189,6 +191,8 @@ class ClipboardService : Service() {
                         .put("text", currentText)
                         .put("timestamp", timestamp)
                         .put("source", "ANDROID")
+                        .put("sourceApp", "")
+                        .put("sourceTitle", "")
                         .put("pinned", false)
                         .put("folder", "")
                     )
@@ -222,6 +226,8 @@ class ClipboardService : Service() {
             if (deletedHistoryStore.isDeleted(text, timestamp)) continue
 
             val source = if (item.optString("source") == "ANDROID") "LOCAL" else "REMOTE"
+            val sourceApp = item.optString("sourceApp", item.optString("source_app", ""))
+            val sourceTitle = item.optString("sourceTitle", item.optString("source_title", ""))
             val pinned = item.optBoolean("pinned", false)
             val folder = ClipboardRepository.cleanFolderName(item.optString("folder", ""))
             if (timestamp > newestIncomingTimestamp) {
@@ -232,6 +238,8 @@ class ClipboardService : Service() {
             val mergeResult = historyRepository.mergeEntry(
                 content = text,
                 source = source,
+                sourceApp = sourceApp,
+                sourceTitle = sourceTitle,
                 timestamp = timestamp,
                 pinned = pinned,
                 folder = folder

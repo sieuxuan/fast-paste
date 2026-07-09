@@ -1,6 +1,6 @@
 [package]
 name = "fast-paste"
-version = "2.2.3"
+version = "2.2.4"
 description = "Ultra-lightweight clipboard sync — Tauri + Rust"
 authors = ["Xuan"]
 edition = "2021"
@@ -41,3 +41,6 @@ urlencoding = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }

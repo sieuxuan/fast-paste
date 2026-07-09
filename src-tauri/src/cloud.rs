@@ -50,6 +50,10 @@ pub struct CloudEntry {
     pub text: String,
     pub timestamp: i64,
     pub source: String,
+    #[serde(default, rename = "sourceApp", alias = "source_app")]
+    pub source_app: String,
+    #[serde(default, rename = "sourceTitle", alias = "source_title")]
+    pub source_title: String,
     #[serde(default)]
     pub pinned: bool,
     #[serde(default)]

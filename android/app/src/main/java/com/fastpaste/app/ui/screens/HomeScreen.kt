@@ -6,6 +6,7 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
@@ -33,9 +35,9 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Wifi
@@ -48,7 +50,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -104,12 +105,19 @@ fun HomeScreen(
     onOpenUpdate: () -> Unit = {},
     onGoogleSync: () -> Unit = {}
 ) {
-    var menuOpen by rememberSaveable { mutableStateOf(false) }
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var historyFilter by rememberSaveable { mutableStateOf(HISTORY_FILTER_ALL) }
     val folders = remember(state.clipboardHistory) {
         state.clipboardHistory
             .map { it.folder.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sortedWith(String.CASE_INSENSITIVE_ORDER)
+    }
+    val sourceApps = remember(state.clipboardHistory) {
+        state.clipboardHistory
+            .map { it.sourceApp.trim() }
             .filter { it.isNotBlank() }
             .distinct()
             .sortedWith(String.CASE_INSENSITIVE_ORDER)
@@ -121,7 +129,9 @@ fun HomeScreen(
         } else {
             state.clipboardHistory.filter { entry ->
                 entry.content.contains(query, ignoreCase = true) ||
-                    entry.folder.contains(query, ignoreCase = true)
+                    entry.folder.contains(query, ignoreCase = true) ||
+                    entry.sourceApp.contains(query, ignoreCase = true) ||
+                    entry.sourceTitle.contains(query, ignoreCase = true)
             }
         }
         filtered.filter { entry ->
@@ -130,6 +140,8 @@ fun HomeScreen(
                 historyFilter == HISTORY_FILTER_UNTAGGED -> entry.folder.isBlank()
                 historyFilter.startsWith(HISTORY_FILTER_FOLDER_PREFIX) ->
                     entry.folder == historyFilter.removePrefix(HISTORY_FILTER_FOLDER_PREFIX)
+                historyFilter.startsWith(HISTORY_FILTER_APP_PREFIX) ->
+                    entry.sourceApp == historyFilter.removePrefix(HISTORY_FILTER_APP_PREFIX)
                 else -> true
             }
         }
@@ -138,6 +150,13 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                navigationIcon = {
+                    if (settingsOpen) {
+                        IconButton(onClick = { settingsOpen = false }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại")
+                        }
+                    }
+                },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
@@ -156,9 +175,9 @@ fun HomeScreen(
                         }
                         Spacer(Modifier.width(10.dp))
                         Column {
-                            Text("FastPaste", fontWeight = FontWeight.Bold)
+                            Text(if (settingsOpen) "Cài đặt" else "FastPaste", fontWeight = FontWeight.Bold)
                             Text(
-                                text = "${state.clipboardHistory.size} mục clipboard",
+                                text = if (settingsOpen) "Kết nối, đồng bộ và cập nhật" else state.connectionMessage,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.bodySmall,
@@ -168,8 +187,10 @@ fun HomeScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Trình đơn")
+                    if (!settingsOpen) {
+                        IconButton(onClick = { settingsOpen = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Cài đặt")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -178,21 +199,23 @@ fun HomeScreen(
             )
         }
     ) { padding ->
-        if (menuOpen) {
-            ModalBottomSheet(onDismissRequest = { menuOpen = false }) {
-                SettingsSheet(
-                    state = state,
-                    onConnectServer = onConnectServer,
-                    onDisconnect = onDisconnect,
-                    onManualIpChange = onManualIpChange,
-                    onManualPortChange = onManualPortChange,
-                    onConnectManual = onConnectManual,
-                    onRefreshDiscovery = onRefreshDiscovery,
-                    onCheckUpdate = onCheckUpdate,
-                    onOpenUpdate = onOpenUpdate,
-                    onGoogleSync = onGoogleSync
-                )
-            }
+        if (settingsOpen) {
+            SettingsSheet(
+                state = state,
+                onConnectServer = onConnectServer,
+                onDisconnect = onDisconnect,
+                onManualIpChange = onManualIpChange,
+                onManualPortChange = onManualPortChange,
+                onConnectManual = onConnectManual,
+                onRefreshDiscovery = onRefreshDiscovery,
+                onCheckUpdate = onCheckUpdate,
+                onOpenUpdate = onOpenUpdate,
+                onGoogleSync = onGoogleSync,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            )
+            return@Scaffold
         }
 
         LazyColumn(
@@ -220,13 +243,14 @@ fun HomeScreen(
                 HistoryFilters(
                     history = state.clipboardHistory,
                     folders = folders,
+                    sourceApps = sourceApps,
                     selected = historyFilter,
                     onSelect = { historyFilter = it }
                 )
             }
 
             item {
-                StatusStrip(state = state, onOpenMenu = { menuOpen = true })
+                StatusStrip(state = state, onOpenMenu = { settingsOpen = true })
             }
 
             if (state.clipboardHistory.isEmpty()) {
@@ -271,10 +295,11 @@ private fun SettingsSheet(
     onRefreshDiscovery: () -> Unit,
     onCheckUpdate: () -> Unit,
     onOpenUpdate: () -> Unit,
-    onGoogleSync: () -> Unit
+    onGoogleSync: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 10.dp),
@@ -354,7 +379,7 @@ private fun SettingsHeader(state: UiState) {
                 )
                 SummaryPill(
                     label = "Lịch sử",
-                    value = "${state.clipboardHistory.size} mục",
+                    value = "Gần đây",
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f)
                 )
@@ -740,7 +765,7 @@ private fun HistoryHeader(count: Int, onClearHistory: () -> Unit) {
         Column {
             Text("Lịch sử clipboard", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(
-                "$count mục gần đây",
+                "Các mục mới nhất",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
@@ -777,18 +802,19 @@ private fun HistorySearch(
 private fun HistoryFilters(
     history: List<ClipboardEntry>,
     folders: List<String>,
+    sourceApps: List<String>,
     selected: String,
     onSelect: (String) -> Unit
 ) {
-    val filters = remember(history, folders) {
-        val pinnedCount = history.count { it.pinned }
-        val untaggedCount = history.count { it.folder.isBlank() }
+    val filters = remember(history, folders, sourceApps) {
         listOf(
-            HistoryFilterOption(HISTORY_FILTER_ALL, "Tất cả", history.size),
-            HistoryFilterOption(HISTORY_FILTER_PINNED, "Ghim", pinnedCount),
-            HistoryFilterOption(HISTORY_FILTER_UNTAGGED, "Chưa nhãn", untaggedCount)
+            HistoryFilterOption(HISTORY_FILTER_ALL, "Tất cả"),
+            HistoryFilterOption(HISTORY_FILTER_PINNED, "Ghim"),
+            HistoryFilterOption(HISTORY_FILTER_UNTAGGED, "Chưa nhãn")
         ) + folders.map { folder ->
-            HistoryFilterOption("$HISTORY_FILTER_FOLDER_PREFIX$folder", folder, history.count { it.folder == folder })
+            HistoryFilterOption("$HISTORY_FILTER_FOLDER_PREFIX$folder", folder)
+        } + sourceApps.map { app ->
+            HistoryFilterOption("$HISTORY_FILTER_APP_PREFIX$app", app)
         }
     }
 
@@ -833,13 +859,6 @@ private fun FilterChip(
                 fontSize = 12.sp,
                 color = color,
                 fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                option.count.toString(),
-                fontSize = 11.sp,
-                color = color.copy(alpha = 0.68f),
-                fontWeight = FontWeight.SemiBold
             )
         }
     }
@@ -1005,7 +1024,11 @@ private fun HistoryItem(
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     SourceBadge(
                         text = if (isLocal) "Điện thoại" else "PC",
                         color = if (isLocal) LocalBadge else RemoteBadge
@@ -1043,10 +1066,26 @@ private fun HistoryItem(
                             }
                         }
                     }
+                    if (entry.sourceApp.isNotBlank()) {
+                        SourceBadge(
+                            text = entry.sourceApp,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
                     Text(
                         timeFormat.format(Date(entry.timestamp)),
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                    )
+                }
+                if (entry.sourceTitle.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        entry.sourceTitle,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )
                 }
             }
@@ -1094,8 +1133,7 @@ private fun SourceBadge(text: String, color: Color) {
 
 private data class HistoryFilterOption(
     val key: String,
-    val label: String,
-    val count: Int
+    val label: String
 )
 
 private data class ConnectionUi(
@@ -1133,6 +1171,7 @@ private const val HISTORY_FILTER_ALL = "all"
 private const val HISTORY_FILTER_PINNED = "pinned"
 private const val HISTORY_FILTER_UNTAGGED = "untagged"
 private const val HISTORY_FILTER_FOLDER_PREFIX = "folder:"
+private const val HISTORY_FILTER_APP_PREFIX = "app:"
 
 private fun historyGroups(entries: List<ClipboardEntry>): Map<String, List<ClipboardEntry>> {
     val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())

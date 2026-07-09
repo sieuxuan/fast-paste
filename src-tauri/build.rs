@@ -22,4 +22,3 @@ fn extract_json_value(json: &str, key: &str) -> Option<String> {
     let val = &json[actual_start..actual_start + quote_end];
     Some(val.to_string())
 }
-

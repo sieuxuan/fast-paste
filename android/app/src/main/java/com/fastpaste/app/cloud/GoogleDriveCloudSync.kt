@@ -50,6 +50,8 @@ class GoogleDriveCloudSync(
                     ClipboardEntry(
                         content = it.text,
                         source = if (it.source == SOURCE_ANDROID) "LOCAL" else "REMOTE",
+                        sourceApp = it.sourceApp,
+                        sourceTitle = it.sourceTitle,
                         timestamp = it.timestamp,
                         pinned = it.pinned,
                         folder = it.folder
@@ -101,6 +103,8 @@ class GoogleDriveCloudSync(
                             .put("text", entry.text)
                             .put("timestamp", entry.timestamp)
                             .put("source", entry.source)
+                            .put("sourceApp", entry.sourceApp)
+                            .put("sourceTitle", entry.sourceTitle)
                             .put("pinned", entry.pinned)
                             .put("folder", entry.folder)
                     )
@@ -206,6 +210,8 @@ class GoogleDriveCloudSync(
                 text = text,
                 timestamp = item.optLong("timestamp", System.currentTimeMillis()),
                 source = item.optString("source", SOURCE_PC),
+                sourceApp = item.optString("sourceApp", item.optString("source_app", "")),
+                sourceTitle = item.optString("sourceTitle", item.optString("source_title", "")),
                 pinned = item.optBoolean("pinned", false),
                 folder = cleanFolderName(item.optString("folder", ""))
             )
@@ -231,6 +237,8 @@ class GoogleDriveCloudSync(
             text = content,
             timestamp = timestamp,
             source = if (source == "LOCAL") SOURCE_ANDROID else SOURCE_PC,
+            sourceApp = sourceApp,
+            sourceTitle = sourceTitle,
             pinned = pinned,
             folder = folder
         )
@@ -254,6 +262,8 @@ class GoogleDriveCloudSync(
         val text: String,
         val timestamp: Long,
         val source: String,
+        val sourceApp: String = "",
+        val sourceTitle: String = "",
         val pinned: Boolean = false,
         val folder: String = ""
     )

@@ -35,10 +35,12 @@ interface ClipboardDao {
     @Query("UPDATE clipboard_history SET pinned = :pinned WHERE id = :id")
     suspend fun updatePinned(id: Long, pinned: Boolean)
 
-    @Query("UPDATE clipboard_history SET source = :source, timestamp = :timestamp, pinned = :pinned, folder = :folder WHERE id = :id")
+    @Query("UPDATE clipboard_history SET source = :source, sourceApp = :sourceApp, sourceTitle = :sourceTitle, timestamp = :timestamp, pinned = :pinned, folder = :folder WHERE id = :id")
     suspend fun updateEntryById(
         id: Long,
         source: String,
+        sourceApp: String,
+        sourceTitle: String,
         timestamp: Long,
         pinned: Boolean,
         folder: String

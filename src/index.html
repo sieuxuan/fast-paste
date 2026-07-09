@@ -1302,7 +1302,7 @@
 
             <div class="setting-card card card-pad">
               <div class="auto-row">
-                <div class="label"><strong id="version-title">FastPaste 2.2.3</strong><span id="update-status">Chưa kiểm tra cập nhật.</span></div>
+                <div class="label"><strong id="version-title">FastPaste 2.2.4</strong><span id="update-status">Chưa kiểm tra cập nhật.</span></div>
                 <div class="button-row">
                   <button id="check-update" class="btn" type="button"><svg><use href="#i-rotate"></use></svg><span data-i18n="checkUpdate">Kiểm tra</span></button>
                   <button id="open-update" class="btn primary" type="button" hidden><svg><use href="#i-download"></use></svg><span data-i18n="downloadUpdate">Tải bản mới</span></button>
@@ -1386,7 +1386,7 @@
     }
     const invoke = tauriApi.core.invoke;
     const listen = tauriApi.event.listen;
-    const APP_VERSION = '2.2.3';
+    const APP_VERSION = '2.2.4';
     const UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/sieuxuan/fast-paste/master/update.json';
     const HISTORY_PAGE_SIZE = 160;
     const HISTORY_LOAD_AHEAD_PX = 420;
@@ -1454,7 +1454,7 @@
         noClipboardDesc: 'Sao chép nội dung trên PC hoặc kết nối Android để bắt đầu.',
         noResultTitle: 'Không tìm thấy kết quả',
         noResultDesc: 'Thử từ khóa khác hoặc đổi bộ lọc nhãn.',
-        moreHistory: count => `Còn ${count} mục, cuộn để tải thêm`,
+        moreHistory: () => 'Còn mục khác, cuộn để tải thêm',
         pinBadge: 'Ghim',
         copyTitle: 'Sao chép',
         unpinTitle: 'Bỏ ghim',
@@ -1584,7 +1584,7 @@
         noClipboardDesc: 'Copy something on PC or connect Android to begin.',
         noResultTitle: 'No results found',
         noResultDesc: 'Try another keyword or tag filter.',
-        moreHistory: count => `${count} more item${count === 1 ? '' : 's'}, scroll to load`,
+        moreHistory: () => 'More items, scroll to load',
         pinBadge: 'Pinned',
         copyTitle: 'Copy',
         unpinTitle: 'Unpin',
@@ -1826,13 +1826,13 @@
     }
 
     function formatQuickSlotRange(raw) {
-      const prefix = hotkeyInputText(raw || 'Alt');
+      const prefix = hotkeyInputText(raw || 'CommandOrControl+Alt');
       return `${prefix || 'Alt'}+1-9`;
     }
 
     function quickSlotFromEvent(event) {
       if (!/^[1-9]$/.test(event.key)) return null;
-      const prefix = String(state.data?.settings?.quick_slot_hotkey || 'Alt')
+      const prefix = String(state.data?.settings?.quick_slot_hotkey || 'CommandOrControl+Alt')
         .split('+')
         .map(part => normalizeKeyToken(part).toLowerCase())
         .filter(Boolean);
@@ -1960,7 +1960,8 @@
       const clients = state.data?.clients || [];
       const cloud = state.data?.cloud || {};
 
-      els.historyCount.textContent = String(history.length);
+      els.historyCount.hidden = true;
+      els.historyCount.textContent = '';
       els.deviceOnlineCount.textContent = String(clients.length);
 
       els.sidebarCloudDot.className = 'dot';
@@ -1986,6 +1987,15 @@
       return Array.from(folders).sort((a, b) => a.localeCompare(b, currentLocale()));
     }
 
+    function getSourceApps() {
+      const apps = new Set();
+      (state.data?.history || []).forEach(item => {
+        const app = String(item.sourceApp || item.source_app || '').trim();
+        if (app) apps.add(app);
+      });
+      return Array.from(apps).sort((a, b) => a.localeCompare(b, currentLocale()));
+    }
+
     function textFingerprint(value) {
       const text = String(value || '');
       let hash = 0;
@@ -2000,6 +2010,8 @@
         item.id || '',
         item.timestamp || '',
         item.source || '',
+        item.sourceApp || item.source_app || '',
+        item.sourceTitle || item.source_title || '',
         item.pinned ? 1 : 0,
         item.quick_slot || '',
         cleanFolderName(item.folder),
@@ -2022,19 +2034,22 @@
 
     function renderFolderFilters() {
       const folderSignature = `${state.language}|${state.folderFilter}|${getFolders().join('\u0001')}`;
-      if (state.renderCache.folderFilterSignature === folderSignature) return;
-      state.renderCache.folderFilterSignature = folderSignature;
+      const sourceAppSignature = getSourceApps().join('\u0001');
+      const filterSignature = `${folderSignature}|${sourceAppSignature}`;
+      if (state.renderCache.folderFilterSignature === filterSignature) return;
+      state.renderCache.folderFilterSignature = filterSignature;
 
       const filters = [
         { key: 'all', label: t('allTags') },
         { key: 'pinned', label: t('pinned') },
         { key: 'none', label: t('untagged') },
-        ...getFolders().map(folder => ({ key: `folder:${folder}`, label: folder, folder }))
+        ...getFolders().map(folder => ({ key: `folder:${folder}`, label: folder, folder })),
+        ...getSourceApps().map(app => ({ key: `app:${app}`, label: app, app }))
       ];
 
       els.folderFilters.innerHTML = filters.map(filter => `
         <button class="chip ${state.folderFilter === filter.key ? 'active' : ''}" type="button" data-filter="${escapeHtml(filter.key)}">
-          ${filter.folder ? icon('i-tag') : ''}<span>${escapeHtml(filter.label)}</span>
+          ${filter.folder ? icon('i-tag') : filter.app ? icon('i-devices') : ''}<span>${escapeHtml(filter.label)}</span>
         </button>
       `).join('');
     }
@@ -2045,6 +2060,9 @@
       if (state.folderFilter === 'pinned') return Boolean(item.pinned);
       if (state.folderFilter === 'none') return !folder;
       if (state.folderFilter.startsWith('folder:')) return folder === state.folderFilter.slice(7);
+      if (state.folderFilter.startsWith('app:')) {
+        return String(item.sourceApp || item.source_app || '') === state.folderFilter.slice(4);
+      }
       return true;
     }
 
@@ -2062,13 +2080,24 @@
         : `<span class="badge b-pc">${icon('i-devices')}PC</span>`;
     }
 
+    function sourceMetaBadge(item) {
+      const sourceApp = String(item.sourceApp || item.source_app || '').trim();
+      if (!sourceApp) return '';
+      const sourceTitle = String(item.sourceTitle || item.source_title || '').trim();
+      const title = sourceTitle ? ` title="${escapeHtml(sourceTitle)}"` : '';
+      return `<span class="badge"${title}>${icon('i-devices')}${escapeHtml(sourceApp)}</span>`;
+    }
+
     function renderHistory({ force = false } = {}) {
       const allItems = state.data?.history || [];
       const query = state.query.trim().toLowerCase();
       const filtered = allItems.filter(item => {
         const text = String(item.text || '').toLowerCase();
         const folder = String(item.folder || '').toLowerCase();
-        return applyFolderFilter(item) && (!query || text.includes(query) || folder.includes(query));
+        const sourceApp = String(item.sourceApp || item.source_app || '').toLowerCase();
+        const sourceTitle = String(item.sourceTitle || item.source_title || '').toLowerCase();
+        return applyFolderFilter(item)
+          && (!query || text.includes(query) || folder.includes(query) || sourceApp.includes(query) || sourceTitle.includes(query));
       });
       const visibleItems = filtered.slice(0, state.historyVisibleLimit);
       const historySignature = [
@@ -2124,6 +2153,7 @@
                       ${item.pinned ? `<span class="badge b-pin">${icon('i-star')}${escapeHtml(t('pinBadge'))}</span>` : ''}
                       ${isUrl(text) ? `<span class="badge b-url">${icon('i-link')}URL</span>` : ''}
                       ${folder ? `<span class="badge">${icon('i-tag')}${escapeHtml(folder)}</span>` : ''}
+                      ${sourceMetaBadge(item)}
                       <span class="time">${escapeHtml(formatTime(item.timestamp))}</span>
                     </div>
                     <div class="htext">${escapeHtml(displayText)}</div>
@@ -2221,7 +2251,7 @@
       const mainHotkey = settings.hotkey || 'CommandOrControl+Alt+Z';
       const editHotkey = settings.edit_hotkey || 'CommandOrControl+Alt+E';
       const pinnedHotkey = settings.pinned_hotkey || 'CommandOrControl+Alt+P';
-      const quickSlotHotkey = settings.quick_slot_hotkey || 'Alt';
+      const quickSlotHotkey = settings.quick_slot_hotkey || 'CommandOrControl+Alt';
 
       els.versionTitle.textContent = `FastPaste ${APP_VERSION}`;
 

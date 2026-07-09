@@ -10,6 +10,8 @@ class ClipboardRepository(private val dao: ClipboardDao) {
     suspend fun mergeEntry(
         content: String,
         source: String,
+        sourceApp: String = "",
+        sourceTitle: String = "",
         timestamp: Long = System.currentTimeMillis(),
         pinned: Boolean = false,
         folder: String = "",
@@ -26,6 +28,8 @@ class ClipboardRepository(private val dao: ClipboardDao) {
                 ClipboardEntry(
                     content = content,
                     source = source,
+                    sourceApp = sourceApp.cleanSourceMeta(96),
+                    sourceTitle = sourceTitle.cleanSourceMeta(160),
                     timestamp = timestamp,
                     pinned = pinned,
                     folder = cleanFolder
@@ -37,10 +41,22 @@ class ClipboardRepository(private val dao: ClipboardDao) {
         val shouldUseIncomingTime = promoteExisting || timestamp > existing.timestamp
         val nextTimestamp = if (shouldUseIncomingTime) timestamp else existing.timestamp
         val nextSource = if (shouldUseIncomingTime) source else existing.source
+        val nextSourceApp = if (shouldUseIncomingTime && sourceApp.isNotBlank()) {
+            sourceApp.cleanSourceMeta(96)
+        } else {
+            existing.sourceApp
+        }
+        val nextSourceTitle = if (shouldUseIncomingTime && sourceTitle.isNotBlank()) {
+            sourceTitle.cleanSourceMeta(160)
+        } else {
+            existing.sourceTitle
+        }
         val nextPinned = existing.pinned || pinned
         val nextFolder = existing.folder.ifBlank { cleanFolder }
         val changed = existing.timestamp != nextTimestamp ||
             existing.source != nextSource ||
+            existing.sourceApp != nextSourceApp ||
+            existing.sourceTitle != nextSourceTitle ||
             existing.pinned != nextPinned ||
             existing.folder != nextFolder
 
@@ -48,6 +64,8 @@ class ClipboardRepository(private val dao: ClipboardDao) {
             dao.updateEntryById(
                 id = existing.id,
                 source = nextSource,
+                sourceApp = nextSourceApp,
+                sourceTitle = nextSourceTitle,
                 timestamp = nextTimestamp,
                 pinned = nextPinned,
                 folder = nextFolder
@@ -61,6 +79,10 @@ class ClipboardRepository(private val dao: ClipboardDao) {
     companion object {
         fun cleanFolderName(folder: String): String {
             return folder.trim().replace(Regex("\\s+"), " ").take(MAX_FOLDER_LENGTH)
+        }
+
+        private fun String.cleanSourceMeta(maxLength: Int): String {
+            return trim().replace(Regex("\\s+"), " ").take(maxLength)
         }
 
         private const val MAX_FOLDER_LENGTH = 48
