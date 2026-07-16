@@ -1122,7 +1122,7 @@ dependencies = [
 
 [[package]]
 name = "fast-paste"
-version = "2.2.4"
+version = "2.2.5"
 dependencies = [
  "base64 0.22.1",
  "chrono",

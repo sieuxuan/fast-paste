@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.2.5 - 2026-07-16
+
+- Fixed the desktop WebSocket server dying silently on transient accept errors; a stalled client can no longer block new connections (per-connection handshake with timeout).
+- Fixed UDP discovery going stale after PC sleep/wake or network changes — broadcast sockets now rebind automatically and the displayed IP list stays current.
+- Android reconnects indefinitely with capped backoff, keeps discovering in the background via the sync service, and automatically follows the PC to a new IP address.
+- Fixed an Android 12+ crash when auto-connect fired from the background, and a discovery restart race that could silently stop UDP scanning.
+- Battery: discovery scans in 15s windows with growing pauses (5s→60s); reconnect log spam reduced.
+- Refactored the desktop backend into network/history/hotkeys/state modules.
+
 ## 2.2.4 - 2026-07-09
 
 - Fixed quick paste hotkeys by moving the default slot combo to Ctrl+Alt/Command+Alt and sending paste after the clipboard update.

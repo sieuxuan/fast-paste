@@ -1,6 +1,6 @@
 {
   "name": "fast-paste",
-  "version": "2.2.4",
+  "version": "2.2.5",
   "description": "Ultra-lightweight clipboard sync between Windows PC and Android via WebSocket — powered by Tauri (Rust)",
   "private": true,
   "type": "module",
