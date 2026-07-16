@@ -67,12 +67,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         application.getSharedPreferences("fastpaste_cloud", Context.MODE_PRIVATE)
     private var autoConnectEnabled = true
     private val loggedServers = mutableSetOf<String>()
+    private var lastConnectRequest: Pair<String, Long>? = null
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
     init {
-        discovery.startDiscovery()
+        discovery.startDiscovery(cycle = true)
         checkForUpdates()
         if (isCloudSyncEnabled()) {
             _uiState.update {
@@ -93,24 +94,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // Auto-connect to first discovered server if currently disconnected
-                if (
-                    autoConnectEnabled &&
-                    servers.isNotEmpty() &&
-                    _uiState.value.connectionState == ConnectionState.DISCONNECTED
-                ) {
+                // Auto-connect to the first discovered server. Gate on the
+                // service's real state (not the optimistic uiState), skip
+                // targets the service is already managing (its own retry loop
+                // owns those — reconnecting here would reset its backoff), and
+                // throttle repeat requests for the same target.
+                if (autoConnectEnabled && servers.isNotEmpty()) {
                     val server = servers.first()
-                    connectToServer(server.host, server.port)
+                    val target = "${server.host}:${server.port}"
+                    val now = System.currentTimeMillis()
+                    val recentlyRequested = lastConnectRequest?.let { (requested, at) ->
+                        requested == target && now - at < CONNECT_REQUEST_THROTTLE_MS
+                    } == true
+                    if (
+                        ClipboardService.connectionState.value == ConnectionState.DISCONNECTED &&
+                        ClipboardService.activeTarget.value != target &&
+                        !recentlyRequested
+                    ) {
+                        connectToServer(server.host, server.port)
+                    }
                 }
             }
         }
 
         viewModelScope.launch {
+            // Rescan cycles live inside ServiceDiscovery; this collector only
+            // mirrors the flag for the UI.
             discovery.isScanning.collect { scanning ->
                 _uiState.update { it.copy(isScanning = scanning) }
-                if (scanning) {
-                    addConnectionLog("Đang quét PC trong mạng Wi-Fi.")
-                }
             }
         }
 
@@ -143,7 +154,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (state == ConnectionState.CONNECTED) {
                     discovery.stopDiscovery()
                 } else if (state == ConnectionState.DISCONNECTED && autoConnectEnabled) {
-                    discovery.startDiscovery()
+                    discovery.startDiscovery(cycle = true)
                 }
             }
         }
@@ -160,15 +171,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun connectToServer(host: String, port: Int) {
         autoConnectEnabled = true
+        lastConnectRequest = "$host:$port" to System.currentTimeMillis()
         val intent = Intent(getApplication(), ClipboardService::class.java).apply {
             action = ClipboardService.ACTION_START
             putExtra(ClipboardService.EXTRA_HOST, host)
             putExtra(ClipboardService.EXTRA_PORT, port)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getApplication<FastPasteApp>().startForegroundService(intent)
-        } else {
-            getApplication<FastPasteApp>().startService(intent)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getApplication<FastPasteApp>().startForegroundService(intent)
+            } else {
+                getApplication<FastPasteApp>().startService(intent)
+            }
+        } catch (e: Exception) {
+            // Android 12+ blocks foreground-service starts while the app is in
+            // the background — don't crash, just report and stay disconnected.
+            addConnectionLog("Không thể khởi động dịch vụ nền: ${e.message ?: "bị hệ thống chặn"}")
+            _uiState.update {
+                it.copy(
+                    connectionState = ConnectionState.DISCONNECTED,
+                    connectionMessage = "Mở lại ứng dụng để kết nối."
+                )
+            }
+            return
         }
         _uiState.update {
             it.copy(
@@ -208,7 +233,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun restartDiscovery() {
         autoConnectEnabled = true
         discovery.stopDiscovery()
-        discovery.startDiscovery()
+        discovery.startDiscovery(cycle = true)
         _uiState.update {
             it.copy(
                 discoveredServers = emptyList(),
@@ -409,6 +434,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "https://github.com/sieuxuan/fast-paste/releases/latest"
         private const val MAX_HISTORY_ITEMS = 500
         private const val MAX_CONNECTION_LOGS = 12
+        private const val CONNECT_REQUEST_THROTTLE_MS = 10_000L
         private const val CLOUD_SYNC_ENABLED = "cloud_sync_enabled"
     }
 }

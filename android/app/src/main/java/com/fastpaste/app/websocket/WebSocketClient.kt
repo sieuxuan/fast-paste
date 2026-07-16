@@ -86,6 +86,14 @@ class WebSocketClient(private val scope: CoroutineScope) {
         webSocket?.send(text)
     }
 
+    /** Skip the current backoff delay and retry immediately (no-op unless idle). */
+    fun retryNow() {
+        if (!shouldReconnect || _state.value != ConnectionState.DISCONNECTED) return
+        reconnectJob?.cancel()
+        _state.value = ConnectionState.CONNECTING
+        doConnect()
+    }
+
     fun disconnect() {
         shouldReconnect = false
         reconnectJob?.cancel()
@@ -101,20 +109,18 @@ class WebSocketClient(private val scope: CoroutineScope) {
         if (!shouldReconnect || serverUrl != failedUrl) return
         reconnectJob?.cancel()
 
-        if (reconnectAttempt >= 5) {
-            Log.d(TAG, "Max reconnect attempts reached. Giving up.")
-            _events.tryEmit("Đã thử kết nối lại 5 lần, tạm dừng.")
-            shouldReconnect = false
-            serverUrl = null
-            webSocket = null
-            return
-        }
-
+        // Never give up on our own: the PC may just be asleep or restarting.
+        // Back off exponentially and keep retrying until disconnect() is called
+        // or a newer connection replaces this one.
         reconnectJob = scope.launch {
-            val delayMs = minOf(350L * (1 shl minOf(reconnectAttempt, 5)), 8_000L)
+            val delayMs = minOf(350L * (1 shl minOf(reconnectAttempt, 6)), MAX_RECONNECT_DELAY_MS)
             val nextAttempt = reconnectAttempt + 1
             Log.d(TAG, "Reconnecting in ${delayMs}ms (attempt $nextAttempt)")
-            _events.tryEmit("Thử kết nối lại lần $nextAttempt sau ${delayMs / 1000.0}s")
+            // Log the first few attempts, then sample — endless retries must
+            // not flood the short connection log.
+            if (nextAttempt <= 3 || nextAttempt % 10 == 0) {
+                _events.tryEmit("Thử kết nối lại lần $nextAttempt sau ${delayMs / 1000.0}s")
+            }
             delay(delayMs)
             if (!shouldReconnect || serverUrl != failedUrl) return@launch
             reconnectAttempt = nextAttempt
@@ -125,5 +131,6 @@ class WebSocketClient(private val scope: CoroutineScope) {
 
     companion object {
         private const val TAG = "WebSocketClient"
+        private const val MAX_RECONNECT_DELAY_MS = 15_000L
     }
 }

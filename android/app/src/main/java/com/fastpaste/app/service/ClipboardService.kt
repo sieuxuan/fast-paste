@@ -15,6 +15,7 @@ import com.fastpaste.app.FastPasteApp
 import com.fastpaste.app.MainActivity
 import com.fastpaste.app.R
 import com.fastpaste.app.data.ClipboardRepository
+import com.fastpaste.app.discovery.ServiceDiscovery
 import com.fastpaste.app.sync.DeletedHistoryStore
 import com.fastpaste.app.websocket.ConnectionState
 import com.fastpaste.app.websocket.WebSocketClient
@@ -30,6 +31,14 @@ class ClipboardService : Service() {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var clipboardManager: ClipboardManager
     private var wsClient: WebSocketClient? = null
+    // Per-client scope: cancelling it tears down the client's collectors AND
+    // its pending reconnect jobs in one shot.
+    private var clientScope: CoroutineScope? = null
+    private var currentHost: String? = null
+    private var currentPort = 0
+    // Service-owned discovery keeps running in the background (the ViewModel's
+    // discovery dies with the UI), so a PC coming back on a new IP is found.
+    private var backgroundDiscovery: ServiceDiscovery? = null
     private var lastSyncedText = ""
     private val dao by lazy { (application as FastPasteApp).database.clipboardDao() }
     private val historyRepository by lazy { ClipboardRepository(dao) }
@@ -56,9 +65,20 @@ class ClipboardService : Service() {
             ACTION_START -> {
                 val host = intent.getStringExtra(EXTRA_HOST) ?: return START_NOT_STICKY
                 val port = intent.getIntExtra(EXTRA_PORT, 4567)
-                startSync(host, port)
+                if (host == currentHost && port == currentPort && wsClient != null) {
+                    // Already managing this target — don't tear down the client
+                    // (that would reset its backoff); just retry right away.
+                    startForeground(
+                        NOTIFICATION_ID,
+                        buildNotification("Đang đồng bộ với $host:$port")
+                    )
+                    wsClient?.retryNow()
+                } else {
+                    startSync(host, port)
+                }
             }
             ACTION_STOP -> {
+                activeTarget.value = null
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -79,43 +99,89 @@ class ClipboardService : Service() {
         val notification = buildNotification("Đang kết nối tới $host:$port...")
         startForeground(NOTIFICATION_ID, notification)
 
+        currentHost = host
+        currentPort = port
+        activeTarget.value = "$host:$port"
+
+        // Cancel the previous client's collectors BEFORE disconnecting, so its
+        // final DISCONNECTED can't be published as a spurious blip mid-handoff.
+        clientScope?.cancel()
         wsClient?.disconnect()
-        wsClient = WebSocketClient(scope).also { client ->
+
+        val cs = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        clientScope = cs
+        wsClient = WebSocketClient(cs).also { client ->
             client.connect(host, port)
 
             // Receive clipboard from desktop
-            scope.launch {
+            cs.launch {
                 client.messages.collect { message ->
                     handleIncomingMessage(message)
                 }
             }
 
-            scope.launch {
+            cs.launch {
                 client.events.collect { event ->
                     connectionEvents.tryEmit(event)
                 }
             }
 
             // Update notification with connection status
-            scope.launch {
+            cs.launch {
                 client.state.collectLatest { state ->
                     connectionState.value = state
                     val status = when (state) {
                         ConnectionState.CONNECTED -> {
+                            stopBackgroundDiscovery()
                             sendHistorySync(client)
                             Log.d(TAG, "Connected; exchanging clipboard history")
                             connectionEvents.tryEmit("Đã kết nối tới $host:$port")
                             "Đã kết nối tới $host"
                         }
                         ConnectionState.CONNECTING -> "Đang kết nối tới $host..."
-                        ConnectionState.DISCONNECTED -> "Đã ngắt kết nối, đang thử lại..."
+                        ConnectionState.DISCONNECTED -> {
+                            ensureBackgroundDiscovery()
+                            "Đã ngắt kết nối, đang thử lại..."
+                        }
                     }
                     updateNotification(status)
                 }
             }
         }
 
+        // Re-register instead of stacking a duplicate listener on reconnect
+        clipboardManager.removePrimaryClipChangedListener(clipListener)
         clipboardManager.addPrimaryClipChangedListener(clipListener)
+    }
+
+    /**
+     * While disconnected, scan for the PC ourselves: the client's retry loop
+     * only knows the last IP, and the ViewModel's discovery dies with the UI.
+     * Only a target CHANGE triggers a reconnect here — rediscovering the same
+     * address is left to the client's own backoff, avoiding connect storms.
+     */
+    private fun ensureBackgroundDiscovery() {
+        val discovery = backgroundDiscovery ?: ServiceDiscovery(applicationContext).also { d ->
+            backgroundDiscovery = d
+            scope.launch {
+                d.servers.collect { servers ->
+                    val server = servers.firstOrNull() ?: return@collect
+                    val target = "${server.host}:${server.port}"
+                    if (target != activeTarget.value &&
+                        connectionState.value != ConnectionState.CONNECTED
+                    ) {
+                        Log.d(TAG, "PC reappeared at new address $target — switching")
+                        connectionEvents.tryEmit("Tìm thấy PC ở địa chỉ mới $target, đang chuyển kết nối")
+                        startSync(server.host, server.port)
+                    }
+                }
+            }
+        }
+        discovery.startDiscovery(cycle = true)
+    }
+
+    private fun stopBackgroundDiscovery() {
+        backgroundDiscovery?.stopDiscovery()
     }
 
     private suspend fun handleIncomingMessage(message: String) {
@@ -302,6 +368,10 @@ class ClipboardService : Service() {
 
     override fun onDestroy() {
         clipboardManager.removePrimaryClipChangedListener(clipListener)
+        stopBackgroundDiscovery()
+        activeTarget.value = null
+        connectionState.value = ConnectionState.DISCONNECTED
+        clientScope?.cancel()
         wsClient?.disconnect()
         scope.cancel()
         super.onDestroy()
@@ -321,5 +391,8 @@ class ClipboardService : Service() {
         const val EXTRA_TEXT = "text"
         val connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
         val connectionEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
+
+        /** "host:port" the service is currently managing, null when idle. */
+        val activeTarget = MutableStateFlow<String?>(null)
     }
 }

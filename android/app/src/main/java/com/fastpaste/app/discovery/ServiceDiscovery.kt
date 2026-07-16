@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import java.net.SocketTimeoutException
 
 data class DiscoveredServer(
     val name: String,
@@ -26,91 +27,129 @@ class ServiceDiscovery(context: Context) {
     val isScanning: StateFlow<Boolean> = _isScanning
 
     private var listenJob: Job? = null
-    private var multicastLock: WifiManager.MulticastLock? = null
+    @Volatile
+    private var activeSocket: DatagramSocket? = null
+    // Bumped on every start/stop; a scan window whose generation is stale must
+    // not touch shared state (activeSocket, _isScanning) owned by a newer scan.
+    @Volatile
+    private var scanGeneration = 0
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    fun startDiscovery() {
+    /**
+     * With [cycle] the discovery keeps scanning in windows of [SCAN_TIMEOUT_MS]
+     * separated by growing pauses (5s doubling up to 60s — cheap on battery
+     * when the PC stays offline) until [stopDiscovery] is called.
+     */
+    fun startDiscovery(cycle: Boolean = false) {
         if (listenJob?.isActive == true) return
         _servers.value = emptyList()
-        _isScanning.value = true
-
-        // Acquire multicast lock — required for receiving broadcast on many Android devices
-        try {
-            val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            multicastLock = wifiManager.createMulticastLock("FastPaste_UDP").apply {
-                setReferenceCounted(true)
-                acquire()
-            }
-            Log.d(TAG, "MulticastLock acquired")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to acquire MulticastLock: ${e.message}")
-        }
+        val generation = ++scanGeneration
 
         listenJob = scope.launch {
-            var socket: DatagramSocket? = null
-            try {
-                socket = DatagramSocket(null)
-                socket.reuseAddress = true
-                socket.bind(InetSocketAddress(4568))
-                socket.broadcast = true
-
-                val buffer = ByteArray(1024)
-                Log.d(TAG, "Listening for UDP broadcasts on port 4568")
-
-                // Auto-stop discovery after a short scan window to save battery
-                withTimeoutOrNull(SCAN_TIMEOUT_MS) {
-                    while (isActive) {
-                        val packet = DatagramPacket(buffer, buffer.size)
-                        socket.receive(packet)
-
-                        val message = String(packet.data, 0, packet.length)
-                        if (message.startsWith("FASTPASTE:")) {
-                            val parts = message.split(":")
-                            if (parts.size >= 3) {
-                                val hostname = parts[1]
-                                val port = parts[2].toIntOrNull() ?: 4567
-                                val host = packet.address.hostAddress ?: continue
-                                
-                                val server = DiscoveredServer(hostname, host, port)
-                                Log.d(TAG, "Discovered via UDP: $server")
-
-                                updateServer(server)
-                            }
-                        }
-                    }
+            var pauseMs = INITIAL_RESCAN_PAUSE_MS
+            while (isActive && generation == scanGeneration) {
+                val found = scanWindow(generation)
+                if (!cycle || !isActive || generation != scanGeneration) break
+                pauseMs = if (found) {
+                    INITIAL_RESCAN_PAUSE_MS
+                } else {
+                    minOf(pauseMs * 2, MAX_RESCAN_PAUSE_MS)
                 }
-                Log.d(TAG, "UDP discovery timeout reached")
-            } catch (e: Exception) {
-                if (e !is CancellationException) {
-                    Log.e(TAG, "UDP listen error: ${e.message}")
-                }
-            } finally {
-                socket?.close()
-                _isScanning.value = false
-                Log.d(TAG, "UDP socket closed")
-                
-                // Release lock when timeout is reached
-                try {
-                    multicastLock?.release()
-                    multicastLock = null
-                } catch (e: Exception) { /* ignored */ }
+                delay(pauseMs)
             }
         }
     }
 
     fun stopDiscovery() {
+        scanGeneration++
+        // Closing the socket unblocks a pending receive() immediately
+        try {
+            activeSocket?.close()
+        } catch (_: Exception) { /* ignored */ }
+        activeSocket = null
         listenJob?.cancel()
         listenJob = null
         _isScanning.value = false
+    }
 
-        // Release multicast lock
-        try {
-            multicastLock?.release()
-            multicastLock = null
-            Log.d(TAG, "MulticastLock released")
-        } catch (e: Exception) {
-            Log.e(TAG, "Release lock error: ${e.message}")
+    private fun acquireMulticastLock(): WifiManager.MulticastLock? = try {
+        val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        wifiManager.createMulticastLock("FastPaste_UDP").apply {
+            setReferenceCounted(true)
+            acquire()
         }
+    } catch (e: Exception) {
+        Log.e(TAG, "Failed to acquire MulticastLock: ${e.message}")
+        null
+    }
+
+    /** Runs one scan window. Returns true if at least one server was seen. */
+    private fun CoroutineScope.scanWindow(generation: Int): Boolean {
+        var found = false
+        // Lock and socket are per-window locals, so a stale window can only
+        // ever release its own lock and close its own socket.
+        val multicastLock = acquireMulticastLock()
+        var socket: DatagramSocket? = null
+        try {
+            socket = DatagramSocket(null).apply {
+                reuseAddress = true
+                // receive() blocks and coroutine cancellation can't interrupt
+                // it — poll with a short timeout so the scan window deadline
+                // takes effect even without traffic.
+                soTimeout = RECEIVE_POLL_MS
+                bind(InetSocketAddress(4568))
+                broadcast = true
+            }
+            activeSocket = socket
+            _isScanning.value = true
+
+            val buffer = ByteArray(1024)
+            Log.d(TAG, "Listening for UDP broadcasts on port 4568")
+            val deadline = System.currentTimeMillis() + SCAN_TIMEOUT_MS
+
+            while (isActive && generation == scanGeneration &&
+                System.currentTimeMillis() < deadline
+            ) {
+                val packet = DatagramPacket(buffer, buffer.size)
+                try {
+                    socket.receive(packet)
+                } catch (e: SocketTimeoutException) {
+                    continue
+                }
+
+                val message = String(packet.data, 0, packet.length)
+                if (message.startsWith("FASTPASTE:")) {
+                    val parts = message.split(":")
+                    if (parts.size >= 3) {
+                        val hostname = parts[1]
+                        val port = parts[2].toIntOrNull() ?: 4567
+                        val host = packet.address.hostAddress ?: continue
+
+                        val server = DiscoveredServer(hostname, host, port)
+                        Log.d(TAG, "Discovered via UDP: $server")
+
+                        updateServer(server)
+                        found = true
+                    }
+                }
+            }
+            Log.d(TAG, "UDP discovery scan window ended")
+        } catch (e: Exception) {
+            if (e !is CancellationException) {
+                Log.e(TAG, "UDP listen error: ${e.message}")
+            }
+        } finally {
+            socket?.close()
+            // Only clear shared state if this window is still the current scan
+            if (generation == scanGeneration) {
+                activeSocket = null
+                _isScanning.value = false
+            }
+            try {
+                multicastLock?.release()
+            } catch (e: Exception) { /* ignored */ }
+        }
+        return found
     }
 
     private fun updateServer(server: DiscoveredServer) {
@@ -128,5 +167,8 @@ class ServiceDiscovery(context: Context) {
         private const val TAG = "ServiceDiscovery"
         private const val SCAN_TIMEOUT_MS = 15_000L
         private const val SERVER_TTL_MS = 30_000L
+        private const val RECEIVE_POLL_MS = 2_000
+        private const val INITIAL_RESCAN_PAUSE_MS = 5_000L
+        private const val MAX_RESCAN_PAUSE_MS = 60_000L
     }
 }
