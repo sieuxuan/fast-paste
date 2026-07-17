@@ -2,8 +2,12 @@ package com.fastpaste.app
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -19,17 +23,25 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import com.fastpaste.app.data.ClipboardPayload
+import com.fastpaste.app.service.ClipboardService
+import com.fastpaste.app.sync.AndroidClipboardCodec
 import com.fastpaste.app.ui.screens.HomeScreen
 import com.fastpaste.app.ui.theme.FastPasteTheme
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
     private var lastSilentCloudSyncAt = 0L
+    private var handlingShare = false
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -54,22 +66,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requestNotificationPermission()
 
-        // Handle text shared from other apps
-        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
-            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
-            if (!sharedText.isNullOrBlank()) {
-                val serviceIntent = Intent(this, com.fastpaste.app.service.ClipboardService::class.java).apply {
-                    action = com.fastpaste.app.service.ClipboardService.ACTION_SEND_TEXT
-                    putExtra(com.fastpaste.app.service.ClipboardService.EXTRA_TEXT, sharedText)
-                }
-                startService(serviceIntent)
-                Toast.makeText(this, "Đã gửi tới PC", Toast.LENGTH_SHORT).show()
-                finish() // Close UI immediately after sharing
-                return
-            }
-        }
+        if (handleSharedIntent(intent)) return
+        requestNotificationPermission()
 
         setContent {
             FastPasteTheme {
@@ -87,8 +86,12 @@ class MainActivity : ComponentActivity() {
                         onManualPortChange = viewModel::updateManualPort,
                         onConnectManual = viewModel::connectManual,
                         onDeleteItem = viewModel::deleteHistoryItem,
+                        onDeleteItems = viewModel::deleteHistoryItems,
                         onTogglePin = viewModel::toggleHistoryPin,
                         onClearHistory = viewModel::clearHistory,
+                        onUndoHistoryDelete = viewModel::undoHistoryDelete,
+                        onCopyItem = viewModel::copyHistoryItem,
+                        onEditItem = viewModel::updateHistoryItem,
                         onRefreshDiscovery = viewModel::restartDiscovery,
                         onCheckUpdate = viewModel::checkForUpdates,
                         onOpenUpdate = viewModel::openUpdatePage,
@@ -103,30 +106,86 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Track last synced text to avoid duplicate sends on every focus
-    private var lastFocusSyncedText: String? = null
+    private fun handleSharedIntent(sharedIntent: Intent?): Boolean {
+        val share = sharedIntent ?: return false
+        if (share.action !in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) {
+            return false
+        }
+        handlingShare = true
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val sharedText = share.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
+            val sharedHtml = share.getStringExtra(Intent.EXTRA_HTML_TEXT).orEmpty()
+            val payload = if (sharedText.isNotBlank() && share.clipData?.hasUris() != true) {
+                if (share.type == "text/html" || sharedHtml.isNotBlank()) {
+                    ClipboardPayload(
+                        kind = ClipboardPayload.KIND_HTML,
+                        text = sharedText,
+                        html = sharedHtml.ifBlank { sharedText },
+                        mimeType = "text/html"
+                    )
+                } else {
+                    ClipboardPayload.text(sharedText)
+                }
+            } else {
+                AndroidClipboardCodec.read(
+                    this@MainActivity,
+                    share.clipData ?: buildStreamClip(share)
+                )
+            }
+
+            val clip = payload?.let {
+                runCatching { AndroidClipboardCodec.write(this@MainActivity, it) }.getOrNull()
+            }
+            withContext(Dispatchers.Main) {
+                if (clip == null) {
+                    Toast.makeText(this@MainActivity, "Không đọc được nội dung chia sẻ", Toast.LENGTH_SHORT).show()
+                } else {
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(clip)
+                    startService(Intent(this@MainActivity, ClipboardService::class.java).apply {
+                        action = ClipboardService.ACTION_SYNC_CURRENT_CLIP
+                    })
+                    Toast.makeText(this@MainActivity, "Đã gửi tới PC", Toast.LENGTH_SHORT).show()
+                }
+                finish()
+            }
+        }
+        return true
+    }
+
+    private fun ClipData.hasUris(): Boolean {
+        for (index in 0 until itemCount) {
+            if (getItemAt(index).uri != null) return true
+        }
+        return false
+    }
+
+    @Suppress("DEPRECATION")
+    private fun buildStreamClip(sharedIntent: Intent): ClipData? {
+        val uris = if (sharedIntent.action == Intent.ACTION_SEND_MULTIPLE) {
+            sharedIntent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+        } else {
+            listOfNotNull(sharedIntent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))
+        }
+        if (uris.isEmpty()) return null
+        return ClipData.newUri(contentResolver, "Fast Paste", uris.first()).also { clip ->
+            uris.drop(1).forEach { clip.addItem(ClipData.Item(it)) }
+        }
+    }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
-            // Only sync clipboard when connected and text is genuinely new
+        if (hasFocus && !handlingShare) {
+            // Android may suppress clipboard callbacks while this app is in the
+            // background, so ask the foreground service to inspect every format
+            // once when the UI regains focus. Payload fingerprints prevent loops.
             val currentState = viewModel.uiState.value
             if (currentState.connectionState == com.fastpaste.app.websocket.ConnectionState.CONNECTED) {
-                try {
-                    val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    val clip = clipboard.primaryClip
-                    if (clip != null && clip.itemCount > 0) {
-                        val text = clip.getItemAt(0).text?.toString()
-                        if (!text.isNullOrBlank() && text != lastFocusSyncedText) {
-                            lastFocusSyncedText = text
-                            val intent = Intent(this, com.fastpaste.app.service.ClipboardService::class.java).apply {
-                                action = com.fastpaste.app.service.ClipboardService.ACTION_SEND_TEXT
-                                putExtra(com.fastpaste.app.service.ClipboardService.EXTRA_TEXT, text)
-                            }
-                            startService(intent)
-                        }
-                    }
-                } catch (_: Exception) { /* Clipboard access may fail on some devices */ }
+                val intent = Intent(this, com.fastpaste.app.service.ClipboardService::class.java).apply {
+                    action = com.fastpaste.app.service.ClipboardService.ACTION_SYNC_CURRENT_CLIP
+                }
+                startService(intent)
             }
 
             if (viewModel.isCloudSyncEnabled()) {

@@ -15,7 +15,8 @@ class ClipboardRepository(private val dao: ClipboardDao) {
         timestamp: Long = System.currentTimeMillis(),
         pinned: Boolean = false,
         folder: String = "",
-        promoteExisting: Boolean = false
+        promoteExisting: Boolean = false,
+        payload: ClipboardPayload? = null
     ): HistoryMergeResult {
         if (content.isEmpty()) {
             return HistoryMergeResult(inserted = false, changed = false)
@@ -32,7 +33,12 @@ class ClipboardRepository(private val dao: ClipboardDao) {
                     sourceTitle = sourceTitle.cleanSourceMeta(160),
                     timestamp = timestamp,
                     pinned = pinned,
-                    folder = cleanFolder
+                    folder = cleanFolder,
+                    payloadType = payload?.kind ?: ClipboardPayload.KIND_TEXT,
+                    mimeType = payload?.mimeType ?: "text/plain",
+                    htmlContent = payload?.html.orEmpty(),
+                    payloadData = payload?.data.orEmpty(),
+                    filesJson = payload?.filesJson().orEmpty().ifBlank { "[]" }
                 )
             )
             return HistoryMergeResult(inserted = true, changed = true)
@@ -53,12 +59,22 @@ class ClipboardRepository(private val dao: ClipboardDao) {
         }
         val nextPinned = existing.pinned || pinned
         val nextFolder = existing.folder.ifBlank { cleanFolder }
+        val nextPayload = if (shouldUseIncomingTime && payload != null) {
+            payload
+        } else {
+            ClipboardPayload.fromEntry(existing)
+        }
         val changed = existing.timestamp != nextTimestamp ||
             existing.source != nextSource ||
             existing.sourceApp != nextSourceApp ||
             existing.sourceTitle != nextSourceTitle ||
             existing.pinned != nextPinned ||
-            existing.folder != nextFolder
+            existing.folder != nextFolder ||
+            existing.payloadType != nextPayload.kind ||
+            existing.mimeType != nextPayload.mimeType ||
+            existing.htmlContent != nextPayload.html ||
+            existing.payloadData != nextPayload.data ||
+            existing.filesJson != nextPayload.filesJson()
 
         if (changed) {
             dao.updateEntryById(
@@ -68,7 +84,12 @@ class ClipboardRepository(private val dao: ClipboardDao) {
                 sourceTitle = nextSourceTitle,
                 timestamp = nextTimestamp,
                 pinned = nextPinned,
-                folder = nextFolder
+                folder = nextFolder,
+                payloadType = nextPayload.kind,
+                mimeType = nextPayload.mimeType,
+                htmlContent = nextPayload.html,
+                payloadData = nextPayload.data,
+                filesJson = nextPayload.filesJson()
             )
         }
         val removedDuplicates = dao.deleteDuplicatesByContent(content, existing.id)

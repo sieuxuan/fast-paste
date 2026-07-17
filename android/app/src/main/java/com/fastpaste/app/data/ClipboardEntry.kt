@@ -12,5 +12,10 @@ data class ClipboardEntry(
     val sourceTitle: String = "",
     val timestamp: Long = System.currentTimeMillis(),
     val pinned: Boolean = false,
-    val folder: String = ""
+    val folder: String = "",
+    val payloadType: String = "text",
+    val mimeType: String = "text/plain",
+    val htmlContent: String = "",
+    val payloadData: String = "",
+    val filesJson: String = "[]"
 )

@@ -9,6 +9,7 @@ use tokio::sync::broadcast;
 use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::clipboard::{self, ClipboardPayload};
 use crate::history::{self, SyncEntry};
 use crate::state::{broadcast_state, queue_cloud_sync, save_state, AppStateData};
 
@@ -26,6 +27,7 @@ struct WsProtocolMessage {
     #[serde(rename = "type")]
     kind: String,
     entries: Option<Vec<SyncEntry>>,
+    payload: Option<ClipboardPayload>,
 }
 
 pub(crate) fn get_local_ips() -> Vec<String> {
@@ -138,8 +140,10 @@ pub(crate) fn spawn_udp_broadcaster(app: &AppHandle, data: Arc<Mutex<AppStateDat
             // matches — force a rebind, but rate-limited so one adapter that
             // always rejects broadcasts can't cause rebind churn every tick.
             if send_failed
-                && last_forced_rebind
-                    .map_or(true, |at| at.elapsed() >= FORCED_REBIND_MIN_INTERVAL)
+                && match last_forced_rebind {
+                    Some(at) => at.elapsed() >= FORCED_REBIND_MIN_INTERVAL,
+                    None => true,
+                }
             {
                 sockets.clear();
                 last_forced_rebind = Some(Instant::now());
@@ -199,11 +203,8 @@ async fn handle_client(
     client_counts: Arc<Mutex<HashMap<String, usize>>>,
     mut rx: broadcast::Receiver<String>,
 ) {
-    let Ok(Ok(ws_stream)) = tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
-        tokio_tungstenite::accept_async(stream),
-    )
-    .await
+    let Ok(Ok(ws_stream)) =
+        tokio::time::timeout(HANDSHAKE_TIMEOUT, tokio_tungstenite::accept_async(stream)).await
     else {
         return;
     };
@@ -220,11 +221,10 @@ async fn handle_client(
     let (mut write, mut read) = futures_util::StreamExt::split(ws_stream);
 
     // Sender: exchange full history first, then forward future clipboard changes.
-    let app_sync = app.clone();
     let data_sync = data.clone();
     let sender_task = tauri::async_runtime::spawn(async move {
         use futures_util::SinkExt;
-        let current_clipboard = app_sync.clipboard().read_text().ok();
+        let current_clipboard = clipboard::read_clipboard();
         let payload = {
             let mut d = data_sync.lock().unwrap();
             history::make_history_sync_payload(&mut d, current_clipboard)
@@ -268,6 +268,26 @@ async fn handle_client(
             if protocol.app.as_deref() == Some("fastpaste") && protocol.kind == "history_sync" {
                 handle_history_sync(&app, &data, protocol.entries.unwrap_or_default());
                 continue;
+            }
+            if protocol.app.as_deref() == Some("fastpaste") && protocol.kind == "clipboard_payload"
+            {
+                if let Some(payload) = protocol.payload {
+                    let _ = clipboard::write_clipboard(&payload);
+                    let history_changed = {
+                        let mut d = data.lock().unwrap();
+                        let changed =
+                            history::promote_or_insert_payload(&mut d, &payload, "ANDROID");
+                        if changed {
+                            save_state(&d);
+                        }
+                        changed
+                    };
+                    if history_changed {
+                        broadcast_state(&app);
+                        queue_cloud_sync(&app);
+                    }
+                    continue;
+                }
             }
         }
 
@@ -315,7 +335,11 @@ fn handle_history_sync(app: &AppHandle, data: &Mutex<AppStateData>, entries: Vec
 
     if let Some(entry) = newest_incoming {
         if entry.timestamp > latest_local_timestamp {
-            let _ = app.clipboard().write_text(entry.text);
+            if let Some(payload) = entry.payload {
+                let _ = clipboard::write_clipboard(&payload);
+            } else {
+                let _ = app.clipboard().write_text(entry.text);
+            }
         }
     }
     if history_changed {

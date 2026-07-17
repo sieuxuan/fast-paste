@@ -4,7 +4,6 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -14,8 +13,10 @@ import androidx.core.app.NotificationCompat
 import com.fastpaste.app.FastPasteApp
 import com.fastpaste.app.MainActivity
 import com.fastpaste.app.R
+import com.fastpaste.app.data.ClipboardPayload
 import com.fastpaste.app.data.ClipboardRepository
 import com.fastpaste.app.discovery.ServiceDiscovery
+import com.fastpaste.app.sync.AndroidClipboardCodec
 import com.fastpaste.app.sync.DeletedHistoryStore
 import com.fastpaste.app.websocket.ConnectionState
 import com.fastpaste.app.websocket.WebSocketClient
@@ -39,19 +40,29 @@ class ClipboardService : Service() {
     // Service-owned discovery keeps running in the background (the ViewModel's
     // discovery dies with the UI), so a PC coming back on a new IP is found.
     private var backgroundDiscovery: ServiceDiscovery? = null
-    private var lastSyncedText = ""
+    private var lastSyncedFingerprint = ""
     private val dao by lazy { (application as FastPasteApp).database.clipboardDao() }
     private val historyRepository by lazy { ClipboardRepository(dao) }
     private val deletedHistoryStore by lazy { DeletedHistoryStore(applicationContext) }
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
-        val clip = clipboardManager.primaryClip
-        val text = clip?.getItemAt(0)?.text?.toString() ?: return@OnPrimaryClipChangedListener
-        if (text.isNotEmpty() && text != lastSyncedText) {
-            lastSyncedText = text
-            wsClient?.send(text)
-            saveToHistory(text, "LOCAL")
-            Log.d(TAG, "Sent: ${text.take(60)}")
+        syncCurrentClipboard()
+    }
+
+    private fun syncCurrentClipboard() {
+        val clip = runCatching { clipboardManager.primaryClip }.getOrNull()
+        scope.launch {
+            val payload = AndroidClipboardCodec.read(this@ClipboardService, clip)
+                ?: return@launch
+            val fingerprint = payload.fingerprint()
+            if (fingerprint == lastSyncedFingerprint) return@launch
+            lastSyncedFingerprint = fingerprint
+            wsClient?.send(
+                if (payload.kind == ClipboardPayload.KIND_TEXT) payload.text
+                else payload.protocolJson()
+            )
+            saveToHistory(payload, "LOCAL")
+            Log.d(TAG, "Sent ${payload.kind}: ${payload.text.take(60)}")
         }
     }
 
@@ -84,13 +95,16 @@ class ClipboardService : Service() {
             }
             ACTION_SEND_TEXT -> {
                 val text = intent.getStringExtra(EXTRA_TEXT) ?: return START_STICKY
-                if (text.isNotEmpty() && text != lastSyncedText) {
-                    lastSyncedText = text
+                val payload = ClipboardPayload.text(text)
+                val fingerprint = payload.fingerprint()
+                if (text.isNotEmpty() && fingerprint != lastSyncedFingerprint) {
+                    lastSyncedFingerprint = fingerprint
                     wsClient?.send(text)
-                    saveToHistory(text, "LOCAL")
+                    saveToHistory(payload, "LOCAL")
                     Log.d(TAG, "Sent via intent: ${text.take(60)}")
                 }
             }
+            ACTION_SYNC_CURRENT_CLIP -> syncCurrentClipboard()
         }
         return START_STICKY
     }
@@ -185,34 +199,43 @@ class ClipboardService : Service() {
     }
 
     private suspend fun handleIncomingMessage(message: String) {
-        val handledAsSync = try {
+        val handledAsProtocol = try {
             val json = JSONObject(message)
-            if (json.optString("app") == "fastpaste" && json.optString("type") == "history_sync") {
-                mergeHistorySync(json.optJSONArray("entries") ?: JSONArray())
-                true
-            } else {
+            if (json.optString("app") != "fastpaste") {
                 false
+            } else when (json.optString("type")) {
+                "history_sync" -> {
+                    mergeHistorySync(json.optJSONArray("entries") ?: JSONArray())
+                    true
+                }
+
+                "clipboard_payload" -> {
+                    val payloadJson = json.optJSONObject("payload") ?: return
+                    receiveClipboardPayload(ClipboardPayload.fromJson(payloadJson))
+                    true
+                }
+
+                else -> false
             }
         } catch (_: Exception) {
             false
         }
 
-        if (!handledAsSync) {
-            receiveClipboardText(message)
+        if (!handledAsProtocol) {
+            receiveClipboardPayload(ClipboardPayload.text(message))
         }
     }
 
-    private suspend fun receiveClipboardText(text: String) {
-        if (text.isNotEmpty() && text != lastSyncedText) {
-            lastSyncedText = text
-            withContext(Dispatchers.Main) {
-                clipboardManager.setPrimaryClip(
-                    ClipData.newPlainText("Fast Paste", text)
-                )
-            }
-            saveToHistory(text, "REMOTE")
-            Log.d(TAG, "Received: ${text.take(60)}")
+    private suspend fun receiveClipboardPayload(payload: ClipboardPayload) {
+        if (payload.text.isEmpty() || !payload.isWithinLimit()) return
+        val fingerprint = payload.fingerprint()
+        if (fingerprint == lastSyncedFingerprint) return
+        lastSyncedFingerprint = fingerprint
+        withContext(Dispatchers.Main) {
+            clipboardManager.setPrimaryClip(AndroidClipboardCodec.write(this@ClipboardService, payload))
         }
+        saveToHistory(payload, "REMOTE")
+        Log.d(TAG, "Received ${payload.kind}: ${payload.text.take(60)}")
     }
 
     private fun sendHistorySync(client: WebSocketClient) {
@@ -222,7 +245,7 @@ class ClipboardService : Service() {
                 val seen = mutableSetOf<String>()
                 val history = JSONArray()
                 entries.forEach { entry ->
-                    if (deletedHistoryStore.isDeleted(entry.content, entry.timestamp)) {
+                    if (deletedHistoryStore.isDeleted(entry.content, entry.timestamp, entry.pinned)) {
                         return@forEach
                     }
                     seen.add(entry.content)
@@ -234,14 +257,20 @@ class ClipboardService : Service() {
                         .put("sourceTitle", entry.sourceTitle)
                         .put("pinned", entry.pinned)
                         .put("folder", entry.folder)
+                        .also { item ->
+                            val entryPayload = ClipboardPayload.fromEntry(entry)
+                            if (entryPayload.kind != ClipboardPayload.KIND_TEXT) {
+                                item.put("payload", entryPayload.toJson())
+                            }
+                        }
                     )
                 }
 
-                val currentText = clipboardManager.primaryClip
-                    ?.takeIf { it.itemCount > 0 }
-                    ?.getItemAt(0)
-                    ?.text
-                    ?.toString()
+                val currentPayload = AndroidClipboardCodec.read(
+                    this@ClipboardService,
+                    clipboardManager.primaryClip
+                )
+                val currentText = currentPayload?.text
                 if (
                     !currentText.isNullOrBlank() &&
                     !seen.contains(currentText) &&
@@ -251,7 +280,8 @@ class ClipboardService : Service() {
                     historyRepository.mergeEntry(
                         content = currentText,
                         source = "LOCAL",
-                        timestamp = timestamp
+                        timestamp = timestamp,
+                        payload = currentPayload
                     )
                     history.put(JSONObject()
                         .put("text", currentText)
@@ -261,6 +291,11 @@ class ClipboardService : Service() {
                         .put("sourceTitle", "")
                         .put("pinned", false)
                         .put("folder", "")
+                        .also { item ->
+                            if (currentPayload.kind != ClipboardPayload.KIND_TEXT) {
+                                item.put("payload", currentPayload.toJson())
+                            }
+                        }
                     )
                 }
 
@@ -279,7 +314,7 @@ class ClipboardService : Service() {
 
     private suspend fun mergeHistorySync(entries: JSONArray) {
         val latestLocalTimestamp = dao.getLatestOnce()?.timestamp ?: 0L
-        var newestIncomingText: String? = null
+        var newestIncomingPayload: ClipboardPayload? = null
         var newestIncomingTimestamp = 0L
         var inserted = 0
 
@@ -287,18 +322,22 @@ class ClipboardService : Service() {
             val item = entries.optJSONObject(i) ?: continue
             val text = item.optString("text")
             if (text.isBlank()) continue
+            val incomingPayload = item.optJSONObject("payload")
+                ?.let(ClipboardPayload::fromJson)
+                ?: ClipboardPayload.text(text)
+            if (!incomingPayload.isWithinLimit()) continue
 
             val timestamp = item.optLong("timestamp", System.currentTimeMillis())
-            if (deletedHistoryStore.isDeleted(text, timestamp)) continue
+            val pinned = item.optBoolean("pinned", false)
+            if (deletedHistoryStore.isDeleted(text, timestamp, pinned)) continue
 
             val source = if (item.optString("source") == "ANDROID") "LOCAL" else "REMOTE"
             val sourceApp = item.optString("sourceApp", item.optString("source_app", ""))
             val sourceTitle = item.optString("sourceTitle", item.optString("source_title", ""))
-            val pinned = item.optBoolean("pinned", false)
             val folder = ClipboardRepository.cleanFolderName(item.optString("folder", ""))
             if (timestamp > newestIncomingTimestamp) {
                 newestIncomingTimestamp = timestamp
-                newestIncomingText = text
+                newestIncomingPayload = incomingPayload
             }
 
             val mergeResult = historyRepository.mergeEntry(
@@ -308,20 +347,19 @@ class ClipboardService : Service() {
                 sourceTitle = sourceTitle,
                 timestamp = timestamp,
                 pinned = pinned,
-                folder = folder
+                folder = folder,
+                payload = incomingPayload
             )
             if (mergeResult.inserted) {
                 inserted++
             }
         }
 
-        val textToApply = newestIncomingText
-        if (newestIncomingTimestamp > latestLocalTimestamp && !textToApply.isNullOrBlank()) {
-            lastSyncedText = textToApply
+        val payloadToApply = newestIncomingPayload
+        if (newestIncomingTimestamp > latestLocalTimestamp && payloadToApply != null) {
+            lastSyncedFingerprint = payloadToApply.fingerprint()
             withContext(Dispatchers.Main) {
-                clipboardManager.setPrimaryClip(
-                    ClipData.newPlainText("Fast Paste", textToApply)
-                )
+                clipboardManager.setPrimaryClip(AndroidClipboardCodec.write(this@ClipboardService, payloadToApply))
             }
         }
 
@@ -329,13 +367,14 @@ class ClipboardService : Service() {
         connectionEvents.tryEmit("Đã nhận đồng bộ từ PC: thêm $inserted mục mới")
     }
 
-    private fun saveToHistory(text: String, source: String) {
+    private fun saveToHistory(payload: ClipboardPayload, source: String) {
         scope.launch {
             try {
                 historyRepository.mergeEntry(
-                    content = text,
+                    content = payload.text,
                     source = source,
-                    promoteExisting = true
+                    promoteExisting = true,
+                    payload = payload
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "Save history failed: ${e.message}")
@@ -382,10 +421,11 @@ class ClipboardService : Service() {
     companion object {
         private const val TAG = "ClipboardService"
         private const val NOTIFICATION_ID = 1
-        private const val MAX_HISTORY_ITEMS = 500
+        private const val MAX_HISTORY_ITEMS = 1_000
         const val ACTION_START = "com.fastpaste.START"
         const val ACTION_STOP = "com.fastpaste.STOP"
         const val ACTION_SEND_TEXT = "com.fastpaste.SEND_TEXT"
+        const val ACTION_SYNC_CURRENT_CLIP = "com.fastpaste.SYNC_CURRENT_CLIP"
         const val EXTRA_HOST = "host"
         const val EXTRA_PORT = "port"
         const val EXTRA_TEXT = "text"

@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::cloud;
-use crate::history::{normalize_deleted_markers, DeletedMarker, HistoryItem};
+use crate::history::{
+    hydrate_running_app_icons, normalize_deleted_markers, DeletedMarker, HistoryBackup, HistoryItem,
+};
 use crate::hotkeys::{
     default_edit_hotkey, default_hotkey, default_pinned_hotkey, default_quick_slot_hotkey,
     normalize_settings,
@@ -21,6 +23,7 @@ pub(crate) fn default_settings() -> AppSettings {
         quick_slot_hotkey: default_quick_slot_hotkey(),
         always_on_top: default_always_on_top(),
         auto_start: false,
+        excluded_apps: vec![],
     }
 }
 
@@ -38,6 +41,8 @@ pub(crate) struct AppSettings {
     pub(crate) always_on_top: bool,
     #[serde(default)]
     pub(crate) auto_start: bool,
+    #[serde(default, rename = "excludedApps", alias = "excluded_apps")]
+    pub(crate) excluded_apps: Vec<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -50,6 +55,10 @@ pub(crate) struct AppStateData {
     pub(crate) deleted_markers: Vec<DeletedMarker>,
     #[serde(default)]
     pub(crate) clear_history_at: Option<i64>,
+    #[serde(default, rename = "appIcons", alias = "app_icons")]
+    pub(crate) app_icons: std::collections::HashMap<String, String>,
+    #[serde(default, rename = "historyBackup", alias = "history_backup")]
+    pub(crate) history_backup: Option<HistoryBackup>,
     #[serde(default)]
     pub(crate) cloud: cloud::CloudUiState,
 }
@@ -81,8 +90,9 @@ pub(crate) fn load_state() -> AppStateData {
             data.cloud.syncing = false;
             let settings_changed = normalize_settings(&mut data.settings);
             normalize_deleted_markers(&mut data);
+            let icons_changed = hydrate_running_app_icons(&mut data);
             refresh_cloud_state(&mut data.cloud);
-            if settings_changed {
+            if settings_changed || icons_changed {
                 save_state(&data);
             }
             return data;
@@ -95,6 +105,8 @@ pub(crate) fn load_state() -> AppStateData {
         clients: vec![],
         deleted_markers: vec![],
         clear_history_at: None,
+        app_icons: std::collections::HashMap::new(),
+        history_backup: None,
         cloud: cloud::CloudUiState::default(),
     };
     save_state(&data);
@@ -125,7 +137,19 @@ pub(crate) fn refresh_cloud_state(cloud_state: &mut cloud::CloudUiState) {
 
 pub(crate) fn broadcast_state(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let data = state.0.lock().unwrap().clone();
+    let mut data = state.0.lock().unwrap().clone();
+    for item in &mut data.history {
+        if let Some(payload) = &item.payload {
+            item.payload = Some(payload.sanitized_for_ui());
+        }
+    }
+    if let Some(backup) = &mut data.history_backup {
+        for item in &mut backup.items {
+            if let Some(payload) = &item.payload {
+                item.payload = Some(payload.sanitized_for_ui());
+            }
+        }
+    }
     let _ = app.emit("update_state", data);
 }
 

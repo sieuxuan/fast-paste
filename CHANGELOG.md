@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.2.6 - 2026-07-17
+
+- Added image, file, and rich-text clipboard sync between Windows and Android, including history and Google Drive metadata.
+- Increased retained history from 500 to 1,000 items while always preserving pinned entries.
+- Added a private-app exclusion list so selected password managers, banking apps, or other sensitive Windows apps are synced live but never saved to history.
+- Replaced source executable labels with real app icons, added scalable app/folder filters, and added delete-by-filter.
+- Added delete confirmations and durable undo backups; bulk and filtered deletes never remove pinned items, while explicit single-item deletion still can.
+- Added editing on desktop and Android, removed the desktop Add button, and made the empty connection panel more compact.
+- Modernized the Android home/settings UI and added a scroll-to-top action for long histories.
+- Reduced unnecessary Google Drive uploads, made merges deterministic, preserved metadata more reliably, and prevented overlapping sync jobs.
+
 ## 2.2.5 - 2026-07-16
 
 - Fixed the desktop WebSocket server dying silently on transient accept errors; a stalled client can no longer block new connections (per-connection handshake with timeout).

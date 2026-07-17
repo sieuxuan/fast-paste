@@ -1,9 +1,6 @@
 package com.fastpaste.app.ui.screens
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -21,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -29,11 +27,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -42,10 +42,12 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -59,16 +61,17 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -87,6 +90,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,8 +102,12 @@ fun HomeScreen(
     onManualPortChange: (String) -> Unit,
     onConnectManual: () -> Unit,
     onDeleteItem: (Long) -> Unit,
+    onDeleteItems: (List<Long>) -> Unit,
     onTogglePin: (Long) -> Unit,
     onClearHistory: () -> Unit,
+    onUndoHistoryDelete: () -> Unit,
+    onCopyItem: (Long) -> Unit,
+    onEditItem: (Long, String, String) -> Unit,
     onRefreshDiscovery: () -> Unit = {},
     onCheckUpdate: () -> Unit = {},
     onOpenUpdate: () -> Unit = {},
@@ -108,6 +116,15 @@ fun HomeScreen(
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var historyFilter by rememberSaveable { mutableStateOf(HISTORY_FILTER_ALL) }
+    var pendingDelete by remember { mutableStateOf<PendingHistoryDelete?>(null) }
+    var editingEntry by remember { mutableStateOf<ClipboardEntry?>(null) }
+    val historyListState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    val showScrollToTop by remember {
+        derivedStateOf {
+            historyListState.firstVisibleItemIndex > 3 || historyListState.firstVisibleItemScrollOffset > 900
+        }
+    }
     val folders = remember(state.clipboardHistory) {
         state.clipboardHistory
             .map { it.folder.trim() }
@@ -197,6 +214,17 @@ fun HomeScreen(
                     containerColor = MaterialTheme.colorScheme.background
                 )
             )
+        },
+        floatingActionButton = {
+            AnimatedVisibility(visible = !settingsOpen && showScrollToTop) {
+                SmallFloatingActionButton(
+                    onClick = { coroutineScope.launch { historyListState.animateScrollToItem(0) } },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(Icons.Default.ArrowUpward, contentDescription = "Lên đầu lịch sử")
+                }
+            }
         }
     ) { padding ->
         if (settingsOpen) {
@@ -219,6 +247,7 @@ fun HomeScreen(
         }
 
         LazyColumn(
+            state = historyListState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
@@ -227,9 +256,27 @@ fun HomeScreen(
         ) {
             item {
                 HistoryHeader(
-                    count = visibleHistory.size,
-                    onClearHistory = onClearHistory
+                    count = state.clipboardHistory.size,
+                    filteredCount = visibleHistory.count { !it.pinned },
+                    isFiltered = historyFilter != HISTORY_FILTER_ALL || searchQuery.isNotBlank(),
+                    onClearHistory = {
+                        val ids = state.clipboardHistory.filterNot { it.pinned }.map { it.id }
+                        if (ids.isNotEmpty()) pendingDelete = PendingHistoryDelete(ids, deleteAll = true)
+                    },
+                    onDeleteFiltered = {
+                        val ids = visibleHistory.filterNot { it.pinned }.map { it.id }
+                        if (ids.isNotEmpty()) pendingDelete = PendingHistoryDelete(ids, deleteAll = false)
+                    }
                 )
+            }
+
+            if (state.deletedBackupCount > 0) {
+                item {
+                    UndoHistoryBanner(
+                        count = state.deletedBackupCount,
+                        onUndo = onUndoHistoryDelete
+                    )
+                }
             }
 
             item {
@@ -272,7 +319,9 @@ fun HomeScreen(
                     items(entries, key = { it.id }) { entry ->
                         HistoryItem(
                             entry = entry,
+                            onCopy = { onCopyItem(entry.id) },
                             onTogglePin = { onTogglePin(entry.id) },
+                            onEdit = { editingEntry = entry },
                             onDelete = { onDeleteItem(entry.id) }
                         )
                     }
@@ -281,6 +330,40 @@ fun HomeScreen(
 
             item { Spacer(Modifier.height(18.dp)) }
         }
+    }
+
+    pendingDelete?.let { request ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            icon = { Icon(Icons.Default.Delete, contentDescription = null) },
+            title = { Text(if (request.deleteAll) "Xoá lịch sử" else "Xoá theo bộ lọc") },
+            text = {
+                Text(
+                    "Xoá ${request.ids.size} mục chưa ghim? Các mục đã ghim luôn được giữ lại. " +
+                        "Bạn có thể hoàn tác ngay sau khi xoá."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (request.deleteAll) onClearHistory() else onDeleteItems(request.ids)
+                    pendingDelete = null
+                }) { Text("Xoá") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("Huỷ") }
+            }
+        )
+    }
+
+    editingEntry?.let { entry ->
+        EditHistoryDialog(
+            entry = entry,
+            onDismiss = { editingEntry = null },
+            onSave = { content, folder ->
+                onEditItem(entry.id, content, folder)
+                editingEntry = null
+            }
+        )
     }
 }
 
@@ -307,7 +390,7 @@ private fun SettingsSheet(
     ) {
         SettingsHeader(state = state)
 
-        SettingSectionTitle("Kết nối PC", "Tự tìm PC trong LAN hoặc nhập IP thủ công.")
+        SettingSectionTitle("01 · Kết nối PC", "Tự tìm PC trong LAN hoặc nhập IP thủ công.")
         ConnectionPanel(
             state = state,
             onConnectServer = onConnectServer,
@@ -318,20 +401,20 @@ private fun SettingsSheet(
             onRefreshDiscovery = onRefreshDiscovery
         )
 
-        SettingSectionTitle("Đồng bộ đám mây", "Lưu lịch sử riêng trong Google Drive app data.")
+        SettingSectionTitle("02 · Đồng bộ đám mây", "Lưu lịch sử riêng trong Google Drive app data.")
         CloudSyncPanel(
             state = state,
             onGoogleSync = onGoogleSync
         )
 
-        SettingSectionTitle("Cập nhật", "Kiểm tra bản Android mới trên GitHub.")
+        SettingSectionTitle("03 · Cập nhật", "Kiểm tra bản Android mới trên GitHub.")
         UpdatePanel(
             state = state,
             onCheckUpdate = onCheckUpdate,
             onOpenUpdate = onOpenUpdate
         )
 
-        SettingSectionTitle("Nhật ký gần đây", "Theo dõi discover, reconnect và lần sync mới nhất.")
+        SettingSectionTitle("04 · Nhật ký gần đây", "Theo dõi discover, reconnect và lần sync mới nhất.")
         ConnectionLogPanel(state = state)
 
         Spacer(Modifier.height(20.dp))
@@ -379,7 +462,7 @@ private fun SettingsHeader(state: UiState) {
                 )
                 SummaryPill(
                     label = "Lịch sử",
-                    value = "Gần đây",
+                    value = "${state.clipboardHistory.size} mục",
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f)
                 )
@@ -754,7 +837,13 @@ private fun ManualConnect(
 }
 
 @Composable
-private fun HistoryHeader(count: Int, onClearHistory: () -> Unit) {
+private fun HistoryHeader(
+    count: Int,
+    filteredCount: Int,
+    isFiltered: Boolean,
+    onClearHistory: () -> Unit,
+    onDeleteFiltered: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -770,12 +859,36 @@ private fun HistoryHeader(count: Int, onClearHistory: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
         }
-        if (count > 0) {
-            TextButton(onClick = onClearHistory) {
+        if ((!isFiltered && count > 0) || (isFiltered && filteredCount > 0)) {
+            TextButton(onClick = if (isFiltered) onDeleteFiltered else onClearHistory) {
                 Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(17.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Xoá")
+                Text(if (isFiltered) "Xoá lọc ($filteredCount)" else "Xoá")
             }
+        }
+    }
+}
+
+@Composable
+private fun UndoHistoryBanner(count: Int, onUndo: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Đã sao lưu $count mục vừa xoá", fontWeight = FontWeight.Bold)
+                Text(
+                    "Mục ghim không bị ảnh hưởng.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
+                )
+            }
+            TextButton(onClick = onUndo) { Text("Hoàn tác") }
         }
     }
 }
@@ -989,23 +1102,68 @@ private fun EmptySearch() {
 }
 
 @Composable
+private fun EditHistoryDialog(
+    entry: ClipboardEntry,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit
+) {
+    var content by remember(entry.id) { mutableStateOf(entry.content) }
+    var folder by remember(entry.id) { mutableStateOf(entry.folder) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Edit, contentDescription = null) },
+        title = { Text("Sửa clipboard") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = { content = it },
+                    label = { Text("Nội dung") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp),
+                    minLines = 5
+                )
+                OutlinedTextField(
+                    value = folder,
+                    onValueChange = { folder = it },
+                    label = { Text("Nhãn") },
+                    placeholder = { Text("Công việc, Code, Cá nhân…") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Text(
+                    "${content.length} ký tự",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f)
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSave(content, folder) }, enabled = content.isNotBlank()) {
+                Text("Lưu")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Huỷ") } }
+    )
+}
+
+@Composable
 private fun HistoryItem(
     entry: ClipboardEntry,
+    onCopy: () -> Unit,
     onTogglePin: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val context = LocalContext.current
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val isLocal = entry.source == "LOCAL"
+    var confirmDelete by remember(entry.id) { mutableStateOf(false) }
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("FastPaste", entry.content))
-                Toast.makeText(context, "Đã copy", Toast.LENGTH_SHORT).show()
-            },
+            .clickable(onClick = onCopy),
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(10.dp),
         tonalElevation = 1.dp
@@ -1033,6 +1191,17 @@ private fun HistoryItem(
                         text = if (isLocal) "Điện thoại" else "PC",
                         color = if (isLocal) LocalBadge else RemoteBadge
                     )
+                    if (entry.payloadType != "text") {
+                        SourceBadge(
+                            text = when (entry.payloadType) {
+                                "image" -> "Ảnh"
+                                "files" -> "File"
+                                "html" -> "Rich text"
+                                else -> entry.payloadType
+                            },
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    }
                     if (entry.pinned) {
                         SourceBadge(
                             text = "Ghim",
@@ -1102,7 +1271,15 @@ private fun HistoryItem(
                         }
                     )
                 }
-                IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
+                IconButton(onClick = onEdit, modifier = Modifier.size(30.dp)) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Sửa",
+                        modifier = Modifier.size(17.dp),
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                IconButton(onClick = { confirmDelete = true }, modifier = Modifier.size(30.dp)) {
                     Icon(
                         Icons.Default.Close,
                         contentDescription = "Xoá",
@@ -1112,6 +1289,31 @@ private fun HistoryItem(
                 }
             }
         }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(if (entry.pinned) "Xoá mục đã ghim?" else "Xoá clipboard?") },
+            text = {
+                Text(
+                    if (entry.pinned) {
+                        "Đây là thao tác xóa riêng mục ghim này. Mục sẽ bị xóa khỏi lịch sử đồng bộ."
+                    } else {
+                        "Bạn có chắc muốn xóa mục clipboard này?"
+                    }
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    onDelete()
+                    confirmDelete = false
+                }) { Text("Xoá") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("Huỷ") }
+            }
+        )
     }
 }
 
@@ -1134,6 +1336,11 @@ private fun SourceBadge(text: String, color: Color) {
 private data class HistoryFilterOption(
     val key: String,
     val label: String
+)
+
+private data class PendingHistoryDelete(
+    val ids: List<Long>,
+    val deleteAll: Boolean
 )
 
 private data class ConnectionUi(

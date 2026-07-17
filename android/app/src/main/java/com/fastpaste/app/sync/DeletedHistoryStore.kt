@@ -10,30 +10,70 @@ class DeletedHistoryStore(context: Context) {
     private val prefs = context.applicationContext
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    fun markDeleted(text: String, deletedAt: Long = System.currentTimeMillis()) {
+    fun markDeleted(
+        text: String,
+        deletedAt: Long = System.currentTimeMillis(),
+        includePinned: Boolean = true
+    ) {
         if (text.isBlank()) return
 
         val textHash = hashText(text)
-        val markers = loadMarkers()
+        val loaded = loadMarkers()
+        val existing = loaded.firstOrNull { it.textHash == textHash }
+        val markers = loaded
             .filterNot { it.textHash == textHash }
             .toMutableList()
-        markers += DeletedMarker(textHash = textHash, deletedAt = deletedAt)
+        markers += DeletedMarker(
+            textHash = textHash,
+            deletedAt = deletedAt,
+            includePinned = existing?.includePinned == true || includePinned
+        )
         saveMarkers(markers.sortedByDescending { it.deletedAt }.take(MAX_DELETED_MARKERS))
     }
 
     fun markCleared(entries: List<ClipboardEntry>, clearedAt: Long = System.currentTimeMillis()) {
-        entries.forEach { markDeleted(it.content, clearedAt) }
-        prefs.edit().putLong(KEY_CLEAR_AT, clearedAt).apply()
+        markDeletedBatch(
+            texts = entries.filterNot { it.pinned }.map { it.content },
+            deletedAt = clearedAt,
+            includePinned = false
+        )
     }
 
-    fun isDeleted(text: String, timestamp: Long): Boolean {
+    fun markDeletedBatch(
+        texts: List<String>,
+        deletedAt: Long = System.currentTimeMillis(),
+        includePinned: Boolean = false
+    ) {
+        if (texts.isEmpty()) return
+        val markers = loadMarkers().associateBy { it.textHash }.toMutableMap()
+        texts.filter { it.isNotBlank() }.forEach { text ->
+            val textHash = hashText(text)
+            val existing = markers[textHash]
+            markers[textHash] = DeletedMarker(
+                textHash = textHash,
+                deletedAt = deletedAt,
+                includePinned = existing?.includePinned == true || includePinned
+            )
+        }
+        saveMarkers(markers.values.sortedByDescending { it.deletedAt }.take(MAX_DELETED_MARKERS))
+    }
+
+    fun isDeleted(text: String, timestamp: Long, pinned: Boolean = false): Boolean {
         if (text.isBlank()) return false
 
         val clearAt = prefs.getLong(KEY_CLEAR_AT, 0L)
-        if (clearAt > 0L && timestamp <= clearAt) return true
+        if (!pinned && clearAt > 0L && timestamp <= clearAt) return true
 
         val textHash = hashText(text)
-        return loadMarkers().any { it.textHash == textHash && timestamp <= it.deletedAt }
+        return loadMarkers().any {
+            it.textHash == textHash && timestamp <= it.deletedAt && (!pinned || it.includePinned)
+        }
+    }
+
+    fun unmarkDeleted(text: String) {
+        if (text.isBlank()) return
+        val textHash = hashText(text)
+        saveMarkers(loadMarkers().filterNot { it.textHash == textHash })
     }
 
     fun hasMarker(text: String): Boolean {
@@ -51,8 +91,13 @@ class DeletedHistoryStore(context: Context) {
             val item = array.optJSONObject(index) ?: continue
             val hash = item.optString("hash")
             val deletedAt = item.optLong("deletedAt", 0L)
+            val includePinned = item.optBoolean("includePinned", false)
             if (hash.isNotBlank() && deletedAt > 0L) {
-                markers += DeletedMarker(textHash = hash, deletedAt = deletedAt)
+                markers += DeletedMarker(
+                    textHash = hash,
+                    deletedAt = deletedAt,
+                    includePinned = includePinned
+                )
             }
         }
         return markers
@@ -65,6 +110,7 @@ class DeletedHistoryStore(context: Context) {
                 JSONObject()
                     .put("hash", marker.textHash)
                     .put("deletedAt", marker.deletedAt)
+                    .put("includePinned", marker.includePinned)
             )
         }
         prefs.edit().putString(KEY_MARKERS, array.toString()).apply()
@@ -77,7 +123,8 @@ class DeletedHistoryStore(context: Context) {
 
     private data class DeletedMarker(
         val textHash: String,
-        val deletedAt: Long
+        val deletedAt: Long,
+        val includePinned: Boolean
     )
 
     companion object {

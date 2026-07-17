@@ -1,3 +1,4 @@
+mod clipboard;
 mod cloud;
 mod history;
 mod hotkeys;
@@ -130,6 +131,34 @@ fn save_always_on_top(always_on_top: bool, state: State<'_, AppState>, app: AppH
 }
 
 #[tauri::command]
+fn set_app_excluded(
+    app_name: String,
+    excluded: bool,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let app_name = app_name.trim().chars().take(96).collect::<String>();
+    if app_name.is_empty() {
+        return Err("Tên ứng dụng không hợp lệ.".to_string());
+    }
+    {
+        let mut data = state.0.lock().unwrap();
+        data.settings
+            .excluded_apps
+            .retain(|current| !current.eq_ignore_ascii_case(&app_name));
+        if excluded {
+            data.settings.excluded_apps.push(app_name);
+            data.settings
+                .excluded_apps
+                .sort_by_key(|name| name.to_lowercase());
+        }
+        save_state(&data);
+    }
+    broadcast_state(&app);
+    Ok(())
+}
+
+#[tauri::command]
 fn copy_text(text: String, app: AppHandle, state: State<'_, AppState>) {
     let _ = app.clipboard().write_text(text.clone());
     let history_changed = {
@@ -153,6 +182,40 @@ fn copy_text(text: String, app: AppHandle, state: State<'_, AppState>) {
 }
 
 #[tauri::command]
+fn copy_history_item(id: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let (payload, text) = {
+        let mut data = state.0.lock().unwrap();
+        let Some(index) = data.history.iter().position(|item| item.id == id) else {
+            return Err("Không tìm thấy mục clipboard.".to_string());
+        };
+        let mut item = data.history.remove(index);
+        item.timestamp = chrono::Utc::now().to_rfc3339();
+        item.source = "PC".to_string();
+        let result = (item.payload.clone(), item.text.clone());
+        data.history.insert(0, item);
+        save_state(&data);
+        result
+    };
+    let message = if let Some(payload) = payload {
+        crate::clipboard::write_clipboard(&payload)?;
+        payload.protocol_json()
+    } else {
+        app.clipboard()
+            .write_text(text.clone())
+            .map_err(|error| error.to_string())?;
+        text
+    };
+    if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
+        let _ = tx.send(message);
+    }
+    broadcast_state(&app);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn update_history_item(
     id: String,
     text: String,
@@ -173,12 +236,13 @@ fn update_history_item(
 
         let mut item = data.history.remove(index);
         if item.text != text {
-            mark_deleted_text(&mut data, item.text.clone());
+            mark_deleted_item(&mut data, &item);
         }
 
         data.history
-            .retain(|existing| existing.id == item.id || existing.text != text);
+            .retain(|existing| existing.id == item.id || existing.text != text || existing.pinned);
         item.text = text.clone();
+        item.payload = None;
         item.folder = clean_folder_name(&folder);
         item.timestamp = chrono::Utc::now().to_rfc3339();
         item.source = "PC".to_string();
@@ -225,6 +289,7 @@ fn toggle_history_pin(
     }
 
     broadcast_state(&app);
+    queue_cloud_sync(&app);
     Ok(())
 }
 
@@ -279,7 +344,7 @@ async fn delete_history_item(
             return Ok(());
         };
         let item = data.history.remove(index);
-        mark_deleted_text(&mut data, item.text);
+        mark_deleted_item(&mut data, &item);
         refresh_cloud_state(&mut data.cloud);
         if data.cloud.configured && data.cloud.signed_in {
             data.cloud.status = "Đã xóa mục. Google Drive sẽ cập nhật sau vài giây.".to_string();
@@ -295,29 +360,151 @@ async fn delete_history_item(
 
 #[tauri::command]
 async fn clear_history(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let data_arc = state.0.clone();
-    {
-        let mut data = data_arc.lock().unwrap();
-        if data.history.is_empty() {
+    let deleted_count = {
+        let mut data = state.0.lock().unwrap();
+        let deleted_at = chrono::Utc::now().timestamp_millis();
+        let mut kept = Vec::with_capacity(data.history.len());
+        let mut removed = Vec::new();
+        for item in std::mem::take(&mut data.history) {
+            if item.pinned {
+                kept.push(item);
+            } else {
+                removed.push(item);
+            }
+        }
+        if removed.is_empty() {
+            data.history = kept;
             return Ok(());
         }
-        data.clear_history_at = Some(chrono::Utc::now().timestamp_millis());
-        let texts: Vec<String> = data.history.iter().map(|item| item.text.clone()).collect();
-        for text in texts {
-            mark_deleted_text(&mut data, text);
+        for item in &removed {
+            mark_deleted_item_preserving_pinned(&mut data, item);
         }
-        data.history.clear();
+        data.history = kept;
+        data.history_backup = Some(HistoryBackup {
+            items: removed,
+            deleted_at,
+            label: "toàn bộ lịch sử chưa ghim".to_string(),
+        });
+        refresh_cloud_state(&mut data.cloud);
+        if data.cloud.configured && data.cloud.signed_in {
+            data.cloud.status =
+                "Đã xóa lịch sử chưa ghim. Google Drive sẽ cập nhật sau vài giây.".to_string();
+        }
+        let count = data
+            .history_backup
+            .as_ref()
+            .map(|backup| backup.items.len())
+            .unwrap_or(0);
         save_state(&data);
+        count
+    };
+
+    if deleted_count > 0 {
+        broadcast_state(&app);
+        queue_cloud_sync(&app);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_history_items(
+    ids: Vec<String>,
+    label: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    if ids.is_empty() {
+        return Ok(0);
     }
 
+    let id_set: std::collections::HashSet<String> = ids.into_iter().collect();
+    let removed_count = {
+        let mut data = state.0.lock().unwrap();
+        let deleted_at = chrono::Utc::now().timestamp_millis();
+        let mut kept = Vec::with_capacity(data.history.len());
+        let mut removed = Vec::new();
+        for item in std::mem::take(&mut data.history) {
+            if !item.pinned && id_set.contains(&item.id) {
+                removed.push(item);
+            } else {
+                kept.push(item);
+            }
+        }
+        data.history = kept;
+        if removed.is_empty() {
+            return Ok(0);
+        }
+        for item in &removed {
+            mark_deleted_item_preserving_pinned(&mut data, item);
+        }
+        let count = removed.len();
+        data.history_backup = Some(HistoryBackup {
+            items: removed,
+            deleted_at,
+            label: clean_folder_name(&label),
+        });
+        refresh_cloud_state(&mut data.cloud);
+        if data.cloud.configured && data.cloud.signed_in {
+            data.cloud.status =
+                format!("Đã xóa {count} mục theo bộ lọc. Google Drive sẽ cập nhật sau vài giây.");
+        }
+        save_state(&data);
+        count
+    };
+
     broadcast_state(&app);
-    replace_cloud_history(
-        app,
-        data_arc,
-        vec![],
-        "Đã xóa lịch sử và cập nhật Google Drive.",
-    )
-    .await
+    queue_cloud_sync(&app);
+    Ok(removed_count)
+}
+
+#[tauri::command]
+fn undo_history_delete(app: AppHandle, state: State<'_, AppState>) -> Result<usize, String> {
+    let restored_count = {
+        let mut data = state.0.lock().unwrap();
+        let Some(backup) = data.history_backup.take() else {
+            return Ok(0);
+        };
+        let mut restored = 0usize;
+        for item in backup.items {
+            let item_key = history_item_key(&item);
+            unmark_deleted_text(&mut data, &item_key);
+            if let Some(existing) = data
+                .history
+                .iter_mut()
+                .find(|existing| history_item_key(existing) == item_key)
+            {
+                existing.pinned = existing.pinned || item.pinned;
+                if existing.folder.is_empty() {
+                    existing.folder = item.folder;
+                }
+            } else {
+                data.history.push(item);
+                restored += 1;
+            }
+        }
+        trim_history(&mut data.history);
+        refresh_cloud_state(&mut data.cloud);
+        if data.cloud.configured && data.cloud.signed_in {
+            data.cloud.status =
+                "Đã hoàn tác xóa lịch sử. Google Drive sẽ cập nhật sau vài giây.".to_string();
+        }
+        save_state(&data);
+        restored
+    };
+
+    broadcast_state(&app);
+    queue_cloud_sync(&app);
+    Ok(restored_count)
+}
+
+#[tauri::command]
+fn dismiss_history_backup(app: AppHandle, state: State<'_, AppState>) {
+    {
+        let mut data = state.0.lock().unwrap();
+        data.history_backup = None;
+        save_state(&data);
+    }
+    broadcast_state(&app);
 }
 
 #[tauri::command]
@@ -548,6 +735,7 @@ async fn sync_google_drive(
                 .map(|marker| cloud::CloudDeleteMarker {
                     text_hash: marker.text_hash.clone(),
                     deleted_at: marker.deleted_at,
+                    include_pinned: marker.include_pinned,
                 })
                 .collect::<Vec<_>>(),
             data.clear_history_at,
@@ -584,53 +772,6 @@ async fn sync_google_drive(
             data.cloud.signed_in = cloud::is_signed_in();
             data.cloud.account_email = cloud::signed_in_email();
             data.cloud.status = format!("Đồng bộ Google lỗi: {error}");
-            save_state(&data);
-            drop(data);
-            broadcast_state(&app);
-            Err(error)
-        }
-    }
-}
-
-async fn replace_cloud_history(
-    app: AppHandle,
-    data_arc: Arc<Mutex<AppStateData>>,
-    entries: Vec<cloud::CloudEntry>,
-    success_status: &str,
-) -> Result<(), String> {
-    let should_replace = {
-        let mut data = data_arc.lock().unwrap();
-        refresh_cloud_state(&mut data.cloud);
-        if !data.cloud.configured || !data.cloud.signed_in {
-            return Ok(());
-        }
-
-        data.cloud.syncing = true;
-        data.cloud.status = "Đang cập nhật Google Drive...".to_string();
-        save_state(&data);
-        true
-    };
-
-    if !should_replace {
-        return Ok(());
-    }
-
-    broadcast_state(&app);
-    match cloud::replace(entries).await {
-        Ok(count) => {
-            let mut data = data_arc.lock().unwrap();
-            data.cloud.syncing = false;
-            data.cloud.last_sync_at = Some(chrono::Utc::now().timestamp_millis());
-            data.cloud.status = format!("{success_status} Còn {count} mục.");
-            save_state(&data);
-            drop(data);
-            broadcast_state(&app);
-            Ok(())
-        }
-        Err(error) => {
-            let mut data = data_arc.lock().unwrap();
-            data.cloud.syncing = false;
-            data.cloud.status = format!("Cập nhật Google Drive lỗi: {error}");
             save_state(&data);
             drop(data);
             broadcast_state(&app);
@@ -709,7 +850,7 @@ pub fn run() {
                 }
 
                 let w = window.clone();
-                let _ = window.on_window_event(move |event| {
+                window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         let _ = w.hide();
                         api.prevent_close();
@@ -790,14 +931,17 @@ pub fn run() {
             // ── Clipboard Poller ──
             let data_clip = data_arc.clone();
             tauri::async_runtime::spawn(async move {
-                let mut last_text = app_handle_clip.clipboard().read_text().unwrap_or_default();
+                let mut last_clipboard_key = crate::clipboard::read_clipboard()
+                    .map(|payload| payload.fingerprint())
+                    .unwrap_or_default();
                 loop {
-                    if let Ok(text) = app_handle_clip.clipboard().read_text() {
-                        if !text.is_empty() && text != last_text {
-                            last_text = text.clone();
+                    if let Some(payload) = crate::clipboard::read_clipboard() {
+                        let clipboard_key = payload.fingerprint();
+                        if !payload.text.is_empty() && clipboard_key != last_clipboard_key {
+                            last_clipboard_key = clipboard_key;
                             let history_changed = {
                                 let mut d = data_clip.lock().unwrap();
-                                let changed = promote_or_insert_history(&mut d, &text, "PC");
+                                let changed = promote_or_insert_payload(&mut d, &payload, "PC");
                                 if changed {
                                     save_state(&d);
                                 }
@@ -805,9 +949,13 @@ pub fn run() {
                             };
                             if history_changed {
                                 broadcast_state(&app_handle_clip);
-                                let _ = ws_tx.send(text);
                                 queue_cloud_sync(&app_handle_clip);
                             }
+                            let _ = ws_tx.send(if payload.kind == "text" {
+                                payload.text.clone()
+                            } else {
+                                payload.protocol_json()
+                            });
                         }
                     }
                     sleep(Duration::from_millis(CLIPBOARD_POLL_INTERVAL_MS)).await;
@@ -830,12 +978,17 @@ pub fn run() {
             save_quick_slot_hotkey,
             save_autostart,
             save_always_on_top,
+            set_app_excluded,
             copy_text,
+            copy_history_item,
             update_history_item,
             toggle_history_pin,
             set_pinned_slot,
             delete_history_item,
             clear_history,
+            delete_history_items,
+            undo_history_delete,
+            dismiss_history_backup,
             add_history_item,
             request_state,
             open_update_url,

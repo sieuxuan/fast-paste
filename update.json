@@ -1,16 +1,16 @@
 {
-  "version": "2.2.5",
-  "releaseUrl": "https://github.com/sieuxuan/fast-paste/releases/tag/v2.2.5",
-  "notes": "Major connection reliability fixes: the desktop server survives errors and sleep/wake, Android reconnects indefinitely, recovers in the background, and follows the PC to a new IP.",
+  "version": "2.2.6",
+  "releaseUrl": "https://github.com/sieuxuan/fast-paste/releases/tag/v2.2.6",
+  "notes": "Adds image, file and rich-text clipboard sync, 1000-item history, private-app exclusions, safer delete/undo, editing, app icons, improved filters and a modernized Android UI.",
   "desktop": {
-    "version": "2.2.5",
-    "downloadUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.5/FastPaste_2.2.5_x64-setup.exe",
-    "portableUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.5/FastPaste-Portable.exe",
-    "installerUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.5/FastPaste_2.2.5_x64-setup.exe"
+    "version": "2.2.6",
+    "downloadUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.6/FastPaste_2.2.6_x64-setup.exe",
+    "portableUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.6/FastPaste-Portable.exe",
+    "installerUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.6/FastPaste_2.2.6_x64-setup.exe"
   },
   "android": {
-    "versionName": "2.2.5",
-    "versionCode": 225,
-    "apkUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.5/FastPaste-Android.apk"
+    "versionName": "2.2.6",
+    "versionCode": 226,
+    "apkUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.6/FastPaste-Android.apk"
   }
 }

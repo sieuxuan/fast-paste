@@ -446,18 +446,25 @@
       animation:fpPop .18s ease;
     }
 
-    .chip-row {
+    .filter-bar {
       -webkit-app-region:no-drag;
       display:flex;
       align-items:center;
       gap:8px;
-      overflow-x:auto;
+      flex-wrap:wrap;
       padding:12px 22px;
       border-bottom:1px solid var(--bd);
       background:rgba(7,10,19,.24);
     }
-    body.light .chip-row { background:rgba(255,255,255,.42); }
-    .chip-row::-webkit-scrollbar { height:0; }
+    body.light .filter-bar { background:rgba(255,255,255,.42); }
+    .core-filters {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-width:0;
+      flex:1;
+      flex-wrap:wrap;
+    }
     .chip {
       height:32px;
       display:inline-flex;
@@ -477,6 +484,75 @@
       border-color:var(--ac);
       background:var(--acg);
       color:var(--ac);
+    }
+    .filter-select-wrap {
+      position:relative;
+      min-width:180px;
+      max-width:240px;
+      flex:0 1 220px;
+    }
+    .filter-select-wrap svg {
+      position:absolute;
+      z-index:1;
+      left:10px;
+      top:50%;
+      width:15px;
+      height:15px;
+      color:var(--ac);
+      transform:translateY(-50%);
+      pointer-events:none;
+    }
+    .filter-select {
+      width:100%;
+      height:34px;
+      padding:0 32px;
+      border:1px solid var(--bd);
+      border-radius:999px;
+      background:var(--bg3);
+      color:var(--tx);
+      outline:none;
+      cursor:pointer;
+      font-size:12px;
+      font-weight:800;
+    }
+    .filter-select:focus { border-color:var(--ac); box-shadow:0 0 0 3px var(--acg); }
+    .filter-delete { height:34px; color:var(--red); }
+    .undo-row {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:10px 22px;
+      border-bottom:1px solid rgba(52,211,153,.22);
+      background:var(--grnb);
+      color:var(--tx);
+      animation:fpIn .18s ease;
+    }
+    .undo-row-copy { min-width:0; display:flex; align-items:center; gap:9px; }
+    .undo-row-copy svg { flex:0 0 auto; color:var(--grn); }
+    .undo-row-copy span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .undo-row-actions { display:flex; gap:6px; }
+    .app-logo {
+      width:22px;
+      height:22px;
+      display:inline-grid;
+      place-items:center;
+      flex:0 0 22px;
+      overflow:hidden;
+      border:1px solid var(--bd2);
+      border-radius:6px;
+      background:linear-gradient(135deg, rgba(56,189,248,.2), rgba(129,140,248,.2));
+      color:var(--tx);
+      font-size:10px;
+      font-weight:900;
+      line-height:1;
+    }
+    .app-logo img { width:100%; height:100%; object-fit:contain; }
+    .app-logo-badge {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      flex:0 0 auto;
     }
 
     .scroll {
@@ -717,6 +793,30 @@
       font-weight:800;
     }
     .device-left svg { color:var(--grn); }
+    .device-empty {
+      min-height:64px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:12px 14px;
+      border:1px dashed var(--bd);
+      border-radius:var(--r);
+      background:var(--g);
+      color:var(--txd);
+    }
+    .device-empty svg { color:var(--txf); }
+    .device-empty strong { display:block; color:var(--tx); font-size:13px; }
+    .device-empty span { display:block; margin-top:2px; font-size:12px; }
+    .excluded-controls { display:flex; gap:8px; margin-top:12px; }
+    .excluded-controls .tinput { flex:1; min-width:0; }
+    .excluded-list { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+    .excluded-app {
+      display:inline-flex; align-items:center; gap:7px; min-height:32px;
+      padding:4px 6px 4px 9px; border:1px solid rgba(248,113,113,.24);
+      border-radius:999px; background:var(--redb); color:var(--tx);
+      font-size:12px; font-weight:800;
+    }
+    .excluded-app .icon-btn { width:24px; height:24px; color:var(--red); }
 
     .cloud-card .button-row { margin-top:14px; }
     .button-row { display:flex; flex-wrap:wrap; gap:8px; }
@@ -1131,6 +1231,10 @@
       .phead-row { align-items:flex-start; flex-direction:column; }
       .toolbar { width:100%; }
       .search-wrap { flex:1; width:auto; min-width:0; }
+      .filter-bar { padding:10px 14px; }
+      .core-filters { flex:1 1 100%; flex-wrap:nowrap; overflow-x:auto; padding-bottom:2px; }
+      .core-filters::-webkit-scrollbar { height:0; }
+      .filter-select-wrap { flex:1 1 180px; max-width:none; }
       .pinned-list { grid-template-columns:1fr; }
     }
   </style>
@@ -1164,6 +1268,9 @@
     <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol>
     <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M5 13a10 10 0 0 1 14 0"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M12 20h.01"/></symbol>
     <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 5h16"/><path d="M7 12h10"/><path d="M10 19h4"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></symbol>
   </svg>
 
   <div class="app">
@@ -1206,17 +1313,24 @@
                 <input id="history-search" type="search" placeholder="Tìm lịch sử clipboard" data-i18n-placeholder="historySearch" spellcheck="false">
                 <button id="clear-search" class="icon-btn clear-search" type="button" title="Xóa tìm kiếm" data-i18n-title="clearSearchTitle"><svg><use href="#i-x"></use></svg></button>
               </div>
-              <button id="add-new" class="btn primary" type="button"><svg><use href="#i-plus"></use></svg><span data-i18n="add">Thêm</span></button>
               <button id="clear-history" class="btn ghost" type="button" title="Xóa lịch sử" data-i18n-title="clearHistoryTitle"><svg><use href="#i-trash"></use></svg></button>
             </div>
           </div>
           <div id="clear-history-row" class="confirm-row" hidden>
-            <span data-i18n="clearHistoryConfirm">Xóa toàn bộ lịch sử clipboard?</span>
+            <span id="clear-confirm-text">Xóa toàn bộ lịch sử chưa ghim?</span>
             <button id="confirm-clear" class="btn danger" type="button" data-i18n="delete">Xóa</button>
             <button id="cancel-clear" class="btn ghost" type="button" data-i18n="cancel">Hủy</button>
           </div>
         </header>
-        <div id="folder-filters" class="chip-row"></div>
+        <div class="filter-bar">
+          <div id="folder-filters" class="core-filters"></div>
+          <label class="filter-select-wrap" for="app-filter"><svg><use href="#i-filter"></use></svg><select id="app-filter" class="filter-select" aria-label="Lọc theo ứng dụng"></select></label>
+          <button id="delete-filtered" class="btn ghost filter-delete" type="button" hidden><svg><use href="#i-trash"></use></svg><span data-i18n="deleteFiltered">Xóa bộ lọc</span></button>
+        </div>
+        <div id="history-undo-row" class="undo-row" hidden>
+          <div class="undo-row-copy"><svg><use href="#i-shield"></use></svg><span id="history-undo-text"></span></div>
+          <div class="undo-row-actions"><button id="undo-history-delete" class="btn" type="button"><svg><use href="#i-undo"></use></svg><span data-i18n="undo">Hoàn tác</span></button><button id="dismiss-history-undo" class="icon-btn" type="button" title="Đóng" data-i18n-title="close"><svg><use href="#i-x"></use></svg></button></div>
+        </div>
         <div id="history-container" class="scroll"></div>
       </section>
 
@@ -1229,7 +1343,6 @@
               <span class="tag">:4567</span>
             </div>
             <div id="device-server-ip" class="ip-row"></div>
-            <div id="srv-clients" class="muted" data-i18n="noConnection">Chưa có kết nối</div>
           </div>
 
           <div class="section-label" data-i18n="connectedDevices">Thiết bị kết nối</div>
@@ -1298,6 +1411,14 @@
                 <button id="always-on-top-toggle" class="toggle-btn" type="button" data-on="true" aria-label="Luôn nổi khi mở bằng hotkey" data-i18n-aria-label="alwaysOnTopAria"><span class="tthumb"></span></button>
               </div>
               <div id="always-on-top-status" class="status-line"></div>
+            </div>
+
+            <div class="setting-card card card-pad">
+              <h2 data-i18n="privacyAppsTitle">Ứng dụng không lưu lịch sử</h2>
+              <div class="label"><span data-i18n="privacyAppsDesc">Clipboard từ các ứng dụng này vẫn được đồng bộ tức thời nhưng không được ghi vào lịch sử.</span></div>
+              <div class="excluded-controls"><input id="excluded-app-input" class="tinput" list="source-app-options" type="text" spellcheck="false" placeholder="Ví dụ: 1Password.exe" data-i18n-placeholder="privacyAppsPlaceholder"><datalist id="source-app-options"></datalist><button id="add-excluded-app" class="btn danger" type="button"><svg><use href="#i-plus"></use></svg><span data-i18n="excludeApp">Không lưu</span></button></div>
+              <div id="excluded-app-list" class="excluded-list"></div>
+              <div id="excluded-app-status" class="status-line"></div>
             </div>
 
             <div class="setting-card card card-pad">
@@ -1386,7 +1507,7 @@
     }
     const invoke = tauriApi.core.invoke;
     const listen = tauriApi.event.listen;
-    const APP_VERSION = '2.2.4';
+    const APP_VERSION = '2.2.6';
     const UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/sieuxuan/fast-paste/master/update.json';
     const HISTORY_PAGE_SIZE = 160;
     const HISTORY_LOAD_AHEAD_PX = 420;
@@ -1403,7 +1524,13 @@
         clearSearchTitle: 'Xóa tìm kiếm',
         add: 'Thêm',
         clearHistoryTitle: 'Xóa lịch sử',
-        clearHistoryConfirm: 'Xóa toàn bộ lịch sử clipboard?',
+        clearHistoryConfirm: (count, pinned) => `Xóa ${count} mục chưa ghim? ${pinned ? `${pinned} mục đã ghim sẽ được giữ lại.` : ''}`,
+        deleteFiltered: 'Xóa bộ lọc',
+        deleteFilteredCount: count => `Xóa ${count} mục`,
+        deleteFilteredConfirm: (count, label) => `Xóa ${count} mục theo bộ lọc “${label}”? Mục đã ghim luôn được giữ lại.`,
+        deleteItemConfirm: pinned => pinned ? 'Đây là mục đã ghim. Bạn có chắc muốn xóa riêng mục này?' : 'Xóa mục clipboard này?',
+        appFilterAll: 'Lọc theo ứng dụng',
+        undoHistoryText: (count, label) => `Đã sao lưu ${count} mục vừa xóa${label ? ` · ${label}` : ''}.`,
         delete: 'Xóa',
         cancel: 'Hủy',
         devicesTitle: 'Thiết bị',
@@ -1506,6 +1633,15 @@
         autostartSavedOff: 'Đã tắt tự khởi động.',
         alwaysOnTopSavedOn: 'Đã bật luôn nổi khi mở.',
         alwaysOnTopSavedOff: 'Đã tắt luôn nổi.',
+        privacyAppsTitle: 'Ứng dụng không lưu lịch sử',
+        privacyAppsDesc: 'Clipboard từ các ứng dụng này vẫn được đồng bộ tức thời nhưng không được ghi vào lịch sử.',
+        privacyAppsPlaceholder: 'Ví dụ: 1Password.exe',
+        excludeApp: 'Không lưu',
+        noExcludedApps: 'Chưa loại trừ ứng dụng nào.',
+        removeExcludedApp: 'Cho phép lưu lại',
+        mediaImage: 'Hình ảnh',
+        mediaFiles: 'Tệp',
+        mediaRichText: 'Rich text',
         checkingUpdate: 'Đang kiểm tra cập nhật...',
         updateAvailable: version => `Có bản mới ${version}. Bấm tải để mở GitHub.`,
         updateLatest: 'Đang dùng bản mới nhất.',
@@ -1533,7 +1669,13 @@
         clearSearchTitle: 'Clear search',
         add: 'Add',
         clearHistoryTitle: 'Clear history',
-        clearHistoryConfirm: 'Clear all clipboard history?',
+        clearHistoryConfirm: (count, pinned) => `Delete ${count} unpinned item${count === 1 ? '' : 's'}? ${pinned ? `${pinned} pinned item${pinned === 1 ? '' : 's'} will be kept.` : ''}`,
+        deleteFiltered: 'Delete filtered',
+        deleteFilteredCount: count => `Delete ${count}`,
+        deleteFilteredConfirm: (count, label) => `Delete ${count} item${count === 1 ? '' : 's'} matching “${label}”? Pinned items are always kept.`,
+        deleteItemConfirm: pinned => pinned ? 'This item is pinned. Delete this pinned item specifically?' : 'Delete this clipboard item?',
+        appFilterAll: 'Filter by application',
+        undoHistoryText: (count, label) => `Backed up ${count} deleted item${count === 1 ? '' : 's'}${label ? ` · ${label}` : ''}.`,
         delete: 'Delete',
         cancel: 'Cancel',
         devicesTitle: 'Devices',
@@ -1636,6 +1778,15 @@
         autostartSavedOff: 'Autostart disabled.',
         alwaysOnTopSavedOn: 'Always on top enabled.',
         alwaysOnTopSavedOff: 'Always on top disabled.',
+        privacyAppsTitle: 'Apps excluded from history',
+        privacyAppsDesc: 'Clipboard from these apps is still synced live, but is never saved to history.',
+        privacyAppsPlaceholder: 'Example: 1Password.exe',
+        excludeApp: 'Exclude',
+        noExcludedApps: 'No apps are excluded.',
+        removeExcludedApp: 'Allow history again',
+        mediaImage: 'Image',
+        mediaFiles: 'Files',
+        mediaRichText: 'Rich text',
         checkingUpdate: 'Checking for updates...',
         updateAvailable: version => `Version ${version} is available. Click download to open GitHub.`,
         updateLatest: 'You are on the latest version.',
@@ -1663,6 +1814,7 @@
       historyVisibleLimit: HISTORY_PAGE_SIZE,
       hoveredHistoryIndex: null,
       editingEntryId: null,
+      pendingDelete: null,
       editorDraft: { initial: '', last: '', undo: [], redo: [], applying: false },
       pinnedPalette: { items: [], selectedIndex: 0 },
       updateUrl: 'https://github.com/sieuxuan/fast-paste/releases/latest',
@@ -1685,15 +1837,20 @@
       pinnedLaunch: document.getElementById('pinned-launch'),
       historySearch: document.getElementById('history-search'),
       clearSearch: document.getElementById('clear-search'),
-      addNew: document.getElementById('add-new'),
       clearHistory: document.getElementById('clear-history'),
       clearHistoryRow: document.getElementById('clear-history-row'),
+      clearConfirmText: document.getElementById('clear-confirm-text'),
       confirmClear: document.getElementById('confirm-clear'),
       cancelClear: document.getElementById('cancel-clear'),
       folderFilters: document.getElementById('folder-filters'),
+      appFilter: document.getElementById('app-filter'),
+      deleteFiltered: document.getElementById('delete-filtered'),
+      historyUndoRow: document.getElementById('history-undo-row'),
+      historyUndoText: document.getElementById('history-undo-text'),
+      undoHistoryDelete: document.getElementById('undo-history-delete'),
+      dismissHistoryUndo: document.getElementById('dismiss-history-undo'),
       historyContainer: document.getElementById('history-container'),
       deviceServerIp: document.getElementById('device-server-ip'),
-      srvClients: document.getElementById('srv-clients'),
       devicesList: document.getElementById('devices-list'),
       cloudBadge: document.getElementById('cloud-badge'),
       cloudTitle: document.getElementById('cloud-title'),
@@ -1722,6 +1879,11 @@
       alwaysOnTopCopy: document.getElementById('always-on-top-copy'),
       alwaysOnTopStatus: document.getElementById('always-on-top-status'),
       alwaysOnTopToggle: document.getElementById('always-on-top-toggle'),
+      excludedAppInput: document.getElementById('excluded-app-input'),
+      sourceAppOptions: document.getElementById('source-app-options'),
+      addExcludedApp: document.getElementById('add-excluded-app'),
+      excludedAppList: document.getElementById('excluded-app-list'),
+      excludedAppStatus: document.getElementById('excluded-app-status'),
       versionTitle: document.getElementById('version-title'),
       updateStatus: document.getElementById('update-status'),
       checkUpdate: document.getElementById('check-update'),
@@ -2027,8 +2189,21 @@
     }
 
     function renderHistoryChrome(allItems) {
-      els.clearHistory.disabled = allItems.length === 0;
+      const deletableItems = allItems.filter(item => !item.pinned);
+      const filteredDeletable = state.currentHistory.filter(item => !item.pinned);
+      const hasActiveFilter = state.folderFilter !== 'all' || Boolean(state.query.trim());
+      els.clearHistory.disabled = deletableItems.length === 0;
       els.clearSearch.hidden = !state.query;
+      els.deleteFiltered.hidden = !hasActiveFilter || filteredDeletable.length === 0;
+      const deleteFilteredLabel = els.deleteFiltered.querySelector('span');
+      if (deleteFilteredLabel) deleteFilteredLabel.textContent = t('deleteFilteredCount', filteredDeletable.length);
+
+      const backup = state.data?.historyBackup || state.data?.history_backup;
+      const backupItems = backup?.items || [];
+      els.historyUndoRow.hidden = backupItems.length === 0;
+      if (backupItems.length) {
+        els.historyUndoText.textContent = t('undoHistoryText', backupItems.length, backup.label || '');
+      }
       renderFolderFilters();
     }
 
@@ -2043,15 +2218,21 @@
         { key: 'all', label: t('allTags') },
         { key: 'pinned', label: t('pinned') },
         { key: 'none', label: t('untagged') },
-        ...getFolders().map(folder => ({ key: `folder:${folder}`, label: folder, folder })),
-        ...getSourceApps().map(app => ({ key: `app:${app}`, label: app, app }))
+        ...getFolders().map(folder => ({ key: `folder:${folder}`, label: folder, folder }))
       ];
 
       els.folderFilters.innerHTML = filters.map(filter => `
         <button class="chip ${state.folderFilter === filter.key ? 'active' : ''}" type="button" data-filter="${escapeHtml(filter.key)}">
-          ${filter.folder ? icon('i-tag') : filter.app ? icon('i-devices') : ''}<span>${escapeHtml(filter.label)}</span>
+          ${filter.folder ? icon('i-tag') : ''}<span>${escapeHtml(filter.label)}</span>
         </button>
       `).join('');
+
+      const selectedApp = state.folderFilter.startsWith('app:') ? state.folderFilter : 'all';
+      els.appFilter.innerHTML = [
+        `<option value="all">${escapeHtml(t('appFilterAll'))}</option>`,
+        ...getSourceApps().map(app => `<option value="app:${escapeHtml(app)}">${escapeHtml(app.replace(/\.exe$/i, ''))}</option>`)
+      ].join('');
+      els.appFilter.value = selectedApp;
     }
 
     function applyFolderFilter(item) {
@@ -2084,8 +2265,19 @@
       const sourceApp = String(item.sourceApp || item.source_app || '').trim();
       if (!sourceApp) return '';
       const sourceTitle = String(item.sourceTitle || item.source_title || '').trim();
-      const title = sourceTitle ? ` title="${escapeHtml(sourceTitle)}"` : '';
-      return `<span class="badge"${title}>${icon('i-devices')}${escapeHtml(sourceApp)}</span>`;
+      const tooltip = [sourceApp.replace(/\.exe$/i, ''), sourceTitle].filter(Boolean).join(' · ');
+      const appIcons = state.data?.appIcons || state.data?.app_icons || {};
+      const iconData = appIcons[sourceApp.toLowerCase()] || '';
+      const fallback = sourceApp.replace(/\.exe$/i, '').trim().charAt(0).toUpperCase() || '?';
+      return `<span class="app-logo-badge" title="${escapeHtml(tooltip)}"><span class="app-logo">${iconData ? `<img src="${escapeHtml(iconData)}" alt="">` : escapeHtml(fallback)}</span></span>`;
+    }
+
+    function payloadBadge(item) {
+      const kind = item.payload?.kind || '';
+      if (kind === 'image') return `<span class="badge b-url">${icon('i-image')}${escapeHtml(t('mediaImage'))}</span>`;
+      if (kind === 'files') return `<span class="badge b-url">${icon('i-folder')}${escapeHtml(t('mediaFiles'))} · ${item.payload.files?.length || 0}</span>`;
+      if (kind === 'html') return `<span class="badge b-url">${icon('i-code')}${escapeHtml(t('mediaRichText'))}</span>`;
+      return '';
     }
 
     function renderHistory({ force = false } = {}) {
@@ -2105,6 +2297,7 @@
         state.folderFilter,
         state.query,
         state.historyVisibleLimit,
+        Object.keys(state.data?.appIcons || state.data?.app_icons || {}).join('|'),
         historyDataSignature(allItems)
       ].join('\u0002');
 
@@ -2150,6 +2343,7 @@
                   <div class="hmain">
                     <div class="hmeta">
                       ${sourceBadge(item)}
+                      ${payloadBadge(item)}
                       ${item.pinned ? `<span class="badge b-pin">${icon('i-star')}${escapeHtml(t('pinBadge'))}</span>` : ''}
                       ${isUrl(text) ? `<span class="badge b-url">${icon('i-link')}URL</span>` : ''}
                       ${folder ? `<span class="badge">${icon('i-tag')}${escapeHtml(folder)}</span>` : ''}
@@ -2188,10 +2382,6 @@
         ? ips.map(ip => `<span class="tag">${escapeHtml(ip)}:4567</span>`).join('')
         : `<span class="tag">${escapeHtml(t('noLanIp'))}</span>`;
 
-      els.srvClients.textContent = clients.length
-        ? t('connectedCount', clients.length)
-        : t('noConnection');
-
       els.devicesList.innerHTML = clients.length
         ? clients.map(ip => `
           <div class="device-item">
@@ -2199,7 +2389,7 @@
             <span class="badge b-android">Android</span>
           </div>
         `).join('')
-        : `<div class="empty"><div><strong>${escapeHtml(t('noAndroidTitle'))}</strong><span>${escapeHtml(t('noAndroidDesc'))}</span></div></div>`;
+        : `<div class="device-empty">${icon('i-phone')}<div><strong>${escapeHtml(t('noAndroidTitle'))}</strong><span>${escapeHtml(t('noAndroidDesc'))}</span></div></div>`;
 
       renderCloudSettings();
     }
@@ -2279,6 +2469,29 @@
         : t('alwaysOnTopOffDesc');
 
       els.folderOptions.innerHTML = getFolders().map(folder => `<option value="${escapeHtml(folder)}"></option>`).join('');
+      const excludedApps = settings.excludedApps || settings.excluded_apps || [];
+      const knownApps = Array.from(new Set([...getSourceApps(), ...excludedApps]))
+        .sort((a, b) => a.localeCompare(b, currentLocale()));
+      els.sourceAppOptions.innerHTML = knownApps.map(app => `<option value="${escapeHtml(app)}"></option>`).join('');
+      els.excludedAppList.innerHTML = excludedApps.length
+        ? excludedApps.map(app => `<span class="excluded-app">${escapeHtml(app.replace(/\.exe$/i, ''))}<button class="icon-btn" type="button" data-allow-app="${escapeHtml(app)}" title="${escapeHtml(t('removeExcludedApp'))}">${icon('i-x')}</button></span>`).join('')
+        : `<span class="faint">${escapeHtml(t('noExcludedApps'))}</span>`;
+    }
+
+    async function setAppExcluded(appName, excluded) {
+      const clean = String(appName || '').trim();
+      if (!clean) return;
+      els.addExcludedApp.disabled = true;
+      setStatus(els.excludedAppStatus, t('saving'));
+      try {
+        await invoke('set_app_excluded', { appName: clean, excluded });
+        els.excludedAppInput.value = '';
+        setStatus(els.excludedAppStatus, t('saved'), 'ok');
+      } catch (error) {
+        setStatus(els.excludedAppStatus, String(error), 'error');
+      } finally {
+        els.addExcludedApp.disabled = false;
+      }
     }
 
     function render({ forceHistory = false } = {}) {
@@ -2293,7 +2506,7 @@
       const entry = state.currentHistory[index];
       if (!entry) return;
       try {
-        await invoke('copy_text', { text: entry.text || '' });
+        await invoke('copy_history_item', { id: entry.id });
       } catch (error) {
         console.error(error);
       }
@@ -2302,6 +2515,7 @@
     async function deleteHistoryItem(index) {
       const entry = state.currentHistory[index];
       if (!entry) return;
+      if (!window.confirm(t('deleteItemConfirm', Boolean(entry.pinned)))) return;
       try {
         await invoke('delete_history_item', { id: entry.id });
       } catch (error) {
@@ -2485,15 +2699,62 @@
       }
     }
 
+    function activeFilterLabel() {
+      if (state.folderFilter === 'pinned') return t('pinned');
+      if (state.folderFilter === 'none') return t('untagged');
+      if (state.folderFilter.startsWith('folder:')) return state.folderFilter.slice(7);
+      if (state.folderFilter.startsWith('app:')) return state.folderFilter.slice(4).replace(/\.exe$/i, '');
+      return state.query.trim() || t('allTags');
+    }
+
+    function prepareHistoryDelete(mode) {
+      const source = mode === 'filtered' ? state.currentHistory : (state.data?.history || []);
+      const items = source.filter(item => !item.pinned);
+      if (!items.length) return;
+      const pinnedCount = source.filter(item => item.pinned).length;
+      const label = mode === 'filtered' ? activeFilterLabel() : t('allTags');
+      state.pendingDelete = { mode, ids: items.map(item => item.id), label, count: items.length };
+      els.clearConfirmText.textContent = mode === 'filtered'
+        ? t('deleteFilteredConfirm', items.length, label)
+        : t('clearHistoryConfirm', items.length, pinnedCount);
+      els.clearHistoryRow.hidden = false;
+    }
+
     async function clearHistoryConfirmed() {
+      const pending = state.pendingDelete;
+      if (!pending) return;
       els.confirmClear.disabled = true;
       try {
-        await invoke('clear_history');
+        if (pending.mode === 'filtered') {
+          await invoke('delete_history_items', { ids: pending.ids, label: pending.label });
+        } else {
+          await invoke('clear_history');
+        }
         els.clearHistoryRow.hidden = true;
+        state.pendingDelete = null;
       } catch (error) {
         console.error(error);
       } finally {
         els.confirmClear.disabled = false;
+      }
+    }
+
+    async function undoHistoryDelete() {
+      els.undoHistoryDelete.disabled = true;
+      try {
+        await invoke('undo_history_delete');
+      } catch (error) {
+        console.error(error);
+      } finally {
+        els.undoHistoryDelete.disabled = false;
+      }
+    }
+
+    async function dismissHistoryUndo() {
+      try {
+        await invoke('dismiss_history_backup');
+      } catch (error) {
+        console.error(error);
       }
     }
 
@@ -2727,7 +2988,7 @@
       const entry = (state.data?.history || []).find(item => item.pinned && Number(item.quick_slot) === slot);
       if (!entry) return;
       try {
-        await invoke('copy_text', { text: entry.text || '' });
+        await invoke('copy_history_item', { id: entry.id });
       } catch (error) {
         console.error(error);
       }
@@ -2774,7 +3035,6 @@
       });
       els.themeBtn.addEventListener('click', toggleTheme);
       els.pinnedLaunch.addEventListener('click', () => openPinnedPalette());
-      els.addNew.addEventListener('click', openNewItem);
 
       els.historySearch.addEventListener('input', event => {
         state.query = event.target.value;
@@ -2788,17 +3048,26 @@
         renderHistory({ force: true });
       });
       els.clearHistory.addEventListener('click', () => {
-        els.clearHistoryRow.hidden = false;
+        prepareHistoryDelete('all');
       });
+      els.deleteFiltered.addEventListener('click', () => prepareHistoryDelete('filtered'));
       els.cancelClear.addEventListener('click', () => {
         els.clearHistoryRow.hidden = true;
+        state.pendingDelete = null;
       });
       els.confirmClear.addEventListener('click', clearHistoryConfirmed);
+      els.undoHistoryDelete.addEventListener('click', undoHistoryDelete);
+      els.dismissHistoryUndo.addEventListener('click', dismissHistoryUndo);
 
       els.folderFilters.addEventListener('click', event => {
         const chip = event.target.closest('[data-filter]');
         if (!chip) return;
         state.folderFilter = chip.dataset.filter;
+        resetHistoryViewport();
+        renderHistory({ force: true });
+      });
+      els.appFilter.addEventListener('change', event => {
+        state.folderFilter = event.target.value;
         resetHistoryViewport();
         renderHistory({ force: true });
       });
@@ -2875,6 +3144,14 @@
       els.savePaletteHotkey.addEventListener('click', saveQuickSlotHotkey);
       els.autostartToggle.addEventListener('click', saveAutoStart);
       els.alwaysOnTopToggle.addEventListener('click', saveAlwaysOnTop);
+      els.addExcludedApp.addEventListener('click', () => setAppExcluded(els.excludedAppInput.value, true));
+      els.excludedAppInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') setAppExcluded(els.excludedAppInput.value, true);
+      });
+      els.excludedAppList.addEventListener('click', event => {
+        const button = event.target.closest('[data-allow-app]');
+        if (button) setAppExcluded(button.dataset.allowApp, false);
+      });
 
       els.checkUpdate.addEventListener('click', () => checkForUpdates(false));
       els.openUpdate.addEventListener('click', openUpdate);

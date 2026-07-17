@@ -11,10 +11,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::time::sleep;
 
+use crate::clipboard::ClipboardPayload;
+
 const CLOUD_FILE_NAME: &str = "fastpaste-cloud-history.json";
 const DRIVE_APPDATA_SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
 const USERINFO_EMAIL_SCOPE: &str = "https://www.googleapis.com/auth/userinfo.email";
-const MAX_CLOUD_ITEMS: usize = 500;
+const MAX_CLOUD_ITEMS: usize = 1_000;
 const HTTP_TIMEOUT_SECONDS: u64 = 60;
 const UPLOAD_RETRY_ATTEMPTS: usize = 3;
 
@@ -45,7 +47,7 @@ impl Default for CloudUiState {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CloudEntry {
     pub text: String,
     pub timestamp: i64,
@@ -58,6 +60,8 @@ pub struct CloudEntry {
     pub pinned: bool,
     #[serde(default)]
     pub folder: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<ClipboardPayload>,
 }
 
 pub struct CloudSyncResult {
@@ -68,6 +72,7 @@ pub struct CloudSyncResult {
 pub struct CloudDeleteMarker {
     pub text_hash: String,
     pub deleted_at: i64,
+    pub include_pinned: bool,
 }
 
 #[derive(Deserialize)]
@@ -187,10 +192,12 @@ pub async fn sync_pruned(
     let access_token = ensure_access_token().await?;
     let client = http_client()?;
     let remote_file_id = find_cloud_file(&client, &access_token).await?;
-    let mut remote_entries = match remote_file_id.as_deref() {
+    let downloaded_remote_entries = match remote_file_id.as_deref() {
         Some(file_id) => download_entries(&client, &access_token, file_id).await?,
         None => vec![],
     };
+    let normalized_remote = merge_entries(downloaded_remote_entries.clone());
+    let mut remote_entries = downloaded_remote_entries;
     let mut local_entries = entries;
 
     if clear_history_at.is_some() || !deleted_markers.is_empty() {
@@ -199,27 +206,20 @@ pub async fn sync_pruned(
     }
 
     let merged_entries = merge_entries([remote_entries, local_entries].concat());
-    upload_entries(
-        &client,
-        &access_token,
-        remote_file_id.as_deref(),
-        &merged_entries,
-    )
-    .await?;
+    if remote_file_id.is_none() || merged_entries != normalized_remote {
+        upload_entries(
+            &client,
+            &access_token,
+            remote_file_id.as_deref(),
+            &merged_entries,
+        )
+        .await?;
+    }
 
     Ok(CloudSyncResult {
         entries: merged_entries.clone(),
         merged_count: merged_entries.len(),
     })
-}
-
-pub async fn replace(entries: Vec<CloudEntry>) -> Result<usize, String> {
-    let access_token = ensure_access_token().await?;
-    let client = http_client()?;
-    let remote_file_id = find_cloud_file(&client, &access_token).await?;
-    let entries = merge_entries(entries);
-    upload_entries(&client, &access_token, remote_file_id.as_deref(), &entries).await?;
-    Ok(entries.len())
 }
 
 async fn wait_for_oauth_code(
@@ -602,8 +602,9 @@ fn merge_entries(entries: Vec<CloudEntry>) -> Vec<CloudEntry> {
         if entry.text.trim().is_empty() {
             continue;
         }
+        let entry_key = cloud_entry_key(&entry);
         let should_replace = by_text
-            .get(&entry.text)
+            .get(&entry_key)
             .map(|current| {
                 entry.timestamp > current.timestamp
                     || (entry.timestamp == current.timestamp
@@ -614,14 +615,14 @@ fn merge_entries(entries: Vec<CloudEntry>) -> Vec<CloudEntry> {
             .unwrap_or(true);
         if should_replace {
             let mut next = entry;
-            if let Some(current) = by_text.get(&next.text) {
+            if let Some(current) = by_text.get(&entry_key) {
                 next.pinned = next.pinned || current.pinned;
                 if next.folder.trim().is_empty() && !current.folder.trim().is_empty() {
                     next.folder = current.folder.clone();
                 }
             }
-            by_text.insert(next.text.clone(), next);
-        } else if let Some(current) = by_text.get_mut(&entry.text) {
+            by_text.insert(entry_key, next);
+        } else if let Some(current) = by_text.get_mut(&entry_key) {
             current.pinned = current.pinned || entry.pinned;
             if current.folder.trim().is_empty() && !entry.folder.trim().is_empty() {
                 current.folder = entry.folder;
@@ -630,8 +631,26 @@ fn merge_entries(entries: Vec<CloudEntry>) -> Vec<CloudEntry> {
     }
 
     let mut merged: Vec<CloudEntry> = by_text.into_values().collect();
-    merged.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    merged.truncate(MAX_CLOUD_ITEMS);
+    merged.sort_by(|a, b| {
+        b.timestamp
+            .cmp(&a.timestamp)
+            .then_with(|| a.text.cmp(&b.text))
+    });
+    if merged.len() > MAX_CLOUD_ITEMS {
+        let pinned_count = merged.iter().filter(|entry| entry.pinned).count();
+        let non_pinned_limit = MAX_CLOUD_ITEMS.saturating_sub(pinned_count);
+        let mut kept_non_pinned = 0usize;
+        merged.retain(|entry| {
+            if entry.pinned {
+                true
+            } else if kept_non_pinned < non_pinned_limit {
+                kept_non_pinned += 1;
+                true
+            } else {
+                false
+            }
+        });
+    }
     merged
 }
 
@@ -640,17 +659,28 @@ fn is_deleted_entry(
     deleted_markers: &[CloudDeleteMarker],
     clear_history_at: Option<i64>,
 ) -> bool {
-    if clear_history_at
-        .map(|clear_at| entry.timestamp <= clear_at)
-        .unwrap_or(false)
+    if !entry.pinned
+        && clear_history_at
+            .map(|clear_at| entry.timestamp <= clear_at)
+            .unwrap_or(false)
     {
         return true;
     }
 
-    let text_hash = hash_text(&entry.text);
-    deleted_markers
-        .iter()
-        .any(|marker| marker.text_hash == text_hash && entry.timestamp <= marker.deleted_at)
+    let text_hash = hash_text(&cloud_entry_key(entry));
+    deleted_markers.iter().any(|marker| {
+        marker.text_hash == text_hash
+            && entry.timestamp <= marker.deleted_at
+            && (!entry.pinned || marker.include_pinned)
+    })
+}
+
+pub(crate) fn cloud_entry_key(entry: &CloudEntry) -> String {
+    entry
+        .payload
+        .as_ref()
+        .map(ClipboardPayload::fingerprint)
+        .unwrap_or_else(|| entry.text.clone())
 }
 
 fn hash_text(text: &str) -> String {

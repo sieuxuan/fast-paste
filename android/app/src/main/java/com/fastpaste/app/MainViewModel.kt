@@ -1,19 +1,22 @@
 package com.fastpaste.app
 
 import android.app.Application
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.fastpaste.app.cloud.GoogleDriveCloudSync
 import com.fastpaste.app.discovery.DiscoveredServer
 import com.fastpaste.app.discovery.ServiceDiscovery
 import com.fastpaste.app.data.ClipboardEntry
+import com.fastpaste.app.data.ClipboardPayload
 import com.fastpaste.app.data.ClipboardRepository
 import com.fastpaste.app.service.ClipboardService
+import com.fastpaste.app.sync.AndroidClipboardCodec
 import com.fastpaste.app.sync.DeletedHistoryStore
+import com.fastpaste.app.sync.HistoryBackupStore
 import com.fastpaste.app.websocket.ConnectionState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -25,6 +28,7 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class ConnectionLogEntry(
     val time: String,
@@ -49,6 +53,7 @@ data class UiState(
     val cloudSignedIn: Boolean = false,
     val cloudMessage: String = "Đăng nhập Google để bật tự đồng bộ",
     val lastSyncText: String = "Chưa đồng bộ",
+    val deletedBackupCount: Int = 0,
     val connectionLogs: List<ConnectionLogEntry> = listOf(
         ConnectionLogEntry("Bây giờ", "Đang khởi động và tìm PC cùng mạng.")
     )
@@ -63,13 +68,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val updateClient = OkHttpClient()
     private val googleDriveCloudSync = GoogleDriveCloudSync()
     private val deletedHistoryStore = DeletedHistoryStore(application)
+    private val historyBackupStore = HistoryBackupStore(application)
     private val cloudPrefs =
         application.getSharedPreferences("fastpaste_cloud", Context.MODE_PRIVATE)
     private var autoConnectEnabled = true
     private val loggedServers = mutableSetOf<String>()
     private var lastConnectRequest: Pair<String, Long>? = null
+    private var lastDeletedBatch: List<ClipboardEntry> = historyBackupStore.load()
+    private val cloudSyncInFlight = AtomicBoolean(false)
 
-    private val _uiState = MutableStateFlow(UiState())
+    private val _uiState = MutableStateFlow(
+        UiState(deletedBackupCount = lastDeletedBatch.size)
+    )
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
     init {
@@ -178,11 +188,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             putExtra(ClipboardService.EXTRA_PORT, port)
         }
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                getApplication<FastPasteApp>().startForegroundService(intent)
-            } else {
-                getApplication<FastPasteApp>().startService(intent)
-            }
+            getApplication<FastPasteApp>().startForegroundService(intent)
         } catch (e: Exception) {
             // Android 12+ blocks foreground-service starts while the app is in
             // the background — don't crash, just report and stay disconnected.
@@ -254,7 +260,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteHistoryItem(id: Long) {
         viewModelScope.launch {
             dao.getById(id)?.let { entry ->
-                deletedHistoryStore.markDeleted(entry.content)
+                deletedHistoryStore.markDeleted(entry.content, includePinned = true)
             }
             dao.deleteById(id)
         }
@@ -269,8 +275,92 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearHistory() {
         viewModelScope.launch {
-            deletedHistoryStore.markCleared(dao.getAllOnce())
-            dao.clearAll()
+            val removable = dao.getAllOnce().filterNot { it.pinned }
+            if (removable.isEmpty()) return@launch
+            lastDeletedBatch = removable
+            historyBackupStore.save(removable)
+            deletedHistoryStore.markCleared(removable)
+            dao.clearUnpinned()
+            _uiState.update { it.copy(deletedBackupCount = removable.size) }
+        }
+    }
+
+    fun deleteHistoryItems(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val idSet = ids.toSet()
+            val removable = dao.getAllOnce().filter { !it.pinned && it.id in idSet }
+            if (removable.isEmpty()) return@launch
+            lastDeletedBatch = removable
+            historyBackupStore.save(removable)
+            deletedHistoryStore.markDeletedBatch(
+                texts = removable.map { it.content },
+                includePinned = false
+            )
+            dao.deleteUnpinnedByIds(removable.map { it.id })
+            _uiState.update { it.copy(deletedBackupCount = removable.size) }
+        }
+    }
+
+    fun undoHistoryDelete() {
+        viewModelScope.launch {
+            val backup = lastDeletedBatch.ifEmpty { historyBackupStore.load() }
+            if (backup.isEmpty()) return@launch
+            backup.forEach { entry ->
+                deletedHistoryStore.unmarkDeleted(entry.content)
+                historyRepository.mergeEntry(
+                    content = entry.content,
+                    source = entry.source,
+                    sourceApp = entry.sourceApp,
+                    sourceTitle = entry.sourceTitle,
+                    timestamp = entry.timestamp,
+                    pinned = entry.pinned,
+                    folder = entry.folder,
+                    payload = ClipboardPayload.fromEntry(entry)
+                )
+            }
+            lastDeletedBatch = emptyList()
+            historyBackupStore.clear()
+            _uiState.update { it.copy(deletedBackupCount = 0) }
+        }
+    }
+
+    fun updateHistoryItem(id: Long, content: String, folder: String) {
+        if (content.isBlank()) return
+        viewModelScope.launch {
+            val entry = dao.getById(id) ?: return@launch
+            val cleanContent = content
+            if (entry.content != cleanContent) {
+                deletedHistoryStore.markDeleted(entry.content, includePinned = true)
+                deletedHistoryStore.unmarkDeleted(cleanContent)
+            }
+            dao.updateEditedEntry(
+                id = id,
+                content = cleanContent,
+                folder = ClipboardRepository.cleanFolderName(folder),
+                timestamp = System.currentTimeMillis()
+            )
+            dao.deleteDuplicatesByContent(cleanContent, id)
+            val intent = Intent(getApplication(), ClipboardService::class.java).apply {
+                action = ClipboardService.ACTION_SEND_TEXT
+                putExtra(ClipboardService.EXTRA_TEXT, cleanContent)
+            }
+            getApplication<FastPasteApp>().startService(intent)
+        }
+    }
+
+    fun copyHistoryItem(id: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val entry = dao.getById(id) ?: return@launch
+            val payload = ClipboardPayload.fromEntry(entry)
+            val clip = runCatching {
+                AndroidClipboardCodec.write(getApplication(), payload)
+            }.getOrNull() ?: return@launch
+            withContext(Dispatchers.Main) {
+                val clipboard = getApplication<FastPasteApp>()
+                    .getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(clip)
+            }
         }
     }
 
@@ -351,6 +441,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             setCloudMessage("Không lấy được quyền Google Drive.")
             return
         }
+        if (!cloudSyncInFlight.compareAndSet(false, true)) return
 
         viewModelScope.launch {
             _uiState.update {
@@ -368,14 +459,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     isDeleted = deletedHistoryStore::isDeleted
                 )
                 var inserted = 0
-                result.entriesToInsert.forEach { entry ->
-                    if (!deletedHistoryStore.isDeleted(entry.content, entry.timestamp)) {
+                result.entriesToMerge.forEach { entry ->
+                    if (!deletedHistoryStore.isDeleted(entry.content, entry.timestamp, entry.pinned)) {
                         val mergeResult = historyRepository.mergeEntry(
                             content = entry.content,
                             source = entry.source,
+                            sourceApp = entry.sourceApp,
+                            sourceTitle = entry.sourceTitle,
                             timestamp = entry.timestamp,
                             pinned = entry.pinned,
-                            folder = entry.folder
+                            folder = entry.folder,
+                            payload = ClipboardPayload.fromEntry(entry)
                         )
                         if (mergeResult.inserted) {
                             inserted++
@@ -385,6 +479,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 inserted to result.mergedCount
             }
             .onSuccess { (inserted, mergedCount) ->
+                cloudSyncInFlight.set(false)
                 if (rememberLogin) {
                     cloudPrefs.edit().putBoolean(CLOUD_SYNC_ENABLED, true).apply()
                 }
@@ -400,6 +495,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 addConnectionLog("Google Drive sync lúc $syncTime: $mergedCount mục, tải về $inserted mục mới.")
             }
             .onFailure { error ->
+                cloudSyncInFlight.set(false)
                 _uiState.update {
                     it.copy(
                         cloudSyncing = false,
@@ -432,7 +528,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "https://raw.githubusercontent.com/sieuxuan/fast-paste/master/update.json"
         private const val FALLBACK_RELEASE_URL =
             "https://github.com/sieuxuan/fast-paste/releases/latest"
-        private const val MAX_HISTORY_ITEMS = 500
+        private const val MAX_HISTORY_ITEMS = 1_000
         private const val MAX_CONNECTION_LOGS = 12
         private const val CONNECT_REQUEST_THROTTLE_MS = 10_000L
         private const val CLOUD_SYNC_ENABLED = "cloud_sync_enabled"
