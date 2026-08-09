@@ -1714,6 +1714,9 @@
         pinBadge: 'Ghim',
         copyTitle: 'Sao chép',
         copySuccess: 'Đã sao chép vào clipboard',
+        blobDownloading: 'Đang tải ảnh; FastPaste sẽ tự chép vào clipboard khi xong.',
+        historyItemMissing: 'Không tìm thấy mục clipboard.',
+        clipboardWriteFailed: 'Không ghi được vào clipboard.',
         unpinTitle: 'Bỏ ghim',
         pinTitle: 'Ghim',
         editTitle: 'Sửa',
@@ -1861,6 +1864,9 @@
         pinBadge: 'Pinned',
         copyTitle: 'Copy',
         copySuccess: 'Copied to clipboard',
+        blobDownloading: 'Downloading image; FastPaste will copy it once verified.',
+        historyItemMissing: 'Clipboard entry not found.',
+        clipboardWriteFailed: 'Could not write to the clipboard.',
         unpinTitle: 'Unpin',
         pinTitle: 'Pin',
         editTitle: 'Edit',
@@ -2474,8 +2480,7 @@
         els.imagePreviewFull.src = await invoke('get_history_image_preview', { id: entry.id });
         els.imagePreviewBackdrop.hidden = false;
       } catch (error) {
-        const message = String(error);
-        showToast(message, !message.includes('Đang tải'));
+        showStatus(error);
       }
     }
 
@@ -2739,10 +2744,10 @@
       const entry = state.currentHistory[index];
       if (!entry) return;
       try {
-        await invoke('copy_history_item', { id: entry.id });
-        showToast(entry.payload?.kind === 'image' ? 'Đã sao chép ảnh vào clipboard' : t('copySuccess'));
+        const status = await invoke('copy_history_item', { id: entry.id });
+        showStatus(status);
       } catch (error) {
-        showToast(String(error), true);
+        showStatus(error);
       }
     }
 
@@ -2755,6 +2760,16 @@
       toast.classList.add('show');
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    function showStatus(status) {
+      if (!status) return;
+      if (typeof status === 'string') {
+        showToast(status, true);
+        return;
+      }
+      const translated = I18N[state.language]?.[status.code];
+      showToast(typeof translated === 'function' ? translated() : (translated || status.text || ''), status.tone === 'error');
     }
 
     async function deleteHistoryItem(index) {
@@ -3337,9 +3352,10 @@
       const entry = (state.data?.history || []).find(item => item.pinned && Number(item.quick_slot) === slot);
       if (!entry) return;
       try {
-        await invoke('copy_history_item', { id: entry.id });
+        const status = await invoke('copy_history_item', { id: entry.id });
+        showStatus(status);
       } catch (error) {
-        console.error(error);
+        showStatus(error);
       }
     }
 

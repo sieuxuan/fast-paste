@@ -6,6 +6,7 @@ mod hotkeys;
 mod network;
 mod pairing;
 mod state;
+mod status;
 mod transfer;
 mod vault;
 mod watcher;
@@ -247,7 +248,7 @@ async fn copy_history_item(
     id: String,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<status::StatusMessage, status::StatusMessage> {
     let mut pending_blob = {
         let data = state.0.lock().unwrap();
         data.history
@@ -291,15 +292,18 @@ async fn copy_history_item(
             let _ = tx.send(request);
         }
         broadcast_state_now(&app);
-        return Err(format!(
-            "Đang tải ảnh/tệp {:.1} MB; FastPaste sẽ xác thực rồi tự chép vào clipboard.",
-            blob_size as f64 / 1_048_576.0
+        return Ok(status::info(
+            "blobDownloading",
+            format!(
+                "Đang tải ảnh {:.1} MB; FastPaste sẽ xác thực rồi tự chép vào clipboard.",
+                blob_size as f64 / 1_048_576.0
+            ),
         ));
     }
     let (payload, text) = {
         let mut data = state.0.lock().unwrap();
         let Some(index) = data.history.iter().position(|item| item.id == id) else {
-            return Err("Không tìm thấy mục clipboard.".to_string());
+            return Err(status::error("historyItemMissing", "Không tìm thấy mục clipboard."));
         };
         let mut item = data.history.remove(index);
         item.timestamp = chrono::Utc::now().to_rfc3339();
@@ -310,12 +314,13 @@ async fn copy_history_item(
         result
     };
     let message = if let Some(payload) = payload {
-        crate::clipboard::write_clipboard(&payload)?;
+        crate::clipboard::write_clipboard(&payload)
+            .map_err(|error| status::error("clipboardWriteFailed", error))?;
         payload.protocol_json()
     } else {
         app.clipboard()
             .write_text(text.clone())
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| status::error("clipboardWriteFailed", error.to_string()))?;
         crate::clipboard::mark_self_write();
         text
     };
@@ -326,7 +331,7 @@ async fn copy_history_item(
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
-    Ok(())
+    Ok(status::ok("copySuccess", "Đã sao chép vào clipboard."))
 }
 
 #[tauri::command]
