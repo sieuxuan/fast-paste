@@ -89,7 +89,7 @@ fn save_quick_slot_hotkey(
     data.settings.quick_slot_hotkey = prefix;
     save_state();
     drop(data);
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     Ok(())
 }
 
@@ -116,7 +116,7 @@ fn save_autostart(
 
     save_state();
     drop(data);
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     Ok(())
 }
 
@@ -130,7 +130,7 @@ fn save_always_on_top(always_on_top: bool, state: State<'_, AppState>, app: AppH
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_always_on_top(always_on_top);
     }
-    broadcast_state(&app);
+    broadcast_state_now(&app);
 }
 
 #[tauri::command]
@@ -157,7 +157,7 @@ fn set_app_excluded(
         }
         save_state();
     }
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     Ok(())
 }
 
@@ -188,7 +188,7 @@ fn set_e2ee_passphrase(
         data.settings.e2ee_key_id = key_id.clone();
         save_state();
     }
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     queue_cloud_sync(&app);
     Ok(key_id)
 }
@@ -212,7 +212,7 @@ fn set_e2ee_enabled(
         }
         save_state();
     }
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     queue_cloud_sync(&app);
     Ok(())
 }
@@ -231,7 +231,7 @@ fn copy_text(text: String, app: AppHandle, state: State<'_, AppState>) {
         changed
     };
     if history_changed {
-        broadcast_state(&app);
+        broadcast_state_now(&app);
         queue_cloud_sync(&app);
     }
     if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
@@ -290,7 +290,7 @@ async fn copy_history_item(
         if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
             let _ = tx.send(request);
         }
-        broadcast_state(&app);
+        broadcast_state_now(&app);
         return Err(format!(
             "Đang tải ảnh/tệp {:.1} MB; FastPaste sẽ xác thực rồi tự chép vào clipboard.",
             blob_size as f64 / 1_048_576.0
@@ -322,7 +322,7 @@ async fn copy_history_item(
     if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
         let _ = tx.send(message);
     }
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
@@ -414,7 +414,7 @@ fn update_history_item(
         edited_payload
     };
 
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     if copy_after_save {
         let message = if let Some(payload) = edited_payload {
             crate::clipboard::write_clipboard(&payload)?;
@@ -454,7 +454,7 @@ fn toggle_history_pin(
         save_state();
     }
 
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     queue_cloud_sync(&app);
     Ok(())
 }
@@ -494,7 +494,7 @@ fn set_pinned_slot(
         save_state();
     }
 
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     Ok(())
 }
 
@@ -519,7 +519,7 @@ async fn delete_history_item(
         save_state();
     }
 
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     queue_cloud_sync(&app);
     Ok(())
 }
@@ -566,7 +566,7 @@ async fn clear_history(app: AppHandle, state: State<'_, AppState>) -> Result<(),
     };
 
     if deleted_count > 0 {
-        broadcast_state(&app);
+        broadcast_state_now(&app);
         queue_cloud_sync(&app);
     }
     Ok(())
@@ -618,7 +618,7 @@ async fn delete_history_items(
         count
     };
 
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     queue_cloud_sync(&app);
     Ok(removed_count)
 }
@@ -658,7 +658,7 @@ fn undo_history_delete(app: AppHandle, state: State<'_, AppState>) -> Result<usi
         restored
     };
 
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     queue_cloud_sync(&app);
     Ok(restored_count)
 }
@@ -670,7 +670,7 @@ fn dismiss_history_backup(app: AppHandle, state: State<'_, AppState>) {
         data.history_backup = None;
         save_state();
     }
-    broadcast_state(&app);
+    broadcast_state_now(&app);
 }
 
 #[tauri::command]
@@ -699,7 +699,7 @@ fn add_history_item(
         }
         save_state();
     }
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     if copy_after_save {
         if app.clipboard().write_text(text.clone()).is_ok() {
             crate::clipboard::mark_self_write();
@@ -714,7 +714,7 @@ fn add_history_item(
 
 #[tauri::command]
 fn request_state(app: AppHandle) {
-    broadcast_state(&app);
+    broadcast_state_now(&app);
 }
 
 #[tauri::command]
@@ -762,7 +762,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
             data.cloud.status = "Chưa bật đồng bộ Google trong bản build này.".to_string();
             save_state();
             drop(data);
-            broadcast_state(&app);
+            broadcast_state_now(&app);
             return Err("Chưa bật đồng bộ Google trong bản build này.".to_string());
         }
 
@@ -770,7 +770,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
         data.cloud.status = "Đang mở đăng nhập Google...".to_string();
         save_state();
     }
-    broadcast_state(&app);
+    broadcast_state_now(&app);
 
     match cloud::sign_in(&app).await {
         Ok(email) => {
@@ -783,7 +783,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
                 data.cloud.status = "Đã đăng nhập Google, đang đồng bộ...".to_string();
                 save_state();
             }
-            broadcast_state(&app);
+            broadcast_state_now(&app);
             sync_google_drive(app, data_arc).await
         }
         Err(error) => {
@@ -794,7 +794,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
             data.cloud.status = format!("Đăng nhập Google lỗi: {error}");
             save_state();
             drop(data);
-            broadcast_state(&app);
+            broadcast_state_now(&app);
             Err(error)
         }
     }
@@ -808,7 +808,7 @@ async fn google_sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<(
         data.cloud.status = "Đang thử đồng bộ lại Google Drive...".to_string();
         save_state();
     }
-    broadcast_state(&app);
+    broadcast_state_now(&app);
     sync_google_drive(app, state.0.clone()).await
 }
 
@@ -823,7 +823,7 @@ fn google_sign_out(app: AppHandle, state: State<'_, AppState>) {
     data.cloud.status = "Đã đăng xuất Google Drive.".to_string();
     save_state();
     drop(data);
-    broadcast_state(&app);
+    broadcast_state_now(&app);
 }
 
 // ── Window Helpers ──

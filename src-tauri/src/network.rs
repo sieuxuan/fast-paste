@@ -12,7 +12,10 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::clipboard::{self, ClipboardPayload};
 use crate::history::{self, SyncEntry};
 use crate::pairing::{self, PairRequest, SessionCipher, SessionHello};
-use crate::state::{broadcast_state, queue_cloud_sync, save_state, AppStateData, TransferUiState};
+use crate::state::{
+    broadcast_state, broadcast_transfers, queue_cloud_sync, save_state, AppStateData,
+    TransferUiState,
+};
 use crate::transfer::{self, BlobChunk, BlobRequest};
 
 const BROADCAST_INTERVAL: Duration = Duration::from_secs(2);
@@ -328,14 +331,20 @@ async fn handle_client(
                     if let Some(control) = outcome.control {
                         let _ = direct_tx.send(DirectMessage::App(control));
                     }
+                    let mut history_changed = false;
                     if let Some(payload) = outcome.payload {
                         let _ = apply_clipboard(payload.clone()).await;
                         let mut d = data.lock().unwrap();
                         if history::promote_or_insert_payload(&mut d, &payload, "ANDROID") {
                             save_state();
+                            history_changed = true;
                         }
                     }
-                    broadcast_state(&app);
+                    broadcast_transfers(&app);
+                    if history_changed {
+                        broadcast_state(&app);
+                        queue_cloud_sync(&app);
+                    }
                 }
             }
             continue;
@@ -475,7 +484,7 @@ async fn handle_client(
                                         },
                                     },
                                 );
-                                broadcast_state(&app);
+                                broadcast_transfers(&app);
                                 for frame in frames {
                                     let _ = direct_tx.send(DirectMessage::AppBinary(frame));
                                 }
@@ -499,7 +508,7 @@ async fn handle_client(
                         progress.status = "Hoàn tất".into();
                     }
                     drop(state);
-                    broadcast_state(&app);
+                    broadcast_transfers(&app);
                     continue;
                 }
                 if kind == "blob_chunk" {
@@ -544,7 +553,7 @@ async fn handle_client(
                                     queue_cloud_sync(&app);
                                 }
                             }
-                            broadcast_state(&app);
+                            broadcast_transfers(&app);
                         }
                     }
                     continue;

@@ -3640,6 +3640,10 @@
       state.data = event.payload;
       render();
     });
+    listen('update_transfers', event => {
+      if (state.data) state.data.transfers = event.payload || [];
+      renderTransfers();
+    });
     listen('edit_history_item', event => {
       openEditor(event.payload);
     });

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -19,6 +19,9 @@ static VAULT_WRITABLE: AtomicBool = AtomicBool::new(true);
 const STATE_FLUSH_INTERVAL_MS: u64 = 500;
 static DIRTY: AtomicBool = AtomicBool::new(false);
 static STATE_READY: AtomicBool = AtomicBool::new(false);
+const BROADCAST_COALESCE_MS: u64 = 100;
+static LAST_BROADCAST_AT: AtomicI64 = AtomicI64::new(0);
+static TRAILING_BROADCAST_PENDING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Serialize, Deserialize)]
 struct SensitiveState {
@@ -331,7 +334,29 @@ pub(crate) fn refresh_cloud_state(cloud_state: &mut cloud::CloudUiState) {
     }
 }
 
+fn should_emit(last_at: i64, now: i64) -> bool {
+    now - last_at >= BROADCAST_COALESCE_MS as i64
+}
+
 pub(crate) fn broadcast_state(app: &AppHandle) {
+    let now = chrono::Utc::now().timestamp_millis();
+    let last_at = LAST_BROADCAST_AT.load(Ordering::Acquire);
+    if should_emit(last_at, now) {
+        broadcast_state_now(app);
+        return;
+    }
+
+    if !TRAILING_BROADCAST_PENDING.swap(true, Ordering::AcqRel) {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(BROADCAST_COALESCE_MS)).await;
+            TRAILING_BROADCAST_PENDING.store(false, Ordering::Release);
+            broadcast_state_now(&app);
+        });
+    }
+}
+
+pub(crate) fn broadcast_state_now(app: &AppHandle) {
     let state = app.state::<AppState>();
     let mut data = state.0.lock().unwrap().clone();
     for item in &mut data.history {
@@ -346,7 +371,14 @@ pub(crate) fn broadcast_state(app: &AppHandle) {
             }
         }
     }
+    LAST_BROADCAST_AT.store(chrono::Utc::now().timestamp_millis(), Ordering::Release);
     let _ = app.emit("update_state", data);
+}
+
+pub(crate) fn broadcast_transfers(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let transfers = state.0.lock().unwrap().transfers.clone();
+    let _ = app.emit("update_transfers", transfers);
 }
 
 #[cfg(test)]
@@ -359,6 +391,26 @@ mod persistence_tests {
         save_state();
         assert!(take_dirty());
         assert!(!take_dirty());
+    }
+}
+
+#[cfg(test)]
+mod coalesce_tests {
+    use super::*;
+
+    #[test]
+    fn first_emit_always_passes() {
+        assert!(should_emit(0, 1_000));
+    }
+
+    #[test]
+    fn emits_inside_the_window_are_dropped() {
+        assert!(!should_emit(1_000, 1_050));
+    }
+
+    #[test]
+    fn emits_after_the_window_pass() {
+        assert!(should_emit(1_000, 1_000 + BROADCAST_COALESCE_MS as i64));
     }
 }
 
