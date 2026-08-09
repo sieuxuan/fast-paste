@@ -447,4 +447,61 @@ mod tests {
             offset = ack["nextOffset"].as_u64().unwrap() as usize;
         }
     }
+
+    #[test]
+    fn binary_frames_round_trip_across_ack_windows() {
+        let payload = ClipboardPayload {
+            kind: "image".into(),
+            text: "binary image".into(),
+            mime_type: "image/png".into(),
+            data: base64::engine::general_purpose::STANDARD.encode(vec![7u8; 180_000]),
+            ..ClipboardPayload::default()
+        };
+        let blob_id = payload.fingerprint();
+        let transfer_id = "binary-transfer-test".to_string();
+        let mut offset = 0;
+        let mut window_size = 2;
+
+        loop {
+            let request = BlobRequest {
+                transfer_id: transfer_id.clone(),
+                blob_id: blob_id.clone(),
+                next_offset: offset,
+                chunk_size: 32 * 1024,
+                window_size,
+            };
+            let frames = make_binary_chunks(&request, &payload).unwrap();
+            assert!(!frames.is_empty());
+            assert!(frames.len() <= window_size);
+
+            let mut next_control = None;
+            let mut completed = None;
+            for frame in frames {
+                assert_eq!(&frame[..4], b"FPB3");
+                let result = receive_binary_chunk(&frame).unwrap();
+                if result.control.is_some() {
+                    next_control = result.control;
+                }
+                if result.payload.is_some() {
+                    completed = result.payload;
+                }
+            }
+
+            if let Some(received) = completed {
+                assert!(received == payload);
+                let complete: serde_json::Value =
+                    serde_json::from_str(&next_control.expect("phải báo hoàn tất binary")).unwrap();
+                assert_eq!(complete["type"], "blob_complete");
+                assert_eq!(complete["version"], 3);
+                break;
+            }
+
+            let ack: serde_json::Value =
+                serde_json::from_str(&next_control.expect("hết cửa sổ binary phải trả ACK"))
+                    .unwrap();
+            assert_eq!(ack["type"], "blob_ack");
+            offset = ack["nextOffset"].as_u64().unwrap() as usize;
+            window_size = ack["windowSize"].as_u64().unwrap() as usize;
+        }
+    }
 }
