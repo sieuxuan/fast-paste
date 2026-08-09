@@ -57,7 +57,7 @@ class ClipboardService : Service() {
     // Service-owned discovery keeps running in the background (the ViewModel's
     // discovery dies with the UI), so a PC coming back on a new IP is found.
     private var backgroundDiscovery: ServiceDiscovery? = null
-    private var lastSyncedFingerprint = ""
+    private val fingerprintGate = ClipboardFingerprintGate()
     private val dao by lazy { (application as FastPasteApp).database.clipboardDao() }
     private val historyRepository by lazy { ClipboardRepository(dao) }
     private val deletedHistoryStore by lazy { DeletedHistoryStore(applicationContext) }
@@ -87,8 +87,7 @@ class ClipboardService : Service() {
             val payload = AndroidClipboardCodec.read(this@ClipboardService, clip)
                 ?: return@launch
             val fingerprint = payload.fingerprint()
-            if (fingerprint == lastSyncedFingerprint) return@launch
-            lastSyncedFingerprint = fingerprint
+            if (!fingerprintGate.shouldSend(fingerprint)) return@launch
             sendClipboardPayload(payload)
             saveToHistory(payload, "LOCAL")
             Log.d(TAG, "Sent ${payload.kind}: ${payload.text.take(60)}")
@@ -335,8 +334,7 @@ class ClipboardService : Service() {
     private suspend fun receiveClipboardPayload(payload: ClipboardPayload) {
         if (payload.text.isEmpty() || !payload.isWithinLimit()) return
         val fingerprint = payload.fingerprint()
-        if (fingerprint == lastSyncedFingerprint) return
-        lastSyncedFingerprint = fingerprint
+        if (!fingerprintGate.shouldApply(fingerprint)) return
         withContext(Dispatchers.Main) {
             clipboardManager.setPrimaryClip(AndroidClipboardCodec.write(this@ClipboardService, payload))
         }
@@ -374,7 +372,7 @@ class ClipboardService : Service() {
             return
         }
 
-        lastSyncedFingerprint = payload.fingerprint()
+        fingerprintGate.markAppliedAndSent(payload.fingerprint())
         withContext(Dispatchers.Main) {
             clipboardManager.setPrimaryClip(clip)
         }
@@ -545,7 +543,7 @@ class ClipboardService : Service() {
 
         val payloadToApply = newestIncomingPayload
         if (newestIncomingTimestamp > latestLocalTimestamp && payloadToApply != null && newestIncomingReady) {
-            lastSyncedFingerprint = payloadToApply.fingerprint()
+            fingerprintGate.markApplied(payloadToApply.fingerprint())
             withContext(Dispatchers.Main) {
                 clipboardManager.setPrimaryClip(AndroidClipboardCodec.write(this@ClipboardService, payloadToApply))
             }
@@ -716,7 +714,7 @@ class ClipboardService : Service() {
             blobId = transfer.blobId, blobSize = payload.encodedSize(), blobReady = true
         )
         if (transfer.applyToClipboard) {
-            lastSyncedFingerprint = payload.fingerprint()
+            fingerprintGate.markApplied(payload.fingerprint())
             withContext(Dispatchers.Main) {
                 clipboardManager.setPrimaryClip(AndroidClipboardCodec.write(this@ClipboardService, payload))
             }
@@ -789,7 +787,7 @@ class ClipboardService : Service() {
             blobReady = true
         )
         if (transfer.applyToClipboard) {
-            lastSyncedFingerprint = payload.fingerprint()
+            fingerprintGate.markApplied(payload.fingerprint())
             withContext(Dispatchers.Main) {
                 clipboardManager.setPrimaryClip(AndroidClipboardCodec.write(this@ClipboardService, payload))
             }
