@@ -24,7 +24,6 @@ use state::*;
 
 const AUTOSTART_HIDDEN_ARG: &str = "--fastpaste-hidden";
 const CLOUD_SYNC_DEBOUNCE_MS: u64 = 3_000;
-const STARTUP_CLOUD_SYNC_DELAY_MS: u64 = 1_500;
 
 // ── IPC Commands ──
 
@@ -962,12 +961,64 @@ async fn sync_google_drive(
     }
 }
 
+fn install_loaded_state(current: &mut AppStateData, mut loaded: AppStateData) {
+    let runtime_ips = std::mem::take(&mut current.ips);
+    let runtime_clients = std::mem::take(&mut current.clients);
+    let runtime_transfers = std::mem::take(&mut current.transfers);
+    let runtime_history = std::mem::take(&mut current.history);
+    let runtime_icons = std::mem::take(&mut current.app_icons);
+
+    for item in runtime_history {
+        let key = history_item_key(&item);
+        if let Some(index) = loaded
+            .history
+            .iter()
+            .position(|loaded_item| history_item_key(loaded_item) == key)
+        {
+            if timestamp_to_millis(&item.timestamp)
+                > timestamp_to_millis(&loaded.history[index].timestamp)
+            {
+                loaded.history[index] = item;
+            }
+        } else {
+            loaded.history.push(item);
+        }
+    }
+    trim_history(&mut loaded.history);
+    loaded.app_icons.extend(runtime_icons);
+    loaded.ips = runtime_ips;
+    loaded.clients = runtime_clients;
+    loaded.transfers = runtime_transfers;
+    *current = loaded;
+}
+
+#[cfg(test)]
+mod startup_state_tests {
+    use super::*;
+
+    #[test]
+    fn background_load_preserves_runtime_state() {
+        let mut current = state::empty_state();
+        current.ips = vec!["192.168.1.10".into()];
+        current.clients = vec!["192.168.1.20".into()];
+        current.history.push(make_history_item("copied during startup", "PC"));
+
+        let loaded = state::empty_state();
+        install_loaded_state(&mut current, loaded);
+
+        assert_eq!(current.ips, ["192.168.1.10"]);
+        assert_eq!(current.clients, ["192.168.1.20"]);
+        assert_eq!(current.history.len(), 1);
+        assert_eq!(current.history[0].text, "copied during startup");
+    }
+}
+
 // ── Application Entry ──
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let initial_data = load_state();
-    let data_arc = Arc::new(Mutex::new(initial_data));
+    // Cửa sổ khởi động trên state rỗng; vault thật được nạp ở thread nền.
+    let data_arc = Arc::new(Mutex::new(state::empty_state()));
     let (ws_tx, _ws_rx) = tokio::sync::broadcast::channel::<String>(100);
 
     tauri::Builder::default()
@@ -1050,7 +1101,6 @@ pub fn run() {
             data.ips = network::get_local_ips();
             drop(data);
             app.manage(AppState(data_arc.clone()));
-            state::spawn_state_writer(data_arc.clone());
             app.manage(ws_tx.clone());
 
             let (cloud_sync_tx, mut cloud_sync_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
@@ -1094,24 +1144,6 @@ pub fn run() {
                 }
             });
 
-            if cloud::is_configured() && cloud::is_signed_in() {
-                let startup_cloud_sync_tx = cloud_sync_tx.clone();
-                tauri::async_runtime::spawn(async move {
-                    sleep(Duration::from_millis(STARTUP_CLOUD_SYNC_DELAY_MS)).await;
-                    let _ = startup_cloud_sync_tx.send(());
-                });
-            }
-
-            let should_refresh_autostart = {
-                let data = data_arc.lock().unwrap();
-                data.settings.auto_start
-            };
-            if should_refresh_autostart {
-                let autostart_manager = app.autolaunch();
-                let _ = autostart_manager.disable();
-                let _ = autostart_manager.enable();
-            }
-
             // ── Networking: UDP discovery broadcast + WebSocket server ──
             network::spawn_udp_broadcaster(&app_handle, data_arc.clone());
             network::spawn_ws_server(&app_handle, data_arc.clone(), ws_tx.clone());
@@ -1144,12 +1176,48 @@ pub fn run() {
                 }
             });
 
-            // ── Register initial hotkeys ──
-            let settings = {
-                let d = data_arc.lock().unwrap();
-                d.settings.clone()
-            };
-            register_initial_hotkeys(app.handle(), &settings);
+            // ── Load state nền ──
+            let load_handle = app.handle().clone();
+            let load_data = data_arc.clone();
+            std::thread::Builder::new()
+                .name("fastpaste-state-loader".into())
+                .spawn(move || {
+                    let loaded = load_state();
+                    let settings = loaded.settings.clone();
+                    {
+                        let mut guard = load_data.lock().unwrap();
+                        install_loaded_state(&mut guard, loaded);
+                    }
+
+                    // Writer chỉ bắt đầu sau khi vault thật đã vào bộ nhớ; nếu
+                    // chạy sớm, một mutation lúc startup có thể ghi đè vault
+                    // bằng state rỗng trước khi loader đọc xong.
+                    state::spawn_state_writer(load_data.clone());
+
+                    let hotkey_handle = load_handle.clone();
+                    let hotkey_settings = settings.clone();
+                    let _ = load_handle.run_on_main_thread(move || {
+                        register_initial_hotkeys(&hotkey_handle, &hotkey_settings);
+                    });
+
+                    if settings.auto_start {
+                        let autostart_handle = load_handle.clone();
+                        let _ = load_handle.run_on_main_thread(move || {
+                            let manager = autostart_handle.autolaunch();
+                            let _ = manager.disable();
+                            let _ = manager.enable();
+                        });
+                    }
+
+                    broadcast_state(&load_handle);
+                    state::hydrate_icons_later(&load_data);
+                    broadcast_state(&load_handle);
+
+                    if cloud::is_configured() && cloud::is_signed_in() {
+                        queue_cloud_sync(&load_handle);
+                    }
+                })
+                .expect("không tạo được state loader thread");
 
             Ok(())
         })

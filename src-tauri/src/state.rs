@@ -18,6 +18,7 @@ const VAULT_VERSION: u8 = 1;
 static VAULT_WRITABLE: AtomicBool = AtomicBool::new(true);
 const STATE_FLUSH_INTERVAL_MS: u64 = 500;
 static DIRTY: AtomicBool = AtomicBool::new(false);
+static STATE_READY: AtomicBool = AtomicBool::new(false);
 
 #[derive(Serialize, Deserialize)]
 struct SensitiveState {
@@ -167,6 +168,7 @@ fn take_dirty() -> bool {
 }
 
 pub(crate) fn spawn_state_writer(data: Arc<Mutex<AppStateData>>) {
+    STATE_READY.store(true, Ordering::Release);
     std::thread::Builder::new()
         .name("fastpaste-state-writer".into())
         .spawn(move || loop {
@@ -181,6 +183,9 @@ pub(crate) fn spawn_state_writer(data: Arc<Mutex<AppStateData>>) {
 }
 
 pub(crate) fn flush_on_exit(data: &Mutex<AppStateData>) {
+    if !STATE_READY.load(Ordering::Acquire) {
+        return;
+    }
     if take_dirty() {
         let snapshot = data.lock().unwrap().clone();
         flush_state_now(&snapshot);
@@ -262,10 +267,9 @@ pub(crate) fn load_state() -> AppStateData {
             }
             normalize_deleted_markers(&mut data);
             let files_migrated = crate::history::drop_file_payloads(&mut data);
-            let icons_changed = hydrate_running_app_icons(&mut data);
             refresh_cloud_state(&mut data.cloud);
             if VAULT_WRITABLE.load(Ordering::Acquire)
-                && (migrated_from_plaintext || settings_changed || icons_changed || files_migrated)
+                && (migrated_from_plaintext || settings_changed || files_migrated)
             {
                 flush_state_now(&data);
             }
@@ -290,6 +294,17 @@ pub(crate) fn load_state() -> AppStateData {
         flush_state_now(&data);
     }
     data
+}
+
+/// Enumerate process/icon là công việc đắt; chạy sau khi cửa sổ và state thật
+/// đã xuất hiện thay vì chặn lần hiển thị đầu tiên.
+pub(crate) fn hydrate_icons_later(data: &Mutex<AppStateData>) -> bool {
+    let mut guard = data.lock().unwrap();
+    let changed = hydrate_running_app_icons(&mut guard);
+    if changed {
+        save_state();
+    }
+    changed
 }
 
 pub(crate) fn refresh_cloud_state(cloud_state: &mut cloud::CloudUiState) {
