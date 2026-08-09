@@ -187,7 +187,7 @@ class MainActivity : ComponentActivity() {
             // background, so ask the foreground service to inspect every format
             // once when the UI regains focus. Payload fingerprints prevent loops.
             val currentState = viewModel.uiState.value
-            if (currentState.connectionState == com.fastpaste.app.websocket.ConnectionState.CONNECTED) {
+            if (currentState.connectionState == com.fastpaste.app.websocket.ConnectionState.CONNECTED_SECURE) {
                 val intent = Intent(this, com.fastpaste.app.service.ClipboardService::class.java).apply {
                     action = com.fastpaste.app.service.ClipboardService.ACTION_SYNC_CURRENT_CLIP
                 }

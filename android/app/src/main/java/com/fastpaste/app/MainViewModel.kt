@@ -193,7 +193,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         connectionState = state,
                         connectionMessage = when (state) {
-                            ConnectionState.CONNECTED -> "Đồng bộ clipboard đang hoạt động"
+                            ConnectionState.CONNECTED_SECURE -> "Đồng bộ clipboard đang hoạt động"
+                            ConnectionState.CONNECTED_UNPAIRED -> "Đã tìm thấy PC nhưng chưa ghép đôi. Quét QR trên PC để bật đồng bộ."
                             ConnectionState.CONNECTING -> "Đang kết nối tới ${it.connectedServer ?: "PC"}"
                             ConnectionState.DISCONNECTED -> if (autoConnectEnabled) {
                                 "Chưa kết nối. Ứng dụng đang quét PC cùng mạng."
@@ -205,7 +206,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 // Battery Optimization: Stop broadcasting/listening when connected
-                if (state == ConnectionState.CONNECTED) {
+                if (state == ConnectionState.CONNECTED_SECURE || state == ConnectionState.CONNECTED_UNPAIRED) {
                     discovery.stopDiscovery()
                 } else if (state == ConnectionState.DISCONNECTED && autoConnectEnabled) {
                     discovery.startDiscovery(cycle = true)

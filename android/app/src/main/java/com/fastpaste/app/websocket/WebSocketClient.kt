@@ -10,10 +10,17 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import okhttp3.*
 import okio.ByteString
+import org.json.JSONObject
 
 enum class ConnectionState {
-    DISCONNECTED, CONNECTING, CONNECTED
+    DISCONNECTED,
+    CONNECTING,
+    CONNECTED_UNPAIRED,
+    CONNECTED_SECURE
 }
+
+internal fun protocolMessageType(text: String): String =
+    runCatching { JSONObject(text).optString("type") }.getOrDefault("")
 
 class WebSocketClient(context: Context, private val scope: CoroutineScope) {
     private val appContext = context.applicationContext
@@ -81,15 +88,24 @@ class WebSocketClient(context: Context, private val scope: CoroutineScope) {
                             "Đang xác thực thiết bị và tạo session key mới"
                         }
                     )
-                    _state.value = ConnectionState.CONNECTING
+                    _state.value = if (secureChannel?.requiresPairing == true) {
+                        ConnectionState.CONNECTED_UNPAIRED
+                    } else {
+                        ConnectionState.CONNECTING
+                    }
                 } else {
-                    _events.tryEmit("Kết nối legacy chưa ghép đôi")
-                    _state.value = ConnectionState.CONNECTED
+                    _events.tryEmit("Kết nối chưa ghép đôi; chưa có dữ liệu nào được đồng bộ")
+                    _state.value = ConnectionState.CONNECTED_UNPAIRED
                 }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 Log.d(TAG, "Received: ${text.take(60)}")
+                if (protocolMessageType(text) == "pair_required") {
+                    _events.tryEmit("PC chưa ghép đôi thiết bị này. Quét QR trên PC để bật đồng bộ.")
+                    _state.value = ConnectionState.CONNECTED_UNPAIRED
+                    return
+                }
                 val event = runCatching {
                     secureChannel?.handleIncoming(text, webSocket::send)
                 }.getOrElse { error ->
@@ -103,7 +119,7 @@ class WebSocketClient(context: Context, private val scope: CoroutineScope) {
                 }
                 event.status?.let(_events::tryEmit)
                 if (event.connected) {
-                    _state.value = ConnectionState.CONNECTED
+                    _state.value = ConnectionState.CONNECTED_SECURE
                 }
                 event.message?.let(_messages::tryEmit)
             }

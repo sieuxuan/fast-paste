@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -707,7 +708,7 @@ private fun ConnectionPanel(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
                     )
                 }
-                if (state.connectionState == ConnectionState.CONNECTED) {
+                if (state.connectionState == ConnectionState.CONNECTED_SECURE) {
                     FilledTonalButton(onClick = onDisconnect) {
                         Text("Ngắt")
                     }
@@ -1682,11 +1683,17 @@ private data class ConnectionUi(
 @Composable
 private fun connectionUi(state: ConnectionState): ConnectionUi {
     return when (state) {
-        ConnectionState.CONNECTED -> ConnectionUi(
+        ConnectionState.CONNECTED_SECURE -> ConnectionUi(
             title = "Đã kết nối",
             color = GreenConnected,
             container = GreenConnected.copy(alpha = 0.14f),
             icon = Icons.Default.CheckCircle
+        )
+        ConnectionState.CONNECTED_UNPAIRED -> ConnectionUi(
+            title = "Chưa ghép đôi",
+            color = OrangeConnecting,
+            container = OrangeConnecting.copy(alpha = 0.16f),
+            icon = Icons.Default.Warning
         )
         ConnectionState.CONNECTING -> ConnectionUi(
             title = "Đang kết nối",

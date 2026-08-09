@@ -178,12 +178,16 @@ class ClipboardService : Service() {
                 client.state.collectLatest { state ->
                     connectionState.value = state
                     val status = when (state) {
-                        ConnectionState.CONNECTED -> {
+                        ConnectionState.CONNECTED_SECURE -> {
                             stopBackgroundDiscovery()
                             sendHistorySync(client)
                             Log.d(TAG, "Connected; exchanging clipboard history")
                             connectionEvents.tryEmit("Đã kết nối tới $host:$port")
                             "Đã kết nối tới $host"
+                        }
+                        ConnectionState.CONNECTED_UNPAIRED -> {
+                            stopBackgroundDiscovery()
+                            "Chưa ghép đôi với $host — quét QR trên PC"
                         }
                         ConnectionState.CONNECTING -> "Đang kết nối tới $host..."
                         ConnectionState.DISCONNECTED -> {
@@ -225,7 +229,7 @@ class ClipboardService : Service() {
                     }
                     val target = "${server.host}:${server.port}"
                     if (target != activeTarget.value &&
-                        connectionState.value != ConnectionState.CONNECTED
+                        connectionState.value != ConnectionState.CONNECTED_SECURE
                     ) {
                         Log.d(TAG, "PC reappeared at new address $target — switching")
                         connectionEvents.tryEmit("Tìm thấy PC ở địa chỉ mới $target, đang chuyển kết nối")
