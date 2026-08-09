@@ -118,9 +118,15 @@ impl ClipboardPayload {
     }
 
     pub(crate) fn sanitized_for_cloud(&self) -> Self {
-        let mut payload = self.clone();
-        payload.data.clear();
-        payload
+        Self {
+            kind: self.kind.clone(),
+            text: self.text.clone(),
+            html: self.html.clone(),
+            mime_type: self.mime_type.clone(),
+            data: String::new(),
+            thumbnail: self.thumbnail.clone(),
+            has_thumbnail: self.has_thumbnail,
+        }
     }
 }
 

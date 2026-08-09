@@ -1109,6 +1109,19 @@ pub(crate) fn merge_cloud_entries_into_history(
     (inserted, changed)
 }
 
+impl HistoryItem {
+    pub(crate) fn sanitized_for_ui(&self) -> Self {
+        Self {
+            id: self.id.clone(), text: self.text.clone(), timestamp: self.timestamp.clone(),
+            source: self.source.clone(), source_app: self.source_app.clone(),
+            source_title: self.source_title.clone(), source_icon: self.source_icon.clone(),
+            pinned: self.pinned, quick_slot: self.quick_slot, folder: self.folder.clone(),
+            payload: self.payload.as_ref().map(ClipboardPayload::sanitized_for_ui),
+            blob_id: self.blob_id.clone(), blob_size: self.blob_size, blob_ready: self.blob_ready,
+        }
+    }
+}
+
 pub(crate) fn history_revision(
     history: &[HistoryItem],
     markers: &[DeletedMarker],

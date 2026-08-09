@@ -19,6 +19,7 @@ static VAULT_WRITABLE: AtomicBool = AtomicBool::new(true);
 const STATE_FLUSH_INTERVAL_MS: u64 = 500;
 static DIRTY: AtomicBool = AtomicBool::new(false);
 static STATE_READY: AtomicBool = AtomicBool::new(false);
+static FLUSH_LOCK: Mutex<()> = Mutex::new(());
 const BROADCAST_COALESCE_MS: u64 = 100;
 static LAST_BROADCAST_AT: AtomicI64 = AtomicI64::new(0);
 static TRAILING_BROADCAST_PENDING: AtomicBool = AtomicBool::new(false);
@@ -176,22 +177,51 @@ pub(crate) fn spawn_state_writer(data: Arc<Mutex<AppStateData>>) {
         .name("fastpaste-state-writer".into())
         .spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(STATE_FLUSH_INTERVAL_MS));
-            if !take_dirty() {
+            if !DIRTY.load(Ordering::Acquire) {
                 continue;
             }
-            let snapshot = data.lock().unwrap().clone();
+            let _flush = FLUSH_LOCK.lock().unwrap();
+            if !take_dirty() { continue; }
+            let snapshot = {
+                let mut live = data.lock().unwrap();
+                crate::history::trim_history(&mut live.history);
+                crate::history::trim_inline_payloads(&mut live.history);
+                live.clone()
+            };
             flush_state_now(&snapshot);
         })
         .expect("không tạo được state writer thread");
 }
 
 pub(crate) fn flush_on_exit(data: &Mutex<AppStateData>) {
-    if !STATE_READY.load(Ordering::Acquire) {
-        return;
+    for _ in 0..100 {
+        if STATE_READY.load(Ordering::Acquire) { break; }
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    if take_dirty() {
-        let snapshot = data.lock().unwrap().clone();
-        flush_state_now(&snapshot);
+    if !STATE_READY.load(Ordering::Acquire) { return; }
+    let _flush = FLUSH_LOCK.lock().unwrap();
+    let snapshot = {
+        let mut live = data.lock().unwrap();
+        crate::history::trim_history(&mut live.history);
+        crate::history::trim_inline_payloads(&mut live.history);
+        live.clone()
+    };
+    DIRTY.store(false, Ordering::Release);
+    flush_state_now(&snapshot);
+}
+
+fn ui_snapshot(data: &AppStateData) -> AppStateData {
+    AppStateData {
+        settings: data.settings.clone(),
+        history: data.history.iter().map(HistoryItem::sanitized_for_ui).collect(),
+        ips: data.ips.clone(), clients: data.clients.clone(),
+        deleted_markers: data.deleted_markers.clone(), clear_history_at: data.clear_history_at,
+        app_icons: data.app_icons.clone(),
+        history_backup: data.history_backup.as_ref().map(|backup| HistoryBackup {
+            items: backup.items.iter().map(HistoryItem::sanitized_for_ui).collect(),
+            deleted_at: backup.deleted_at, label: backup.label.clone(),
+        }),
+        cloud: data.cloud.clone(), transfers: data.transfers.clone(),
     }
 }
 
@@ -365,19 +395,7 @@ pub(crate) fn broadcast_state(app: &AppHandle) {
 
 pub(crate) fn broadcast_state_now(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let mut data = state.0.lock().unwrap().clone();
-    for item in &mut data.history {
-        if let Some(payload) = &item.payload {
-            item.payload = Some(payload.sanitized_for_ui());
-        }
-    }
-    if let Some(backup) = &mut data.history_backup {
-        for item in &mut backup.items {
-            if let Some(payload) = &item.payload {
-                item.payload = Some(payload.sanitized_for_ui());
-            }
-        }
-    }
+    let data = ui_snapshot(&state.0.lock().unwrap());
     LAST_BROADCAST_AT.store(chrono::Utc::now().timestamp_millis(), Ordering::Release);
     let _ = app.emit("update_state", data);
 }
@@ -398,6 +416,21 @@ mod persistence_tests {
         save_state();
         assert!(take_dirty());
         assert!(!take_dirty());
+    }
+
+    #[test]
+    fn ui_snapshot_does_not_clone_or_mutate_binary_payloads() {
+        let mut data = empty_state();
+        let mut item = crate::history::make_history_item("image", "PC");
+        item.payload = Some(crate::clipboard::ClipboardPayload {
+            kind: "image".into(), text: "image".into(), data: "AAAA".into(),
+            thumbnail: "BBBB".into(), ..Default::default()
+        });
+        data.history.push(item);
+        let snapshot = ui_snapshot(&data);
+        let ui = snapshot.history[0].payload.as_ref().unwrap();
+        assert!(ui.data.is_empty() && ui.thumbnail.is_empty() && ui.has_thumbnail);
+        assert_eq!(data.history[0].payload.as_ref().unwrap().data, "AAAA");
     }
 }
 

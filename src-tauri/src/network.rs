@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -257,7 +258,27 @@ async fn handle_client(
     let (direct_tx, mut direct_rx) = tokio::sync::mpsc::unbounded_channel::<DirectMessage>();
     let session = Arc::new(Mutex::new(None::<SessionCipher>));
     let mut registered = false;
-    let mut pair_required_sent = false;
+    let pair_required_sent = Arc::new(AtomicBool::new(false));
+
+    // A brand-new Android install has no session hello to send. Give paired
+    // clients a brief chance to authenticate, then explain the silent socket.
+    let notice_session = session.clone();
+    let notice_sent = pair_required_sent.clone();
+    let notice_tx = direct_tx.clone();
+    let notice_app = app.clone();
+    let notice_ip = ip.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        if notice_session.lock().unwrap().is_none()
+            && !notice_sent.swap(true, Ordering::AcqRel)
+        {
+            let _ = notice_tx.send(DirectMessage::Plain(pair_required_notice()));
+            let _ = notice_app.emit(
+                "pairing_required",
+                serde_json::json!({ "ip": notice_ip }),
+            );
+        }
+    });
 
     // Không dữ liệu ứng dụng nào rời PC trước khi session v2 được xác thực.
     let data_sync = data.clone();
@@ -460,8 +481,7 @@ async fn handle_client(
             continue;
         }
         if session.lock().unwrap().is_none() {
-            if !pair_required_sent {
-                pair_required_sent = true;
+            if !pair_required_sent.swap(true, Ordering::AcqRel) {
                 let _ = direct_tx.send(DirectMessage::Plain(pair_required_notice()));
                 let _ = app.emit("pairing_required", serde_json::json!({ "ip": ip.clone() }));
             }

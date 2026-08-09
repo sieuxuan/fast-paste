@@ -103,6 +103,13 @@ class ClipboardService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            null -> {
+                startForeground(NOTIFICATION_ID, buildNotification("Đang khôi phục kết nối…"))
+                ensureBackgroundDiscovery()
+                if (currentHost == null) {
+                    pairingStore.peers().firstOrNull()?.let { peer -> startSync(peer.host, peer.port) }
+                }
+            }
             ACTION_START_DISCOVERY -> {
                 startForeground(NOTIFICATION_ID, buildNotification("Đang tìm PC cùng mạng…"))
                 ensureBackgroundDiscovery()
