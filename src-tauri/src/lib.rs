@@ -26,6 +26,10 @@ use state::*;
 const AUTOSTART_HIDDEN_ARG: &str = "--fastpaste-hidden";
 const CLOUD_SYNC_DEBOUNCE_MS: u64 = 3_000;
 
+fn next_sync_deadline(first_request_at: i64, _now: i64) -> i64 {
+    first_request_at + CLOUD_SYNC_DEBOUNCE_MS as i64
+}
+
 // ── IPC Commands ──
 
 #[tauri::command]
@@ -1144,14 +1148,18 @@ pub fn run() {
             let data_cloud = data_arc.clone();
             tauri::async_runtime::spawn(async move {
                 while cloud_sync_rx.recv().await.is_some() {
+                    let first_request_at = chrono::Utc::now().timestamp_millis();
+                    let deadline = next_sync_deadline(first_request_at, first_request_at);
                     loop {
-                        sleep(Duration::from_millis(CLOUD_SYNC_DEBOUNCE_MS)).await;
-                        let mut received_more = false;
-                        while cloud_sync_rx.try_recv().is_ok() {
-                            received_more = true;
-                        }
-                        if !received_more {
+                        let remaining = deadline - chrono::Utc::now().timestamp_millis();
+                        if remaining <= 0 {
                             break;
+                        }
+                        if matches!(tokio::time::timeout(
+                            Duration::from_millis(remaining as u64),
+                            cloud_sync_rx.recv(),
+                        ).await, Ok(None)) {
+                            return;
                         }
                     }
 
@@ -1290,4 +1298,23 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod cloud_debounce_tests {
+    use super::*;
+
+    #[test]
+    fn deadline_is_fixed_from_the_first_request() {
+        let first = 1_000;
+        let deadline = next_sync_deadline(first, first);
+        assert_eq!(deadline, first + CLOUD_SYNC_DEBOUNCE_MS as i64);
+        assert_eq!(next_sync_deadline(first, 2_500), deadline);
+    }
+
+    #[test]
+    fn late_request_opens_a_new_window() {
+        let late = 1_000 + CLOUD_SYNC_DEBOUNCE_MS as i64 + 1;
+        assert_eq!(next_sync_deadline(late, late), late + CLOUD_SYNC_DEBOUNCE_MS as i64);
+    }
 }
