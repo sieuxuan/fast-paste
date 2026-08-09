@@ -6,9 +6,9 @@ import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.core.content.ContextCompat
 import com.fastpaste.app.cloud.GoogleDriveCloudSync
 import com.fastpaste.app.discovery.DiscoveredServer
-import com.fastpaste.app.discovery.ServiceDiscovery
 import com.fastpaste.app.data.ClipboardEntry
 import com.fastpaste.app.data.ClipboardPayload
 import com.fastpaste.app.data.ClipboardRepository
@@ -69,7 +69,6 @@ data class UiState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as FastPasteApp
-    private val discovery = ServiceDiscovery(application)
     private val dao = app.database.clipboardDao()
     private val historyRepository = ClipboardRepository(dao)
     private val updateClient = OkHttpClient()
@@ -108,7 +107,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
     init {
-        discovery.startDiscovery(cycle = true)
+        ContextCompat.startForegroundService(
+            application,
+            Intent(application, ClipboardService::class.java).setAction(ClipboardService.ACTION_START_DISCOVERY)
+        )
         checkForUpdates()
         if (isCloudSyncEnabled()) {
             _uiState.update {
@@ -120,7 +122,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            discovery.servers.collect { servers ->
+            ClipboardService.discoveredServers.collect { servers ->
                 _uiState.update { it.copy(discoveredServers = servers) }
                 servers.forEach { server ->
                     val key = "${server.host}:${server.port}"
@@ -174,7 +176,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             // Rescan cycles live inside ServiceDiscovery; this collector only
             // mirrors the flag for the UI.
-            discovery.isScanning.collect { scanning ->
+            ClipboardService.isScanning.collect { scanning ->
                 _uiState.update { it.copy(isScanning = scanning) }
             }
         }
@@ -205,12 +207,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
 
-                // Battery Optimization: Stop broadcasting/listening when connected
-                if (state == ConnectionState.CONNECTED_SECURE || state == ConnectionState.CONNECTED_UNPAIRED) {
-                    discovery.stopDiscovery()
-                } else if (state == ConnectionState.DISCONNECTED && autoConnectEnabled) {
-                    discovery.startDiscovery(cycle = true)
-                }
             }
         }
 
@@ -277,7 +273,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun disconnectFromServer() {
         autoConnectEnabled = false
-        discovery.stopDiscovery()
         val intent = Intent(getApplication(), ClipboardService::class.java).apply {
             action = ClipboardService.ACTION_STOP
         }
@@ -302,8 +297,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun restartDiscovery() {
         autoConnectEnabled = true
-        discovery.stopDiscovery()
-        discovery.startDiscovery(cycle = true)
+        ContextCompat.startForegroundService(
+            getApplication(),
+            Intent(getApplication(), ClipboardService::class.java)
+                .setAction(ClipboardService.ACTION_START_DISCOVERY)
+        )
         _uiState.update {
             it.copy(
                 discoveredServers = emptyList(),
@@ -669,7 +667,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        discovery.stopDiscovery()
         super.onCleared()
     }
 

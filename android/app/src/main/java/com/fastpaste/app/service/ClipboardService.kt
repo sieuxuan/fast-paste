@@ -18,6 +18,7 @@ import com.fastpaste.app.data.ClipboardPayload
 import com.fastpaste.app.data.ClipboardEntry
 import com.fastpaste.app.data.ClipboardRepository
 import com.fastpaste.app.discovery.ServiceDiscovery
+import com.fastpaste.app.discovery.DiscoveredServer
 import com.fastpaste.app.sync.AndroidClipboardCodec
 import com.fastpaste.app.sync.DeletedHistoryStore
 import com.fastpaste.app.sync.EncryptionStore
@@ -97,10 +98,15 @@ class ClipboardService : Service() {
     override fun onCreate() {
         super.onCreate()
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        ensureBackgroundDiscovery()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            ACTION_START_DISCOVERY -> {
+                startForeground(NOTIFICATION_ID, buildNotification("Đang tìm PC cùng mạng…"))
+                ensureBackgroundDiscovery()
+            }
             ACTION_START -> {
                 val host = intent.getStringExtra(EXTRA_HOST) ?: return START_NOT_STICKY
                 val port = intent.getIntExtra(EXTRA_PORT, 4567)
@@ -215,6 +221,7 @@ class ClipboardService : Service() {
             backgroundDiscovery = d
             scope.launch {
                 d.servers.collect { servers ->
+                    discoveredServers.value = servers
                     val activePeer = currentHost?.let(pairingStore::peerForHost)
                     val server = servers.firstOrNull { candidate ->
                         activePeer != null && (
@@ -236,6 +243,7 @@ class ClipboardService : Service() {
                     }
                 }
             }
+            scope.launch { d.isScanning.collect { isScanning.value = it } }
         }
         discovery.startDiscovery(cycle = true)
     }
@@ -970,12 +978,15 @@ class ClipboardService : Service() {
         const val ACTION_STOP = "com.fastpaste.STOP"
         const val ACTION_COPY_HISTORY_ITEM = "com.fastpaste.COPY_HISTORY_ITEM"
         const val ACTION_SYNC_CURRENT_CLIP = "com.fastpaste.SYNC_CURRENT_CLIP"
+        const val ACTION_START_DISCOVERY = "com.fastpaste.START_DISCOVERY"
         const val EXTRA_HOST = "host"
         const val EXTRA_PORT = "port"
         const val EXTRA_ENTRY_ID = "entryId"
         val connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
         val connectionEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
         val transferProgress = MutableStateFlow<List<TransferProgress>>(emptyList())
+        val discoveredServers = MutableStateFlow<List<DiscoveredServer>>(emptyList())
+        val isScanning = MutableStateFlow(false)
 
         /** "host:port" the service is currently managing, null when idle. */
         val activeTarget = MutableStateFlow<String?>(null)
