@@ -852,6 +852,8 @@
     .device-empty svg { color:var(--txf); }
     .device-empty strong { display:block; color:var(--tx); font-size:13px; }
     .device-empty span { display:block; margin-top:2px; font-size:12px; }
+    .pairing-banner { display:flex; align-items:center; gap:10px; margin:0 22px 14px; padding:12px; border:1px solid var(--accent); border-radius:12px; background:var(--g); }
+    .pairing-banner > span { flex:1; }
     .excluded-controls { display:flex; gap:8px; margin-top:12px; }
     .excluded-controls .tinput { flex:1; min-width:0; }
     .excluded-list { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
@@ -1422,6 +1424,7 @@
 
       <section id="panel-devices" class="panel">
         <header class="phead"><div class="phead-row"><h1 data-i18n="devicesTitle">Thiết bị</h1></div></header>
+        <div id="pairing-banner" class="pairing-banner" role="status" aria-live="polite" hidden><svg><use href="#i-phone"></use></svg><span id="pairing-banner-text"></span><button id="pairing-banner-action" class="btn" type="button" data-i18n="pairNow">Ghép đôi ngay</button></div>
         <div class="scroll">
           <div class="srv-card card card-pad">
             <div class="srv-top">
@@ -1664,6 +1667,8 @@
         devicesTitle: 'Thiết bị',
         websocketServer: 'Máy chủ WebSocket',
         connectedDevices: 'Thiết bị kết nối',
+        pairingRequiredBanner: ip => `Thiết bị ${ip} đang chờ ghép đôi. Chưa ghép đôi thì không có dữ liệu nào được đồng bộ.`,
+        pairNow: 'Ghép đôi ngay',
         googleDriveSync: 'Đồng bộ Google Drive',
         googleSignIn: 'Đăng nhập Google',
         syncNow: 'Đồng bộ ngay',
@@ -1814,6 +1819,8 @@
         devicesTitle: 'Devices',
         websocketServer: 'WebSocket Server',
         connectedDevices: 'Connected devices',
+        pairingRequiredBanner: ip => `Device ${ip} is waiting to be paired. Nothing syncs until pairing completes.`,
+        pairNow: 'Pair now',
         googleDriveSync: 'Google Drive Sync',
         googleSignIn: 'Sign in with Google',
         syncNow: 'Sync now',
@@ -2028,6 +2035,9 @@
       pairingQr: document.getElementById('pairing-qr'),
       pairingCountdown: document.getElementById('pairing-countdown'),
       pairingUri: document.getElementById('pairing-uri'),
+      pairingBanner: document.getElementById('pairing-banner'),
+      pairingBannerText: document.getElementById('pairing-banner-text'),
+      pairingBannerAction: document.getElementById('pairing-banner-action'),
       e2eeTitle: document.getElementById('e2ee-title'),
       e2eeCopy: document.getElementById('e2ee-copy'),
       e2eeToggle: document.getElementById('e2ee-toggle'),
@@ -3516,6 +3526,10 @@
       els.alwaysOnTopToggle.addEventListener('click', saveAlwaysOnTop);
       els.beginPairing.addEventListener('click', beginPairing);
       els.pairingClose.addEventListener('click', closePairing);
+      els.pairingBannerAction.addEventListener('click', () => {
+        els.pairingBanner.hidden = true;
+        beginPairing();
+      });
       els.pairingBackdrop.addEventListener('click', event => {
         if (event.target === els.pairingBackdrop) closePairing();
       });
@@ -3676,6 +3690,11 @@
     listen('state_loaded', () => {
       state.stateLoaded = true;
       render({ forceHistory: true });
+    });
+    listen('pairing_required', event => {
+      const ip = event.payload?.ip || '';
+      els.pairingBanner.hidden = false;
+      els.pairingBannerText.textContent = t('pairingRequiredBanner', ip);
     });
     listen('edit_history_item', event => {
       openEditor(event.payload);

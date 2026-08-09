@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::broadcast;
@@ -41,6 +41,16 @@ enum DirectMessage {
     Plain(String),
     App(String),
     AppBinary(Vec<u8>),
+}
+
+fn pair_required_notice() -> String {
+    serde_json::json!({
+        "app": "fastpaste",
+        "type": "pair_required",
+        "version": 2,
+        "desktopId": pairing::desktop_id(),
+    })
+    .to_string()
 }
 
 pub(crate) fn get_local_ips() -> Vec<String> {
@@ -226,6 +236,7 @@ async fn handle_client(
     let (direct_tx, mut direct_rx) = tokio::sync::mpsc::unbounded_channel::<DirectMessage>();
     let session = Arc::new(Mutex::new(None::<SessionCipher>));
     let mut registered = false;
+    let mut pair_required_sent = false;
 
     // Không dữ liệu ứng dụng nào rời PC trước khi session v2 được xác thực.
     let data_sync = data.clone();
@@ -428,7 +439,11 @@ async fn handle_client(
             continue;
         }
         if session.lock().unwrap().is_none() {
-            // Unpaired peers may only send pairing/session control above.
+            if !pair_required_sent {
+                pair_required_sent = true;
+                let _ = direct_tx.send(DirectMessage::Plain(pair_required_notice()));
+                let _ = app.emit("pairing_required", serde_json::json!({ "ip": ip.clone() }));
+            }
             continue;
         }
 
@@ -832,5 +847,19 @@ mod keepalive_tests {
 
         let error = apply_clipboard(payload).await.unwrap_err();
         assert!(error.contains("Dữ liệu ảnh lỗi"));
+    }
+}
+
+#[cfg(test)]
+mod pairing_notice_tests {
+    use super::*;
+
+    #[test]
+    fn pair_required_notice_contains_no_clipboard_data() {
+        let value: serde_json::Value = serde_json::from_str(&pair_required_notice()).unwrap();
+        assert_eq!(value["type"], "pair_required");
+        assert_eq!(value["version"], 2);
+        assert!(value.get("payload").is_none());
+        assert!(value["desktopId"].as_str().is_some_and(|id| !id.is_empty()));
     }
 }
