@@ -783,7 +783,7 @@ pub(crate) fn make_history_sync_payload(
             && !already_known
             && promote_or_insert_payload(data, &payload, "PC")
         {
-            save_state(data);
+            save_state();
         }
     }
 
@@ -839,7 +839,7 @@ pub(crate) fn make_history_delta_payload(
             && !already_known
             && promote_or_insert_payload(data, &payload, "PC")
         {
-            save_state(data);
+            save_state();
         }
     }
 
@@ -863,7 +863,7 @@ pub(crate) fn make_history_delta_payload(
         }
     }
     if metadata_changed {
-        save_state(data);
+        save_state();
     }
 
     let cursor = data

@@ -88,7 +88,7 @@ fn save_quick_slot_hotkey(
     }
 
     data.settings.quick_slot_hotkey = prefix;
-    save_state(&data);
+    save_state();
     drop(data);
     broadcast_state(&app);
     Ok(())
@@ -115,7 +115,7 @@ fn save_autostart(
             .map_err(|error| format!("Không thể tắt tự khởi động: {error}"))?;
     }
 
-    save_state(&data);
+    save_state();
     drop(data);
     broadcast_state(&app);
     Ok(())
@@ -125,7 +125,7 @@ fn save_autostart(
 fn save_always_on_top(always_on_top: bool, state: State<'_, AppState>, app: AppHandle) {
     let mut data = state.0.lock().unwrap();
     data.settings.always_on_top = always_on_top;
-    save_state(&data);
+    save_state();
     drop(data);
 
     if let Some(window) = app.get_webview_window("main") {
@@ -156,7 +156,7 @@ fn set_app_excluded(
                 .excluded_apps
                 .sort_by_key(|name| name.to_lowercase());
         }
-        save_state(&data);
+        save_state();
     }
     broadcast_state(&app);
     Ok(())
@@ -187,7 +187,7 @@ fn set_e2ee_passphrase(
         let mut data = state.0.lock().unwrap();
         data.settings.e2ee_enabled = true;
         data.settings.e2ee_key_id = key_id.clone();
-        save_state(&data);
+        save_state();
     }
     broadcast_state(&app);
     queue_cloud_sync(&app);
@@ -211,7 +211,7 @@ fn set_e2ee_enabled(
         if let Some(key_id) = key_id {
             data.settings.e2ee_key_id = key_id;
         }
-        save_state(&data);
+        save_state();
     }
     broadcast_state(&app);
     queue_cloud_sync(&app);
@@ -227,7 +227,7 @@ fn copy_text(text: String, app: AppHandle, state: State<'_, AppState>) {
         let mut data = state.0.lock().unwrap();
         let changed = promote_or_insert_history(&mut data, &text, "PC");
         if changed {
-            save_state(&data);
+            save_state();
         }
         changed
     };
@@ -262,8 +262,12 @@ async fn copy_history_item(
             if let Some(item) = data.history.iter_mut().find(|item| item.id == id) {
                 item.payload = Some(payload);
                 item.blob_ready = true;
-                item.blob_size = item.payload.as_ref().map(|value| value.encoded_size()).unwrap_or(0);
-                save_state(&data);
+                item.blob_size = item
+                    .payload
+                    .as_ref()
+                    .map(|value| value.encoded_size())
+                    .unwrap_or(0);
+                save_state();
                 pending_blob = None;
             }
         }
@@ -303,7 +307,7 @@ async fn copy_history_item(
         item.source = "PC".to_string();
         let result = (item.payload.clone(), item.text.clone());
         data.history.insert(0, item);
-        save_state(&data);
+        save_state();
         result
     };
     let message = if let Some(payload) = payload {
@@ -395,7 +399,7 @@ fn update_history_item(
             data.cloud.status = "Đã sửa mục. Google Drive sẽ cập nhật sau vài giây.".to_string();
         }
 
-        save_state(&data);
+        save_state();
         edited_payload
     };
 
@@ -436,7 +440,7 @@ fn toggle_history_pin(
         if !pinned {
             item.quick_slot = None;
         }
-        save_state(&data);
+        save_state();
     }
 
     broadcast_state(&app);
@@ -476,7 +480,7 @@ fn set_pinned_slot(
         }
 
         item.quick_slot = slot;
-        save_state(&data);
+        save_state();
     }
 
     broadcast_state(&app);
@@ -501,7 +505,7 @@ async fn delete_history_item(
             data.cloud.status = "Đã xóa mục. Google Drive sẽ cập nhật sau vài giây.".to_string();
         }
 
-        save_state(&data);
+        save_state();
     }
 
     broadcast_state(&app);
@@ -546,7 +550,7 @@ async fn clear_history(app: AppHandle, state: State<'_, AppState>) -> Result<(),
             .as_ref()
             .map(|backup| backup.items.len())
             .unwrap_or(0);
-        save_state(&data);
+        save_state();
         count
     };
 
@@ -599,7 +603,7 @@ async fn delete_history_items(
             data.cloud.status =
                 format!("Đã xóa {count} mục theo bộ lọc. Google Drive sẽ cập nhật sau vài giây.");
         }
-        save_state(&data);
+        save_state();
         count
     };
 
@@ -639,7 +643,7 @@ fn undo_history_delete(app: AppHandle, state: State<'_, AppState>) -> Result<usi
             data.cloud.status =
                 "Đã hoàn tác xóa lịch sử. Google Drive sẽ cập nhật sau vài giây.".to_string();
         }
-        save_state(&data);
+        save_state();
         restored
     };
 
@@ -653,7 +657,7 @@ fn dismiss_history_backup(app: AppHandle, state: State<'_, AppState>) {
     {
         let mut data = state.0.lock().unwrap();
         data.history_backup = None;
-        save_state(&data);
+        save_state();
     }
     broadcast_state(&app);
 }
@@ -682,7 +686,7 @@ fn add_history_item(
             data.cloud.status =
                 "Đã thêm mục mới. Google Drive sẽ cập nhật sau vài giây.".to_string();
         }
-        save_state(&data);
+        save_state();
     }
     broadcast_state(&app);
     if copy_after_save {
@@ -745,7 +749,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
         refresh_cloud_state(&mut data.cloud);
         if !data.cloud.configured {
             data.cloud.status = "Chưa bật đồng bộ Google trong bản build này.".to_string();
-            save_state(&data);
+            save_state();
             drop(data);
             broadcast_state(&app);
             return Err("Chưa bật đồng bộ Google trong bản build này.".to_string());
@@ -753,7 +757,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
 
         data.cloud.syncing = true;
         data.cloud.status = "Đang mở đăng nhập Google...".to_string();
-        save_state(&data);
+        save_state();
     }
     broadcast_state(&app);
 
@@ -766,7 +770,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
                 data.cloud.account_email = email;
                 data.cloud.syncing = false;
                 data.cloud.status = "Đã đăng nhập Google, đang đồng bộ...".to_string();
-                save_state(&data);
+                save_state();
             }
             broadcast_state(&app);
             sync_google_drive(app, data_arc).await
@@ -777,7 +781,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
             data.cloud.signed_in = cloud::is_signed_in();
             data.cloud.account_email = cloud::signed_in_email();
             data.cloud.status = format!("Đăng nhập Google lỗi: {error}");
-            save_state(&data);
+            save_state();
             drop(data);
             broadcast_state(&app);
             Err(error)
@@ -791,7 +795,7 @@ async fn google_sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<(
         let mut data = state.0.lock().unwrap();
         data.cloud.syncing = false;
         data.cloud.status = "Đang thử đồng bộ lại Google Drive...".to_string();
-        save_state(&data);
+        save_state();
     }
     broadcast_state(&app);
     sync_google_drive(app, state.0.clone()).await
@@ -806,7 +810,7 @@ fn google_sign_out(app: AppHandle, state: State<'_, AppState>) {
     data.cloud.syncing = false;
     data.cloud.configured = cloud::is_configured();
     data.cloud.status = "Đã đăng xuất Google Drive.".to_string();
-    save_state(&data);
+    save_state();
     drop(data);
     broadcast_state(&app);
 }
@@ -884,7 +888,7 @@ async fn sync_google_drive(
 
         if !data.cloud.configured {
             data.cloud.status = "Chưa bật đồng bộ Google trong bản build này.".to_string();
-            save_state(&data);
+            save_state();
             drop(data);
             broadcast_state(&app);
             return Err("Chưa bật đồng bộ Google trong bản build này.".to_string());
@@ -896,7 +900,7 @@ async fn sync_google_drive(
 
         if !data.cloud.signed_in {
             data.cloud.status = "Cần đăng nhập Google trước khi đồng bộ.".to_string();
-            save_state(&data);
+            save_state();
             drop(data);
             broadcast_state(&app);
             return Err("Chưa đăng nhập Google.".to_string());
@@ -904,7 +908,7 @@ async fn sync_google_drive(
 
         data.cloud.syncing = true;
         data.cloud.status = "Đang đồng bộ Google Drive...".to_string();
-        save_state(&data);
+        save_state();
         (
             history_to_cloud_entries(&data.history),
             data.deleted_markers
@@ -936,7 +940,7 @@ async fn sync_google_drive(
                     "Tự đồng bộ Google Drive: {} mục, tải về {} mục mới.",
                     result.merged_count, inserted
                 );
-                save_state(&data);
+                save_state();
                 inserted
             };
             broadcast_state(&app);
@@ -950,7 +954,7 @@ async fn sync_google_drive(
             data.cloud.signed_in = cloud::is_signed_in();
             data.cloud.account_email = cloud::signed_in_email();
             data.cloud.status = format!("Đồng bộ Google lỗi: {error}");
-            save_state(&data);
+            save_state();
             drop(data);
             broadcast_state(&app);
             Err(error)
@@ -1001,9 +1005,14 @@ pub fn run() {
                 .tooltip("FastPaste")
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .on_menu_event(move |_app, event| match event.id().as_ref() {
+                .on_menu_event(move |app, event| match event.id().as_ref() {
                     "show" => show_window(&quit_handle),
-                    "quit" => std::process::exit(0),
+                    "quit" => {
+                        if let Some(state) = app.try_state::<AppState>() {
+                            state::flush_on_exit(&state.0);
+                        }
+                        std::process::exit(0);
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(move |_tray, event| {
@@ -1041,6 +1050,7 @@ pub fn run() {
             data.ips = network::get_local_ips();
             drop(data);
             app.manage(AppState(data_arc.clone()));
+            state::spawn_state_writer(data_arc.clone());
             app.manage(ws_tx.clone());
 
             let (cloud_sync_tx, mut cloud_sync_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
@@ -1123,7 +1133,7 @@ pub fn run() {
                         let mut d = data_clip.lock().unwrap();
                         let changed = promote_or_insert_payload(&mut d, &payload, "PC");
                         if changed {
-                            save_state(&d);
+                            save_state();
                         }
                         changed
                     };

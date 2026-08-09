@@ -16,6 +16,8 @@ use crate::vault;
 
 const VAULT_VERSION: u8 = 1;
 static VAULT_WRITABLE: AtomicBool = AtomicBool::new(true);
+const STATE_FLUSH_INTERVAL_MS: u64 = 500;
+static DIRTY: AtomicBool = AtomicBool::new(false);
 
 #[derive(Serialize, Deserialize)]
 struct SensitiveState {
@@ -155,7 +157,37 @@ fn get_history_vault_path() -> std::path::PathBuf {
     get_settings_path().with_file_name("history.vault")
 }
 
-pub(crate) fn save_state(data: &AppStateData) {
+/// Đánh dấu state cần ghi. Writer thread thực hiện toàn bộ I/O blocking.
+pub(crate) fn save_state() {
+    DIRTY.store(true, Ordering::Release);
+}
+
+fn take_dirty() -> bool {
+    DIRTY.swap(false, Ordering::AcqRel)
+}
+
+pub(crate) fn spawn_state_writer(data: Arc<Mutex<AppStateData>>) {
+    std::thread::Builder::new()
+        .name("fastpaste-state-writer".into())
+        .spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(STATE_FLUSH_INTERVAL_MS));
+            if !take_dirty() {
+                continue;
+            }
+            let snapshot = data.lock().unwrap().clone();
+            flush_state_now(&snapshot);
+        })
+        .expect("không tạo được state writer thread");
+}
+
+pub(crate) fn flush_on_exit(data: &Mutex<AppStateData>) {
+    if take_dirty() {
+        let snapshot = data.lock().unwrap().clone();
+        flush_state_now(&snapshot);
+    }
+}
+
+pub(crate) fn flush_state_now(data: &AppStateData) {
     if !VAULT_WRITABLE.load(Ordering::Acquire) {
         eprintln!("FastPaste: history vault đang bị khoá vì lần giải mã trước thất bại; không ghi đè dữ liệu.");
         return;
@@ -179,13 +211,7 @@ pub(crate) fn save_state(data: &AppStateData) {
         // untouched so a legacy plaintext installation can still recover.
         vault::write_protected_atomic(&get_history_vault_path(), &vault_json)?;
         let public_json = serde_json::to_vec(&persisted).map_err(|error| error.to_string())?;
-        let settings_path = get_settings_path();
-        vault::write_atomic(&settings_path, &public_json)?;
-        // The first migration may have copied legacy plaintext history into
-        // settings.bak. Replace it only after both protected and public commits.
-        std::fs::copy(&settings_path, settings_path.with_extension("bak"))
-            .map(|_| ())
-            .map_err(|error| format!("Không làm sạch settings backup cũ: {error}"))
+        vault::write_atomic(&get_settings_path(), &public_json)
     })();
     if let Err(error) = result {
         eprintln!("FastPaste: không lưu được state an toàn: {error}");
@@ -239,12 +265,9 @@ pub(crate) fn load_state() -> AppStateData {
             let icons_changed = hydrate_running_app_icons(&mut data);
             refresh_cloud_state(&mut data.cloud);
             if VAULT_WRITABLE.load(Ordering::Acquire)
-                && (migrated_from_plaintext
-                    || settings_changed
-                    || icons_changed
-                    || files_migrated)
+                && (migrated_from_plaintext || settings_changed || icons_changed || files_migrated)
             {
-                save_state(&data);
+                flush_state_now(&data);
             }
             return data;
         }
@@ -264,7 +287,7 @@ pub(crate) fn load_state() -> AppStateData {
     }
     crate::history::drop_file_payloads(&mut data);
     if VAULT_WRITABLE.load(Ordering::Acquire) {
-        save_state(&data);
+        flush_state_now(&data);
     }
     data
 }
@@ -307,6 +330,19 @@ pub(crate) fn broadcast_state(app: &AppHandle) {
         }
     }
     let _ = app.emit("update_state", data);
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+
+    #[test]
+    fn dirty_marker_is_consumed_once() {
+        DIRTY.store(false, Ordering::Release);
+        save_state();
+        assert!(take_dirty());
+        assert!(!take_dirty());
+    }
 }
 
 pub(crate) fn queue_cloud_sync(app: &AppHandle) {

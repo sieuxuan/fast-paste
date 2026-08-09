@@ -236,7 +236,7 @@ pub(crate) fn save_role_hotkey(
     }
 
     role.set(&mut data.settings, hotkey);
-    save_state(&data);
+    save_state();
     drop(data);
     broadcast_state(&app);
     Ok(())
@@ -259,7 +259,7 @@ fn copy_pinned_slot(app: &AppHandle, slot: usize) {
             true
         };
         if changed {
-            save_state(&data);
+            save_state();
         }
         Some((text, changed))
     });

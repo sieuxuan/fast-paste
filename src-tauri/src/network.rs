@@ -297,19 +297,29 @@ async fn handle_client(
                         .as_ref()
                         .and_then(|payload| transfer::serialized_size(payload).ok())
                         .or_else(|| {
-                            data.lock().unwrap().transfers.iter()
+                            data.lock()
+                                .unwrap()
+                                .transfers
+                                .iter()
                                 .find(|item| item.transfer_id == transfer_id)
                                 .map(|item| item.sent_bytes)
                         })
                         .unwrap_or(0);
-                    update_transfer(&data, TransferUiState {
-                        transfer_id,
-                        label: "Ảnh / tệp".into(),
-                        sent_bytes: received,
-                        total_bytes: received,
-                        direction: "download".into(),
-                        status: if complete { "Hoàn tất".into() } else { "Đang tải".into() },
-                    });
+                    update_transfer(
+                        &data,
+                        TransferUiState {
+                            transfer_id,
+                            label: "Ảnh / tệp".into(),
+                            sent_bytes: received,
+                            total_bytes: received,
+                            direction: "download".into(),
+                            status: if complete {
+                                "Hoàn tất".into()
+                            } else {
+                                "Đang tải".into()
+                            },
+                        },
+                    );
                     if let Some(control) = outcome.control {
                         let _ = direct_tx.send(DirectMessage::App(control));
                     }
@@ -317,7 +327,7 @@ async fn handle_client(
                         let _ = clipboard::write_clipboard(&payload);
                         let mut d = data.lock().unwrap();
                         if history::promote_or_insert_payload(&mut d, &payload, "ANDROID") {
-                            save_state(&d);
+                            save_state();
                         }
                     }
                     broadcast_state(&app);
@@ -442,16 +452,24 @@ async fn handle_client(
                             if let Ok(frames) = transfer::make_binary_chunks(&request, &payload) {
                                 let total = transfer::serialized_size(&payload).unwrap_or(0);
                                 let sent = (request.next_offset
-                                    + frames.len() * request.chunk_size.max(transfer::DEFAULT_CHUNK_BYTES))
-                                    .min(total);
-                                update_transfer(&data, TransferUiState {
-                                    transfer_id: request.transfer_id.clone(),
-                                    label: payload.text.clone(),
-                                    sent_bytes: sent,
-                                    total_bytes: total,
-                                    direction: "upload".into(),
-                                    status: if sent >= total { "Chờ ACK".into() } else { "Đang gửi".into() },
-                                });
+                                    + frames.len()
+                                        * request.chunk_size.max(transfer::DEFAULT_CHUNK_BYTES))
+                                .min(total);
+                                update_transfer(
+                                    &data,
+                                    TransferUiState {
+                                        transfer_id: request.transfer_id.clone(),
+                                        label: payload.text.clone(),
+                                        sent_bytes: sent,
+                                        total_bytes: total,
+                                        direction: "upload".into(),
+                                        status: if sent >= total {
+                                            "Chờ ACK".into()
+                                        } else {
+                                            "Đang gửi".into()
+                                        },
+                                    },
+                                );
                                 broadcast_state(&app);
                                 for frame in frames {
                                     let _ = direct_tx.send(DirectMessage::AppBinary(frame));
@@ -512,7 +530,7 @@ async fn handle_client(
                                         &mut d, &payload, "ANDROID",
                                     );
                                     if changed {
-                                        save_state(&d);
+                                        save_state();
                                     }
                                     changed
                                 };
@@ -632,7 +650,7 @@ async fn handle_client(
                         let changed =
                             history::promote_or_insert_payload(&mut d, &payload, "ANDROID");
                         if changed {
-                            save_state(&d);
+                            save_state();
                         }
                         changed
                     };
@@ -672,7 +690,7 @@ async fn handle_client(
             let mut d = data.lock().unwrap();
             let changed = history::promote_or_insert_history(&mut d, &text, "ANDROID");
             if changed {
-                save_state(&d);
+                save_state();
             }
             changed
         };
@@ -739,7 +757,7 @@ fn handle_history_sync(app: &AppHandle, data: &Mutex<AppStateData>, entries: Vec
         let mut d = data.lock().unwrap();
         let result = history::merge_sync_entries(&mut d, entries);
         if result.1 {
-            save_state(&d);
+            save_state();
         }
         result
     };
