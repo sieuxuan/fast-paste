@@ -47,6 +47,8 @@ pub(crate) struct ClipboardPayload {
     pub(crate) data: String,
     #[serde(default)]
     pub(crate) thumbnail: String,
+    #[serde(default, rename = "hasThumbnail", skip_deserializing)]
+    pub(crate) has_thumbnail: bool,
 }
 
 impl ClipboardPayload {
@@ -109,6 +111,13 @@ impl ClipboardPayload {
     }
 
     pub(crate) fn sanitized_for_ui(&self) -> Self {
+        let mut payload = self.sanitized_for_cloud();
+        payload.has_thumbnail = !payload.thumbnail.is_empty();
+        payload.thumbnail.clear();
+        payload
+    }
+
+    pub(crate) fn sanitized_for_cloud(&self) -> Self {
         let mut payload = self.clone();
         payload.data.clear();
         payload
@@ -427,5 +436,30 @@ mod tests {
         let mut other_codec_preview = payload.clone();
         other_codec_preview.thumbnail = "data:image/jpeg;base64,BBBB".to_string();
         assert_eq!(payload.fingerprint(), other_codec_preview.fingerprint());
+    }
+
+    #[test]
+    fn ui_payload_carries_no_binary_data() {
+        let payload = ClipboardPayload {
+            kind: "image".into(),
+            text: "[Hình ảnh]".into(),
+            mime_type: "image/png".into(),
+            data: STANDARD.encode(vec![9u8; 4096]),
+            thumbnail: "data:image/png;base64,AAAA".into(),
+            ..ClipboardPayload::default()
+        };
+
+        let ui = payload.sanitized_for_ui();
+
+        assert!(ui.data.is_empty());
+        assert!(ui.thumbnail.is_empty());
+        assert!(ui.has_thumbnail);
+        assert_eq!(ui.text, "[Hình ảnh]");
+    }
+
+    #[test]
+    fn ui_payload_without_thumbnail_says_so() {
+        let payload = ClipboardPayload::text("xin chào".into());
+        assert!(!payload.sanitized_for_ui().has_thumbnail);
     }
 }

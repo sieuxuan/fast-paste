@@ -917,7 +917,7 @@ pub(crate) fn make_history_delta_payload(
                 folder: item.folder.clone(),
                 payload: item.payload.as_ref().map(|payload| {
                     if is_blob {
-                        payload.sanitized_for_ui()
+                        payload.sanitized_for_cloud()
                     } else {
                         payload.clone()
                     }

@@ -354,6 +354,18 @@ fn get_history_image_preview(id: String, state: State<'_, AppState>) -> Result<S
 }
 
 #[tauri::command]
+fn get_history_thumbnail(id: String, state: State<'_, AppState>) -> Result<String, String> {
+    let data = state.0.lock().unwrap();
+    data.history
+        .iter()
+        .find(|item| item.id == id)
+        .and_then(|item| item.payload.as_ref())
+        .map(|payload| payload.thumbnail.clone())
+        .filter(|thumbnail| !thumbnail.is_empty())
+        .ok_or_else(|| "Mục này không có ảnh xem trước.".to_string())
+}
+
+#[tauri::command]
 fn update_history_item(
     id: String,
     text: String,
@@ -1234,6 +1246,7 @@ pub fn run() {
             copy_text,
             copy_history_item,
             get_history_image_preview,
+            get_history_thumbnail,
             update_history_item,
             toggle_history_pin,
             set_pinned_slot,

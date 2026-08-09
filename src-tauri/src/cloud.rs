@@ -574,7 +574,7 @@ fn manifest_entries(entries: &[CloudEntry]) -> Vec<CloudEntry> {
                 if entry.blob_size == 0 {
                     entry.blob_size = payload.encoded_size();
                 }
-                entry.payload = Some(payload.sanitized_for_ui());
+                entry.payload = Some(payload.sanitized_for_cloud());
                 entry.blob_ready = false;
             }
             entry
