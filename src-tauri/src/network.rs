@@ -21,7 +21,8 @@ const IP_REFRESH_TICKS: u32 = 15;
 /// Don't let a persistently failing adapter force a rebind more often than this.
 const FORCED_REBIND_MIN_INTERVAL: Duration = Duration::from_secs(30);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-const CLIENT_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+const CLIENT_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+const SERVER_PING_INTERVAL: Duration = Duration::from_secs(15);
 
 #[derive(Deserialize)]
 struct WsProtocolMessage {
@@ -223,9 +224,7 @@ async fn handle_client(
     let session = Arc::new(Mutex::new(None::<SessionCipher>));
     let mut registered = false;
 
-    // Sender: legacy peers receive the initial sync immediately. Once at least
-    // one device is paired, application data waits for an authenticated v2
-    // session so no clipboard content leaks before the handshake completes.
+    // Không dữ liệu ứng dụng nào rời PC trước khi session v2 được xác thực.
     let data_sync = data.clone();
     let sender_session = session.clone();
     let sender_task = tauri::async_runtime::spawn(async move {
@@ -233,8 +232,14 @@ async fn handle_client(
         // Protocol v2 is secure-by-default. No history or live clipboard data
         // leaves the PC until QR pairing/session authentication has completed.
 
+        let mut ping_ticker = tokio::time::interval(SERVER_PING_INTERVAL);
+        ping_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
         loop {
             tokio::select! {
+                _ = ping_ticker.tick() => {
+                    if write.send(Message::Ping(Default::default())).await.is_err() { break; }
+                }
                 direct = direct_rx.recv() => {
                     let Some(direct) = direct else { break };
                     match direct {
@@ -309,7 +314,7 @@ async fn handle_client(
                         &data,
                         TransferUiState {
                             transfer_id,
-                            label: "Ảnh / tệp".into(),
+                            label: "Ảnh".into(),
                             sent_bytes: received,
                             total_bytes: received,
                             direction: "download".into(),
@@ -379,7 +384,7 @@ async fn handle_client(
                                 drop(counts);
                                 broadcast_state(&app);
                             }
-                            let current_clipboard = clipboard::read_clipboard();
+                            let current_clipboard = crate::watcher::latest_payload();
                             let history_payload = {
                                 let mut d = data.lock().unwrap();
                                 history::make_history_delta_payload(
@@ -776,5 +781,15 @@ fn handle_history_sync(app: &AppHandle, data: &Mutex<AppStateData>, entries: Vec
     if history_changed {
         broadcast_state(app);
         queue_cloud_sync(app);
+    }
+}
+
+#[cfg(test)]
+mod keepalive_tests {
+    use super::*;
+
+    #[test]
+    fn server_pings_well_before_idle_timeout() {
+        assert!(SERVER_PING_INTERVAL * 2 < CLIENT_IDLE_TIMEOUT);
     }
 }
