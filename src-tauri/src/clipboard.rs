@@ -1,6 +1,34 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Sequence number tại thời điểm FastPaste tự ghi clipboard lần cuối.
+/// Watcher bỏ qua đúng giá trị này để không phát ngược nội dung vừa nhận.
+static SELF_WRITE_SEQUENCE: AtomicU32 = AtomicU32::new(0);
+
+#[cfg(windows)]
+pub(crate) fn clipboard_sequence() -> u32 {
+    use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
+    unsafe { GetClipboardSequenceNumber() }
+}
+
+#[cfg(not(windows))]
+pub(crate) fn clipboard_sequence() -> u32 {
+    0
+}
+
+pub(crate) fn mark_self_write() {
+    SELF_WRITE_SEQUENCE.store(clipboard_sequence(), Ordering::Release);
+}
+
+pub(crate) fn self_write_sequence() -> u32 {
+    SELF_WRITE_SEQUENCE.load(Ordering::Acquire)
+}
+
+pub(crate) fn should_read(current: u32, last_seen: u32, self_write: u32) -> bool {
+    current != last_seen && current != self_write
+}
 
 pub(crate) const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 const MAX_THUMBNAIL_CHARS: usize = 512 * 1024;
@@ -102,13 +130,17 @@ pub(crate) fn write_clipboard(payload: &ClipboardPayload) -> Result<(), String> 
     if !payload.is_within_limit() {
         return Err("Clipboard vượt giới hạn 64 MB.".to_string());
     }
-    match payload.kind.as_str() {
+    let result = match payload.kind.as_str() {
         "image" => write_image(payload),
         "html" => write_html(payload),
         _ => arboard::Clipboard::new()
             .and_then(|mut clipboard| clipboard.set_text(payload.text.clone()))
             .map_err(|error| error.to_string()),
+    };
+    if result.is_ok() {
+        mark_self_write();
     }
+    result
 }
 
 #[cfg(not(windows))]
@@ -336,6 +368,26 @@ fn build_cf_html(fragment: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn poller_skips_when_sequence_unchanged() {
+        assert!(!should_read(7, 7, 0));
+    }
+
+    #[test]
+    fn poller_reads_when_sequence_advances() {
+        assert!(should_read(8, 7, 0));
+    }
+
+    #[test]
+    fn poller_skips_its_own_write() {
+        assert!(!should_read(8, 7, 8));
+    }
+
+    #[test]
+    fn poller_resumes_after_a_real_copy_follows_its_own_write() {
+        assert!(should_read(9, 8, 8));
+    }
 
     #[test]
     fn cf_html_round_trip_preserves_fragment() {
