@@ -1210,11 +1210,7 @@ pub fn run() {
             let mut clipboard_rx = watcher::spawn_clipboard_watcher();
             tauri::async_runtime::spawn(async move {
                 while let Some(payload) = clipboard_rx.recv().await {
-                    let _ = ws_tx.send(if payload.kind == "text" {
-                        payload.text.clone()
-                    } else {
-                        payload.protocol_json()
-                    });
+                    let _ = ws_tx.send(crate::network::outgoing_clipboard_message(&payload));
 
                     let history_changed = {
                         let mut d = data_clip.lock().unwrap();

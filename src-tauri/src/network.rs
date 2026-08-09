@@ -26,6 +26,27 @@ const FORCED_REBIND_MIN_INTERVAL: Duration = Duration::from_secs(30);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const CLIENT_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const SERVER_PING_INTERVAL: Duration = Duration::from_secs(15);
+pub(crate) const BLOB_OFFER_THRESHOLD_BYTES: usize = 256 * 1024;
+
+pub(crate) fn outgoing_clipboard_message(payload: &ClipboardPayload) -> String {
+    if payload.kind == "text" {
+        return payload.text.clone();
+    }
+    if payload.encoded_size() <= BLOB_OFFER_THRESHOLD_BYTES {
+        return payload.protocol_json();
+    }
+    serde_json::json!({
+        "app": "fastpaste",
+        "type": "clipboard_blob_offer",
+        "version": 2,
+        "text": payload.text,
+        "timestamp": chrono::Utc::now().timestamp_millis(),
+        "source": "PC",
+        "blobId": payload.fingerprint(),
+        "blobSize": payload.encoded_size(),
+        "payload": payload.sanitized_for_cloud(),
+    }).to_string()
+}
 
 #[derive(Deserialize)]
 struct WsProtocolMessage {
@@ -463,7 +484,11 @@ async fn handle_client(
                                 .iter()
                                 .find(|item| item.blob_id == request.blob_id && item.blob_ready)
                                 .and_then(|item| item.payload.clone())
-                        };
+                        }.or_else(|| {
+                            crate::watcher::latest_payload().filter(|payload| {
+                                payload.fingerprint() == request.blob_id
+                            })
+                        });
                         if let Some(payload) = payload {
                             if transfer::serialized_size(&payload).ok() == Some(request.next_offset)
                             {
@@ -861,5 +886,29 @@ mod pairing_notice_tests {
         assert_eq!(value["version"], 2);
         assert!(value.get("payload").is_none());
         assert!(value["desktopId"].as_str().is_some_and(|id| !id.is_empty()));
+    }
+}
+
+#[cfg(test)]
+mod outgoing_tests {
+    use super::*;
+
+    #[test]
+    fn text_goes_out_raw() {
+        assert_eq!(outgoing_clipboard_message(&ClipboardPayload::text("hello".into())), "hello");
+    }
+
+    #[test]
+    fn large_image_is_offered_without_inline_data() {
+        let payload = ClipboardPayload {
+            kind: "image".into(),
+            text: "image".into(),
+            data: "A".repeat((BLOB_OFFER_THRESHOLD_BYTES + 1) * 2),
+            ..Default::default()
+        };
+        let value: serde_json::Value = serde_json::from_str(&outgoing_clipboard_message(&payload)).unwrap();
+        assert_eq!(value["type"], "clipboard_blob_offer");
+        assert_eq!(value["blobId"], payload.fingerprint());
+        assert_eq!(value["payload"]["data"], "");
     }
 }
