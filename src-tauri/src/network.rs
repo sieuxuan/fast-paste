@@ -329,7 +329,7 @@ async fn handle_client(
                         let _ = direct_tx.send(DirectMessage::App(control));
                     }
                     if let Some(payload) = outcome.payload {
-                        let _ = clipboard::write_clipboard(&payload);
+                        let _ = apply_clipboard(payload.clone()).await;
                         let mut d = data.lock().unwrap();
                         if history::promote_or_insert_payload(&mut d, &payload, "ANDROID") {
                             save_state();
@@ -513,7 +513,7 @@ async fn handle_client(
                                 &data,
                                 TransferUiState {
                                     transfer_id,
-                                    label: "Ảnh / tệp".into(),
+                                    label: "Ảnh".into(),
                                     sent_bytes: received.min(total),
                                     total_bytes: total,
                                     direction: "download".into(),
@@ -528,7 +528,7 @@ async fn handle_client(
                                 let _ = direct_tx.send(DirectMessage::App(control));
                             }
                             if let Some(payload) = outcome.payload {
-                                let _ = clipboard::write_clipboard(&payload);
+                                let _ = apply_clipboard(payload.clone()).await;
                                 let changed = {
                                     let mut d = data.lock().unwrap();
                                     let changed = history::promote_or_insert_payload(
@@ -584,7 +584,7 @@ async fn handle_client(
                                 .unwrap_or(0) as usize,
                             blob_ready: false,
                         };
-                        handle_history_sync(&app, &data, vec![entry]);
+                        handle_history_sync(&app, &data, vec![entry]).await;
                         let request = transfer::make_request(&blob_id);
                         let transfer_id = serde_json::from_str::<serde_json::Value>(&request)
                             .ok()
@@ -643,13 +643,13 @@ async fn handle_client(
                         pairing::update_sync_cursor(&device_id, cursor);
                     }
                 }
-                handle_history_sync(&app, &data, protocol.entries.unwrap_or_default());
+                handle_history_sync(&app, &data, protocol.entries.unwrap_or_default()).await;
                 continue;
             }
             if protocol.app.as_deref() == Some("fastpaste") && protocol.kind == "clipboard_payload"
             {
                 if let Some(payload) = protocol.payload {
-                    let _ = clipboard::write_clipboard(&payload);
+                    let _ = apply_clipboard(payload.clone()).await;
                     let history_changed = {
                         let mut d = data.lock().unwrap();
                         let changed =
@@ -688,9 +688,7 @@ async fn handle_client(
         }
 
         // Raw plain text = immediate clipboard paste from the device.
-        if app.clipboard().write_text(text.clone()).is_ok() {
-            crate::clipboard::mark_self_write();
-        }
+        let _ = apply_clipboard_text(app.clone(), text.clone()).await;
         let history_changed = {
             let mut d = data.lock().unwrap();
             let changed = history::promote_or_insert_history(&mut d, &text, "ANDROID");
@@ -733,6 +731,25 @@ fn update_transfer(data: &Mutex<AppStateData>, progress: TransferUiState) {
     }
 }
 
+/// Win32 clipboard và decode ảnh đều blocking; chạy ngoài worker WS.
+async fn apply_clipboard(payload: ClipboardPayload) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || clipboard::write_clipboard(&payload))
+        .await
+        .map_err(|error| format!("Clipboard worker lỗi: {error}"))?
+}
+
+async fn apply_clipboard_text(app: AppHandle, text: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let result = app.clipboard().write_text(text).map_err(|error| error.to_string());
+        if result.is_ok() {
+            clipboard::mark_self_write();
+        }
+        result
+    })
+    .await
+    .map_err(|error| format!("Clipboard worker lỗi: {error}"))?
+}
+
 fn protect_for_client(
     _data: &Mutex<AppStateData>,
     session: &Mutex<Option<SessionCipher>>,
@@ -757,7 +774,11 @@ fn protect_binary_for_client(
         .and_then(|cipher| cipher.encrypt_binary(&frame).ok())
 }
 
-fn handle_history_sync(app: &AppHandle, data: &Mutex<AppStateData>, entries: Vec<SyncEntry>) {
+async fn handle_history_sync(
+    app: &AppHandle,
+    data: &Mutex<AppStateData>,
+    entries: Vec<SyncEntry>,
+) {
     let (newest_incoming, history_changed, latest_local_timestamp) = {
         let mut d = data.lock().unwrap();
         let result = history::merge_sync_entries(&mut d, entries);
@@ -770,11 +791,9 @@ fn handle_history_sync(app: &AppHandle, data: &Mutex<AppStateData>, entries: Vec
     if let Some(entry) = newest_incoming {
         if entry.timestamp > latest_local_timestamp {
             if let Some(payload) = entry.payload {
-                let _ = clipboard::write_clipboard(&payload);
+                let _ = apply_clipboard(payload).await;
             } else {
-                if app.clipboard().write_text(entry.text).is_ok() {
-                    crate::clipboard::mark_self_write();
-                }
+                let _ = apply_clipboard_text(app.clone(), entry.text).await;
             }
         }
     }
@@ -791,5 +810,18 @@ mod keepalive_tests {
     #[test]
     fn server_pings_well_before_idle_timeout() {
         assert!(SERVER_PING_INTERVAL * 2 < CLIENT_IDLE_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn blocking_clipboard_errors_are_returned() {
+        let payload = ClipboardPayload {
+            kind: "image".into(),
+            text: "invalid image".into(),
+            data: "not-base64".into(),
+            ..ClipboardPayload::default()
+        };
+
+        let error = apply_clipboard(payload).await.unwrap_err();
+        assert!(error.contains("Dữ liệu ảnh lỗi"));
     }
 }
