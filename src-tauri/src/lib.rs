@@ -12,6 +12,7 @@ mod vault;
 mod watcher;
 
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
@@ -25,6 +26,7 @@ use state::*;
 
 const AUTOSTART_HIDDEN_ARG: &str = "--fastpaste-hidden";
 const CLOUD_SYNC_DEBOUNCE_MS: u64 = 3_000;
+static LAST_SYNCED_REVISION: AtomicU64 = AtomicU64::new(0);
 
 fn next_sync_deadline(first_request_at: i64, _now: i64) -> i64 {
     first_request_at + CLOUD_SYNC_DEBOUNCE_MS as i64
@@ -940,6 +942,11 @@ async fn sync_google_drive(
             return Err("Chưa đăng nhập Google.".to_string());
         }
 
+        let revision = history_revision(&data.history, &data.deleted_markers, data.clear_history_at);
+        if revision != 0 && revision == LAST_SYNCED_REVISION.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
         data.cloud.syncing = true;
         data.cloud.status_code = "syncing".into();
         data.cloud.status = "Đang đồng bộ Google Drive...".to_string();
@@ -976,6 +983,12 @@ async fn sync_google_drive(
                     "Tự đồng bộ Google Drive: {} mục, tải về {} mục mới.",
                     result.merged_count, inserted
                 );
+                let current_revision = history_revision(
+                    &data.history,
+                    &data.deleted_markers,
+                    data.clear_history_at,
+                );
+                LAST_SYNCED_REVISION.store(current_revision, Ordering::Release);
                 save_state();
                 inserted
             };

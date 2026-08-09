@@ -1109,6 +1109,56 @@ pub(crate) fn merge_cloud_entries_into_history(
     (inserted, changed)
 }
 
+pub(crate) fn history_revision(
+    history: &[HistoryItem],
+    markers: &[DeletedMarker],
+    clear_at: Option<i64>,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for item in history {
+        item.text.hash(&mut hasher);
+        item.timestamp.hash(&mut hasher);
+        item.source.hash(&mut hasher);
+        item.folder.hash(&mut hasher);
+        item.pinned.hash(&mut hasher);
+        item.blob_id.hash(&mut hasher);
+    }
+    for marker in markers {
+        marker.text_hash.hash(&mut hasher);
+        marker.deleted_at.hash(&mut hasher);
+        marker.include_pinned.hash(&mut hasher);
+    }
+    clear_at.hash(&mut hasher);
+    hasher.finish()
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::*;
+
+    #[test]
+    fn revision_is_stable_and_changes_with_entries() {
+        let first = vec![make_history_item("one", "PC")];
+        assert_eq!(history_revision(&first, &[], None), history_revision(&first, &[], None));
+        let mut second = first.clone();
+        second.push(make_history_item("two", "PC"));
+        assert_ne!(history_revision(&first, &[], None), history_revision(&second, &[], None));
+    }
+
+    #[test]
+    fn revision_ignores_binary_payload_bytes() {
+        let mut first = make_history_item("image", "PC");
+        first.blob_id = "abc".into();
+        first.payload = Some(crate::clipboard::ClipboardPayload {
+            kind: "image".into(), text: "image".into(), data: "AAAA".into(), ..Default::default()
+        });
+        let mut second = first.clone();
+        second.payload.as_mut().unwrap().data = "BBBB".into();
+        assert_eq!(history_revision(&[first], &[], None), history_revision(&[second], &[], None));
+    }
+}
+
 #[cfg(test)]
 mod history_maintenance_tests {
     use super::*;
