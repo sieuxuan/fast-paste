@@ -33,6 +33,9 @@ import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -95,7 +98,10 @@ class MainActivity : ComponentActivity() {
                         onRefreshDiscovery = viewModel::restartDiscovery,
                         onCheckUpdate = viewModel::checkForUpdates,
                         onOpenUpdate = viewModel::openUpdatePage,
-                        onGoogleSync = ::requestGoogleDriveSync
+                        onGoogleSync = ::requestGoogleDriveSync,
+                        onScanPairingQr = ::scanPairingQr,
+                        onSetE2eePassphrase = viewModel::setE2eePassphrase,
+                        onSetE2eeEnabled = viewModel::setE2eeEnabled
                     )
                 }
             }
@@ -203,6 +209,30 @@ class MainActivity : ComponentActivity() {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+    }
+
+    private fun scanPairingQr() {
+        val options = GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .enableAutoZoom()
+            .build()
+        GmsBarcodeScanning.getClient(this, options)
+            .startScan()
+            .addOnSuccessListener { barcode ->
+                val value = barcode.rawValue
+                if (value.isNullOrBlank()) {
+                    Toast.makeText(this, "QR không có dữ liệu", Toast.LENGTH_SHORT).show()
+                } else {
+                    viewModel.installPairingQr(value)
+                }
+            }
+            .addOnFailureListener { error ->
+                Toast.makeText(
+                    this,
+                    "Không mở được máy quét QR: ${error.message ?: "không rõ"}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
     }
 
     private fun requestGoogleDriveSync(interactive: Boolean = true) {

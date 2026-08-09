@@ -15,6 +15,7 @@ data class DiscoveredServer(
     val name: String,
     val host: String,
     val port: Int,
+    val desktopId: String = "",
     val lastSeen: Long = System.currentTimeMillis()
 )
 
@@ -123,9 +124,10 @@ class ServiceDiscovery(context: Context) {
                     if (parts.size >= 3) {
                         val hostname = parts[1]
                         val port = parts[2].toIntOrNull() ?: 4567
+                        val desktopId = parts.getOrNull(3).orEmpty()
                         val host = packet.address.hostAddress ?: continue
 
-                        val server = DiscoveredServer(hostname, host, port)
+                        val server = DiscoveredServer(hostname, host, port, desktopId)
                         Log.d(TAG, "Discovered via UDP: $server")
 
                         updateServer(server)
@@ -157,7 +159,10 @@ class ServiceDiscovery(context: Context) {
         val currentList = _servers.value
             .filter { it.lastSeen >= cutoff }
             .filter { it.host != server.host }
-            .filterNot { it.name == server.name && it.port == server.port }
+            .filterNot {
+                server.desktopId.isNotBlank() && it.desktopId == server.desktopId ||
+                    server.desktopId.isBlank() && it.name == server.name && it.port == server.port
+            }
 
         _servers.value = (currentList + server)
             .sortedByDescending { it.lastSeen }

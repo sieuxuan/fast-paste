@@ -11,7 +11,9 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::clipboard::{self, ClipboardPayload};
 use crate::history::{self, SyncEntry};
-use crate::state::{broadcast_state, queue_cloud_sync, save_state, AppStateData};
+use crate::pairing::{self, PairRequest, SessionCipher, SessionHello};
+use crate::state::{broadcast_state, queue_cloud_sync, save_state, AppStateData, TransferUiState};
+use crate::transfer::{self, BlobChunk, BlobRequest};
 
 const BROADCAST_INTERVAL: Duration = Duration::from_secs(2);
 /// Refresh the interface list every N broadcast ticks (~30s at 2s/tick).
@@ -28,6 +30,13 @@ struct WsProtocolMessage {
     kind: String,
     entries: Option<Vec<SyncEntry>>,
     payload: Option<ClipboardPayload>,
+    cursor: Option<i64>,
+}
+
+enum DirectMessage {
+    Plain(String),
+    App(String),
+    AppBinary(Vec<u8>),
 }
 
 pub(crate) fn get_local_ips() -> Vec<String> {
@@ -83,7 +92,7 @@ async fn bind_broadcast_sockets(ips: &[String]) -> Vec<UdpSocket> {
     sockets
 }
 
-/// Announce `FASTPASTE:<hostname>:4567` on every physical interface, rebinding
+/// Announce `FASTPASTE:<hostname>:4567:<desktop-id>` on every physical interface, rebinding
 /// when interfaces change (sleep/wake, Wi-Fi switch) or sends start failing.
 pub(crate) fn spawn_udp_broadcaster(app: &AppHandle, data: Arc<Mutex<AppStateData>>) {
     let hostname = gethostname::gethostname().to_string_lossy().into_owned();
@@ -93,7 +102,7 @@ pub(crate) fn spawn_udp_broadcaster(app: &AppHandle, data: Arc<Mutex<AppStateDat
         let mut bound_ips: Vec<String> = vec![];
         let mut ticks_since_refresh = IP_REFRESH_TICKS; // refresh on first pass
         let mut last_forced_rebind: Option<Instant> = None;
-        let msg = format!("FASTPASTE:{}:4567", hostname);
+        let msg = format!("FASTPASTE:{}:4567:{}", hostname, pairing::desktop_id());
         loop {
             if sockets.is_empty() || ticks_since_refresh >= IP_REFRESH_TICKS {
                 ticks_since_refresh = 0;
@@ -209,43 +218,52 @@ async fn handle_client(
         return;
     };
 
-    // Register client only after a successful WS handshake; count connections
-    // per IP so a quick reconnect doesn't unlist the new one.
-    {
-        let mut counts = client_counts.lock().unwrap();
-        *counts.entry(ip.clone()).or_insert(0) += 1;
-        set_clients_from_counts(&counts, &data);
-    }
-    broadcast_state(&app);
-
     let (mut write, mut read) = futures_util::StreamExt::split(ws_stream);
+    let (direct_tx, mut direct_rx) = tokio::sync::mpsc::unbounded_channel::<DirectMessage>();
+    let session = Arc::new(Mutex::new(None::<SessionCipher>));
+    let mut registered = false;
 
-    // Sender: exchange full history first, then forward future clipboard changes.
+    // Sender: legacy peers receive the initial sync immediately. Once at least
+    // one device is paired, application data waits for an authenticated v2
+    // session so no clipboard content leaks before the handshake completes.
     let data_sync = data.clone();
+    let sender_session = session.clone();
     let sender_task = tauri::async_runtime::spawn(async move {
         use futures_util::SinkExt;
-        let current_clipboard = clipboard::read_clipboard();
-        let payload = {
-            let mut d = data_sync.lock().unwrap();
-            history::make_history_sync_payload(&mut d, current_clipboard)
-        };
-        if let Some(payload) = payload {
-            if !payload.is_empty() && write.send(Message::Text(payload.into())).await.is_err() {
-                return;
-            }
-        }
+        // Protocol v2 is secure-by-default. No history or live clipboard data
+        // leaves the PC until QR pairing/session authentication has completed.
 
         loop {
-            match rx.recv().await {
-                Ok(msg) => {
-                    if write.send(Message::Text(msg.into())).await.is_err() {
-                        break;
+            tokio::select! {
+                direct = direct_rx.recv() => {
+                    let Some(direct) = direct else { break };
+                    match direct {
+                        DirectMessage::Plain(message) => {
+                            if write.send(Message::Text(message.into())).await.is_err() { break; }
+                        }
+                        DirectMessage::App(message) => {
+                            if let Some(message) = protect_for_client(&data_sync, &sender_session, message) {
+                                if write.send(Message::Text(message.into())).await.is_err() { break; }
+                            }
+                        }
+                        DirectMessage::AppBinary(frame) => {
+                            if let Some(frame) = protect_binary_for_client(&data_sync, &sender_session, frame) {
+                                if write.send(Message::Binary(frame.into())).await.is_err() { break; }
+                            }
+                        }
                     }
                 }
-                // A slow client can lag behind the broadcast channel; skip the
-                // missed backlog instead of killing the connection.
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => break,
+                received = rx.recv() => match received {
+                    Ok(message) => {
+                        if let Some(message) = protect_for_client(&data_sync, &sender_session, message) {
+                            if write.send(Message::Text(message.into())).await.is_err() { break; }
+                        }
+                    }
+                    // A slow client can lag behind the broadcast channel; skip
+                    // missed backlog instead of killing the connection.
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
             }
         }
     });
@@ -257,15 +275,351 @@ async fn handle_client(
     )
     .await
     {
-        let Ok(text) = msg.to_text() else {
+        if msg.is_binary() {
+            let wire = msg.into_data();
+            let secure_frame = {
+                let mut guard = session.lock().unwrap();
+                guard
+                    .as_mut()
+                    .and_then(|cipher| cipher.decrypt_binary(&wire).ok().flatten())
+            };
+            if let Some(frame) = secure_frame {
+                if let Ok(outcome) = transfer::receive_binary_chunk(&frame) {
+                    let complete = outcome.payload.is_some();
+                    let transfer_id = serde_json::from_str::<serde_json::Value>(
+                        outcome.control.as_deref().unwrap_or("{}"),
+                    )
+                    .ok()
+                    .and_then(|value| value["transferId"].as_str().map(str::to_string))
+                    .unwrap_or_else(|| "binary-download".to_string());
+                    let received = outcome
+                        .payload
+                        .as_ref()
+                        .and_then(|payload| transfer::serialized_size(payload).ok())
+                        .or_else(|| {
+                            data.lock().unwrap().transfers.iter()
+                                .find(|item| item.transfer_id == transfer_id)
+                                .map(|item| item.sent_bytes)
+                        })
+                        .unwrap_or(0);
+                    update_transfer(&data, TransferUiState {
+                        transfer_id,
+                        label: "Ảnh / tệp".into(),
+                        sent_bytes: received,
+                        total_bytes: received,
+                        direction: "download".into(),
+                        status: if complete { "Hoàn tất".into() } else { "Đang tải".into() },
+                    });
+                    if let Some(control) = outcome.control {
+                        let _ = direct_tx.send(DirectMessage::App(control));
+                    }
+                    if let Some(payload) = outcome.payload {
+                        let _ = clipboard::write_clipboard(&payload);
+                        let mut d = data.lock().unwrap();
+                        if history::promote_or_insert_payload(&mut d, &payload, "ANDROID") {
+                            save_state(&d);
+                        }
+                    }
+                    broadcast_state(&app);
+                }
+            }
+            continue;
+        }
+        let Ok(wire_text) = msg.to_text() else {
             continue;
         };
-        if text.is_empty() {
+        if wire_text.is_empty() {
             continue;
         }
 
-        if let Ok(protocol) = serde_json::from_str::<WsProtocolMessage>(text) {
-            if protocol.app.as_deref() == Some("fastpaste") && protocol.kind == "history_sync" {
+        // Pairing/session control messages are authenticated but intentionally
+        // plaintext: the QR secret authenticates pairing, then the stored root
+        // key authenticates fresh P-256 ECDH for every reconnect.
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(wire_text) {
+            let kind = value
+                .get("type")
+                .and_then(|item| item.as_str())
+                .unwrap_or_default();
+            if value.get("app").and_then(|item| item.as_str()) == Some("fastpaste")
+                && kind == "pair_request"
+            {
+                if let Ok(request) = serde_json::from_value::<PairRequest>(value) {
+                    if let Ok(response) = pairing::accept_pair(request) {
+                        if let Ok(json) = serde_json::to_string(&response) {
+                            let _ = direct_tx.send(DirectMessage::Plain(json));
+                        }
+                    }
+                }
+                continue;
+            }
+            if value.get("app").and_then(|item| item.as_str()) == Some("fastpaste")
+                && kind == "session_hello"
+            {
+                if let Ok(hello) = serde_json::from_value::<SessionHello>(value) {
+                    if let Ok((response, cipher)) = pairing::accept_session(hello) {
+                        if let Ok(json) = serde_json::to_string(&response) {
+                            let _ = direct_tx.send(DirectMessage::Plain(json));
+                            let sync_cursor = cipher.sync_cursor;
+                            *session.lock().unwrap() = Some(cipher);
+                            if !registered {
+                                let mut counts = client_counts.lock().unwrap();
+                                *counts.entry(ip.clone()).or_insert(0) += 1;
+                                set_clients_from_counts(&counts, &data);
+                                registered = true;
+                                drop(counts);
+                                broadcast_state(&app);
+                            }
+                            let current_clipboard = clipboard::read_clipboard();
+                            let history_payload = {
+                                let mut d = data.lock().unwrap();
+                                history::make_history_delta_payload(
+                                    &mut d,
+                                    current_clipboard,
+                                    sync_cursor,
+                                )
+                            };
+                            if let Some(payload) = history_payload {
+                                let _ = direct_tx.send(DirectMessage::App(payload));
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+
+        let secure_text = {
+            let mut guard = session.lock().unwrap();
+            match guard.as_mut() {
+                Some(cipher) => cipher.decrypt(wire_text),
+                None => Ok(None),
+            }
+        };
+        let secure_text = match secure_text {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if session.lock().unwrap().is_some() && secure_text.is_none() {
+            // Authenticated connections never downgrade to plaintext.
+            continue;
+        }
+        if session.lock().unwrap().is_none() {
+            // Unpaired peers may only send pairing/session control above.
+            continue;
+        }
+
+        let Some(text) = secure_text else { continue };
+
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+            if value.get("app").and_then(|item| item.as_str()) == Some("fastpaste") {
+                let kind = value
+                    .get("type")
+                    .and_then(|item| item.as_str())
+                    .unwrap_or_default();
+                if matches!(kind, "blob_request" | "blob_ack") {
+                    if let Ok(request) = serde_json::from_value::<BlobRequest>(value) {
+                        let payload = {
+                            let d = data.lock().unwrap();
+                            d.history
+                                .iter()
+                                .find(|item| item.blob_id == request.blob_id && item.blob_ready)
+                                .and_then(|item| item.payload.clone())
+                        };
+                        if let Some(payload) = payload {
+                            if transfer::serialized_size(&payload).ok() == Some(request.next_offset)
+                            {
+                                let complete = serde_json::json!({
+                                    "app": "fastpaste",
+                                    "type": "blob_complete",
+                                    "version": 2,
+                                    "transferId": request.transfer_id,
+                                    "blobId": request.blob_id,
+                                })
+                                .to_string();
+                                let _ = direct_tx.send(DirectMessage::App(complete));
+                                continue;
+                            }
+                            if let Ok(frames) = transfer::make_binary_chunks(&request, &payload) {
+                                let total = transfer::serialized_size(&payload).unwrap_or(0);
+                                let sent = (request.next_offset
+                                    + frames.len() * request.chunk_size.max(transfer::DEFAULT_CHUNK_BYTES))
+                                    .min(total);
+                                update_transfer(&data, TransferUiState {
+                                    transfer_id: request.transfer_id.clone(),
+                                    label: payload.text.clone(),
+                                    sent_bytes: sent,
+                                    total_bytes: total,
+                                    direction: "upload".into(),
+                                    status: if sent >= total { "Chờ ACK".into() } else { "Đang gửi".into() },
+                                });
+                                broadcast_state(&app);
+                                for frame in frames {
+                                    let _ = direct_tx.send(DirectMessage::AppBinary(frame));
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+                if kind == "blob_complete" {
+                    let transfer_id = value
+                        .get("transferId")
+                        .and_then(|item| item.as_str())
+                        .unwrap_or_default();
+                    let mut state = data.lock().unwrap();
+                    if let Some(progress) = state
+                        .transfers
+                        .iter_mut()
+                        .find(|item| item.transfer_id == transfer_id)
+                    {
+                        progress.sent_bytes = progress.total_bytes;
+                        progress.status = "Hoàn tất".into();
+                    }
+                    drop(state);
+                    broadcast_state(&app);
+                    continue;
+                }
+                if kind == "blob_chunk" {
+                    if let Ok(chunk) = serde_json::from_value::<BlobChunk>(value) {
+                        let transfer_id = chunk.transfer_id.clone();
+                        let total = chunk.total;
+                        let received = chunk.offset + chunk.data.len() * 3 / 4;
+                        if let Ok(outcome) = transfer::receive_chunk(chunk) {
+                            let complete = outcome.payload.is_some();
+                            update_transfer(
+                                &data,
+                                TransferUiState {
+                                    transfer_id,
+                                    label: "Ảnh / tệp".into(),
+                                    sent_bytes: received.min(total),
+                                    total_bytes: total,
+                                    direction: "download".into(),
+                                    status: if complete {
+                                        "Hoàn tất".into()
+                                    } else {
+                                        "Đang tải".into()
+                                    },
+                                },
+                            );
+                            if let Some(control) = outcome.control {
+                                let _ = direct_tx.send(DirectMessage::App(control));
+                            }
+                            if let Some(payload) = outcome.payload {
+                                let _ = clipboard::write_clipboard(&payload);
+                                let changed = {
+                                    let mut d = data.lock().unwrap();
+                                    let changed = history::promote_or_insert_payload(
+                                        &mut d, &payload, "ANDROID",
+                                    );
+                                    if changed {
+                                        save_state(&d);
+                                    }
+                                    changed
+                                };
+                                if changed {
+                                    broadcast_state(&app);
+                                    queue_cloud_sync(&app);
+                                }
+                            }
+                            broadcast_state(&app);
+                        }
+                    }
+                    continue;
+                }
+                if kind == "clipboard_blob_offer" {
+                    let payload = value.get("payload").cloned().and_then(|payload| {
+                        serde_json::from_value::<ClipboardPayload>(payload).ok()
+                    });
+                    let blob_id = value
+                        .get("blobId")
+                        .and_then(|item| item.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let text_value = value
+                        .get("text")
+                        .and_then(|item| item.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    if !blob_id.is_empty() && !text_value.is_empty() {
+                        let entry = SyncEntry {
+                            text: text_value,
+                            timestamp: value
+                                .get("timestamp")
+                                .and_then(|item| item.as_i64())
+                                .unwrap_or_else(|| chrono::Utc::now().timestamp_millis()),
+                            source: "ANDROID".into(),
+                            source_app: String::new(),
+                            source_title: String::new(),
+                            source_icon: String::new(),
+                            pinned: false,
+                            folder: String::new(),
+                            payload,
+                            blob_id: blob_id.clone(),
+                            blob_size: value
+                                .get("blobSize")
+                                .and_then(|item| item.as_u64())
+                                .unwrap_or(0) as usize,
+                            blob_ready: false,
+                        };
+                        handle_history_sync(&app, &data, vec![entry]);
+                        let request = transfer::make_request(&blob_id);
+                        let transfer_id = serde_json::from_str::<serde_json::Value>(&request)
+                            .ok()
+                            .and_then(|item| {
+                                item.get("transferId")
+                                    .and_then(|value| value.as_str())
+                                    .map(str::to_string)
+                            })
+                            .unwrap_or_default();
+                        let _ = direct_tx.send(DirectMessage::App(request));
+                        let retry_tx = direct_tx.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let mut previous_offset =
+                                transfer::current_offset(&blob_id).unwrap_or(0);
+                            let mut retries = 0;
+                            loop {
+                                tokio::time::sleep(Duration::from_millis(2_500)).await;
+                                let Some(offset) = transfer::current_offset(&blob_id) else {
+                                    break;
+                                };
+                                if offset == previous_offset {
+                                    retries += 1;
+                                    if retries > 5 {
+                                        break;
+                                    }
+                                } else {
+                                    previous_offset = offset;
+                                    retries = 0;
+                                }
+                                let resume =
+                                    transfer::make_resume_request(&blob_id, &transfer_id, offset);
+                                if retry_tx.send(DirectMessage::App(resume)).is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if let Ok(protocol) = serde_json::from_str::<WsProtocolMessage>(&text) {
+            if protocol.app.as_deref() == Some("fastpaste")
+                && matches!(protocol.kind.as_str(), "history_sync" | "history_delta")
+            {
+                if protocol.kind == "history_delta" {
+                    if let (Some(cursor), Some(device_id)) = (
+                        protocol.cursor,
+                        session
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .map(|cipher| cipher.device_id.clone()),
+                    ) {
+                        pairing::update_sync_cursor(&device_id, cursor);
+                    }
+                }
                 handle_history_sync(&app, &data, protocol.entries.unwrap_or_default());
                 continue;
             }
@@ -289,13 +643,32 @@ async fn handle_client(
                     continue;
                 }
             }
+            // Never reinterpret FastPaste control JSON as clipboard text.
+            if protocol.app.as_deref() == Some("fastpaste") {
+                continue;
+            }
+        }
+
+        if serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("app")
+                    .and_then(|item| item.as_str())
+                    .map(str::to_owned)
+            })
+            .as_deref()
+            == Some("fastpaste")
+        {
+            // Malformed or future control packets are ignored, never copied.
+            continue;
         }
 
         // Raw plain text = immediate clipboard paste from the device.
-        let _ = app.clipboard().write_text(text.to_string());
+        let _ = app.clipboard().write_text(text.clone());
         let history_changed = {
             let mut d = data.lock().unwrap();
-            let changed = history::promote_or_insert_history(&mut d, text, "ANDROID");
+            let changed = history::promote_or_insert_history(&mut d, &text, "ANDROID");
             if changed {
                 save_state(&d);
             }
@@ -310,7 +683,7 @@ async fn handle_client(
     // Client disconnected (or idle past timeout): abort the sender so both
     // stream halves drop and the socket actually closes.
     sender_task.abort();
-    {
+    if registered {
         let mut counts = client_counts.lock().unwrap();
         if let Some(count) = counts.get_mut(&ip) {
             *count -= 1;
@@ -321,6 +694,42 @@ async fn handle_client(
         set_clients_from_counts(&counts, &data);
     }
     broadcast_state(&app);
+}
+
+fn update_transfer(data: &Mutex<AppStateData>, progress: TransferUiState) {
+    let mut state = data.lock().unwrap();
+    state
+        .transfers
+        .retain(|item| item.transfer_id != progress.transfer_id);
+    state.transfers.push(progress);
+    if state.transfers.len() > 4 {
+        let drain = state.transfers.len() - 4;
+        state.transfers.drain(0..drain);
+    }
+}
+
+fn protect_for_client(
+    _data: &Mutex<AppStateData>,
+    session: &Mutex<Option<SessionCipher>>,
+    message: String,
+) -> Option<String> {
+    if let Some(cipher) = session.lock().unwrap().as_mut() {
+        cipher.encrypt(&message).ok()
+    } else {
+        None
+    }
+}
+
+fn protect_binary_for_client(
+    _data: &Mutex<AppStateData>,
+    session: &Mutex<Option<SessionCipher>>,
+    frame: Vec<u8>,
+) -> Option<Vec<u8>> {
+    session
+        .lock()
+        .unwrap()
+        .as_mut()
+        .and_then(|cipher| cipher.encrypt_binary(&frame).ok())
 }
 
 fn handle_history_sync(app: &AppHandle, data: &Mutex<AppStateData>, entries: Vec<SyncEntry>) {

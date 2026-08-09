@@ -1,9 +1,13 @@
 mod clipboard;
 mod cloud;
+mod crypto;
 mod history;
 mod hotkeys;
 mod network;
+mod pairing;
 mod state;
+mod transfer;
+mod vault;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -159,6 +163,62 @@ fn set_app_excluded(
 }
 
 #[tauri::command]
+fn set_e2ee_passphrase(
+    passphrase: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let key = crypto::derive_key(&passphrase)?;
+    let key_id = crypto::key_id(&key);
+    {
+        let data = state.0.lock().unwrap();
+        if data.settings.e2ee_enabled
+            && !data.settings.e2ee_key_id.is_empty()
+            && data.settings.e2ee_key_id != key_id
+        {
+            return Err(
+                "Để đổi khoá an toàn: tắt E2EE, đồng bộ Drive về plaintext, rồi nhập khoá mới."
+                    .to_string(),
+            );
+        }
+    }
+    crypto::save_key(&key)?;
+    {
+        let mut data = state.0.lock().unwrap();
+        data.settings.e2ee_enabled = true;
+        data.settings.e2ee_key_id = key_id.clone();
+        save_state(&data);
+    }
+    broadcast_state(&app);
+    queue_cloud_sync(&app);
+    Ok(key_id)
+}
+
+#[tauri::command]
+fn set_e2ee_enabled(
+    enabled: bool,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let key_id = if enabled {
+        Some(crypto::key_id(&crypto::load_key()?))
+    } else {
+        None
+    };
+    {
+        let mut data = state.0.lock().unwrap();
+        data.settings.e2ee_enabled = enabled;
+        if let Some(key_id) = key_id {
+            data.settings.e2ee_key_id = key_id;
+        }
+        save_state(&data);
+    }
+    broadcast_state(&app);
+    queue_cloud_sync(&app);
+    Ok(())
+}
+
+#[tauri::command]
 fn copy_text(text: String, app: AppHandle, state: State<'_, AppState>) {
     let _ = app.clipboard().write_text(text.clone());
     let history_changed = {
@@ -182,7 +242,55 @@ fn copy_text(text: String, app: AppHandle, state: State<'_, AppState>) {
 }
 
 #[tauri::command]
-fn copy_history_item(id: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+async fn copy_history_item(
+    id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut pending_blob = {
+        let data = state.0.lock().unwrap();
+        data.history
+            .iter()
+            .find(|item| item.id == id && !item.blob_ready && !item.blob_id.is_empty())
+            .map(|item| (item.blob_id.clone(), item.blob_size))
+    };
+    if let Some((blob_id, _)) = pending_blob.as_ref().filter(|_| cloud::is_signed_in()) {
+        if let Ok(Some(payload)) = cloud::download_blob(blob_id).await {
+            let mut data = state.0.lock().unwrap();
+            if let Some(item) = data.history.iter_mut().find(|item| item.id == id) {
+                item.payload = Some(payload);
+                item.blob_ready = true;
+                item.blob_size = item.payload.as_ref().map(|value| value.encoded_size()).unwrap_or(0);
+                save_state(&data);
+                pending_blob = None;
+            }
+        }
+    }
+    if let Some((blob_id, blob_size)) = pending_blob {
+        let request = crate::transfer::make_request(&blob_id);
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&request) {
+            let mut data = state.0.lock().unwrap();
+            data.transfers.retain(|item| {
+                item.transfer_id != value["transferId"].as_str().unwrap_or_default()
+            });
+            data.transfers.push(TransferUiState {
+                transfer_id: value["transferId"].as_str().unwrap_or_default().to_string(),
+                label: "Ảnh / tệp".into(),
+                sent_bytes: value["offset"].as_u64().unwrap_or(0) as usize,
+                total_bytes: blob_size,
+                direction: "download".into(),
+                status: "Đang yêu cầu".into(),
+            });
+        }
+        if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
+            let _ = tx.send(request);
+        }
+        broadcast_state(&app);
+        return Err(format!(
+            "Đang tải ảnh/tệp {:.1} MB; FastPaste sẽ xác thực rồi tự chép vào clipboard.",
+            blob_size as f64 / 1_048_576.0
+        ));
+    }
     let (payload, text) = {
         let mut data = state.0.lock().unwrap();
         let Some(index) = data.history.iter().position(|item| item.id == id) else {
@@ -216,6 +324,30 @@ fn copy_history_item(id: String, app: AppHandle, state: State<'_, AppState>) -> 
 }
 
 #[tauri::command]
+fn get_history_image_preview(id: String, state: State<'_, AppState>) -> Result<String, String> {
+    let data = state.0.lock().unwrap();
+    let item = data
+        .history
+        .iter()
+        .find(|item| item.id == id)
+        .ok_or_else(|| "Không tìm thấy ảnh trong lịch sử.".to_string())?;
+    let payload = item
+        .payload
+        .as_ref()
+        .filter(|payload| payload.kind == "image" && payload.is_within_limit())
+        .ok_or_else(|| "Mục này không có dữ liệu ảnh.".to_string())?;
+    if payload.data.is_empty() {
+        return Err("Dữ liệu ảnh trống.".to_string());
+    }
+    let mime = if payload.mime_type.starts_with("image/") {
+        payload.mime_type.as_str()
+    } else {
+        "image/png"
+    };
+    Ok(format!("data:{mime};base64,{}", payload.data))
+}
+
+#[tauri::command]
 fn update_history_item(
     id: String,
     text: String,
@@ -228,7 +360,7 @@ fn update_history_item(
         return Err("Nội dung không được để trống.".to_string());
     }
 
-    {
+    let edited_payload = {
         let mut data = state.0.lock().unwrap();
         let Some(index) = data.history.iter().position(|item| item.id == id) else {
             return Err("Không tìm thấy mục clipboard cần sửa.".to_string());
@@ -242,10 +374,16 @@ fn update_history_item(
         data.history
             .retain(|existing| existing.id == item.id || existing.text != text || existing.pinned);
         item.text = text.clone();
-        item.payload = None;
+        if let Some(payload) = &mut item.payload {
+            // For images/files this text is a caption/fallback. Keep the
+            // binary payload copyable instead of silently converting it to
+            // plain text when the user edits its label.
+            payload.text = text.clone();
+        }
         item.folder = clean_folder_name(&folder);
         item.timestamp = chrono::Utc::now().to_rfc3339();
         item.source = "PC".to_string();
+        let edited_payload = item.payload.clone();
         data.history.insert(0, item);
         trim_history(&mut data.history);
 
@@ -255,13 +393,22 @@ fn update_history_item(
         }
 
         save_state(&data);
-    }
+        edited_payload
+    };
 
     broadcast_state(&app);
     if copy_after_save {
-        let _ = app.clipboard().write_text(text.clone());
+        let message = if let Some(payload) = edited_payload {
+            crate::clipboard::write_clipboard(&payload)?;
+            payload.protocol_json()
+        } else {
+            app.clipboard()
+                .write_text(text.clone())
+                .map_err(|error| error.to_string())?;
+            text.clone()
+        };
         if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
-            let _ = tx.send(text);
+            let _ = tx.send(message);
         }
     }
     queue_cloud_sync(&app);
@@ -520,7 +667,8 @@ fn add_history_item(
     }
     {
         let mut data = state.0.lock().unwrap();
-        data.history.retain(|existing| existing.text != text);
+        data.history
+            .retain(|existing| existing.text != text || existing.pinned);
         let mut item = make_history_item(&text, "PC");
         item.folder = clean_folder_name(&folder);
         data.history.insert(0, item);
@@ -546,6 +694,29 @@ fn add_history_item(
 #[tauri::command]
 fn request_state(app: AppHandle) {
     broadcast_state(&app);
+}
+
+#[tauri::command]
+fn begin_device_pairing(state: State<'_, AppState>) -> Result<pairing::PairingQr, String> {
+    let host = state
+        .0
+        .lock()
+        .unwrap()
+        .ips
+        .first()
+        .cloned()
+        .ok_or("Không tìm thấy IP LAN. Hãy kết nối Wi-Fi/LAN rồi thử lại.")?;
+    pairing::begin_pairing(&host, 4567)
+}
+
+#[tauri::command]
+fn list_paired_devices() -> Vec<pairing::PairedDeviceInfo> {
+    pairing::paired_devices()
+}
+
+#[tauri::command]
+fn forget_paired_device(device_id: String) -> Result<(), String> {
+    pairing::forget_device(&device_id)
 }
 
 #[tauri::command]
@@ -701,7 +872,7 @@ async fn sync_google_drive(
     app: AppHandle,
     data_arc: Arc<Mutex<AppStateData>>,
 ) -> Result<(), String> {
-    let (entries, deleted_markers, clear_history_at) = {
+    let (entries, deleted_markers, clear_history_at, e2ee_enabled) = {
         let mut data = data_arc.lock().unwrap();
         refresh_cloud_state(&mut data.cloud);
 
@@ -739,11 +910,12 @@ async fn sync_google_drive(
                 })
                 .collect::<Vec<_>>(),
             data.clear_history_at,
+            data.settings.e2ee_enabled,
         )
     };
     broadcast_state(&app);
 
-    match cloud::sync_pruned(entries, deleted_markers, clear_history_at).await {
+    match cloud::sync_pruned(entries, deleted_markers, clear_history_at, e2ee_enabled).await {
         Ok(result) => {
             let inserted = {
                 let mut data = data_arc.lock().unwrap();
@@ -979,8 +1151,11 @@ pub fn run() {
             save_autostart,
             save_always_on_top,
             set_app_excluded,
+            set_e2ee_passphrase,
+            set_e2ee_enabled,
             copy_text,
             copy_history_item,
+            get_history_image_preview,
             update_history_item,
             toggle_history_pin,
             set_pinned_slot,
@@ -991,6 +1166,9 @@ pub fn run() {
             dismiss_history_backup,
             add_history_item,
             request_state,
+            begin_device_pairing,
+            list_paired_devices,
+            forget_paired_device,
             open_update_url,
             google_sign_in,
             google_sync_now,

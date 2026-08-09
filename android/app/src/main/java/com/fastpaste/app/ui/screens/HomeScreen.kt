@@ -1,6 +1,9 @@
 package com.fastpaste.app.ui.screens
 
+import android.graphics.BitmapFactory
+import android.util.Base64
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -36,6 +39,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -72,8 +76,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -111,7 +119,10 @@ fun HomeScreen(
     onRefreshDiscovery: () -> Unit = {},
     onCheckUpdate: () -> Unit = {},
     onOpenUpdate: () -> Unit = {},
-    onGoogleSync: () -> Unit = {}
+    onGoogleSync: () -> Unit = {},
+    onScanPairingQr: () -> Unit = {},
+    onSetE2eePassphrase: (String) -> Unit = {},
+    onSetE2eeEnabled: (Boolean) -> Unit = {}
 ) {
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -239,6 +250,9 @@ fun HomeScreen(
                 onCheckUpdate = onCheckUpdate,
                 onOpenUpdate = onOpenUpdate,
                 onGoogleSync = onGoogleSync,
+                onScanPairingQr = onScanPairingQr,
+                onSetE2eePassphrase = onSetE2eePassphrase,
+                onSetE2eeEnabled = onSetE2eeEnabled,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
@@ -298,6 +312,10 @@ fun HomeScreen(
 
             item {
                 StatusStrip(state = state, onOpenMenu = { settingsOpen = true })
+            }
+
+            if (state.transfers.isNotEmpty()) {
+                item { TransferPanel(state) }
             }
 
             if (state.clipboardHistory.isEmpty()) {
@@ -379,6 +397,9 @@ private fun SettingsSheet(
     onCheckUpdate: () -> Unit,
     onOpenUpdate: () -> Unit,
     onGoogleSync: () -> Unit,
+    onScanPairingQr: () -> Unit,
+    onSetE2eePassphrase: (String) -> Unit,
+    onSetE2eeEnabled: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -390,7 +411,17 @@ private fun SettingsSheet(
     ) {
         SettingsHeader(state = state)
 
-        SettingSectionTitle("01 · Kết nối PC", "Tự tìm PC trong LAN hoặc nhập IP thủ công.")
+        SettingSectionTitle("00 · Ghép đôi an toàn", "Khoá riêng từng PC và session mới cho mỗi lần kết nối.")
+        PairingPanel(state = state, onScanPairingQr = onScanPairingQr)
+
+        SettingSectionTitle("01 · Mã hoá Drive", "Khoá khôi phục riêng cho bản sao trên Google Drive.")
+        SecurityPanel(
+            state = state,
+            onSetPassphrase = onSetE2eePassphrase,
+            onSetEnabled = onSetE2eeEnabled
+        )
+
+        SettingSectionTitle("02 · Kết nối PC", "Tự tìm PC trong LAN hoặc nhập IP thủ công.")
         ConnectionPanel(
             state = state,
             onConnectServer = onConnectServer,
@@ -401,20 +432,20 @@ private fun SettingsSheet(
             onRefreshDiscovery = onRefreshDiscovery
         )
 
-        SettingSectionTitle("02 · Đồng bộ đám mây", "Lưu lịch sử riêng trong Google Drive app data.")
+        SettingSectionTitle("03 · Đồng bộ đám mây", "Lưu lịch sử riêng trong Google Drive app data.")
         CloudSyncPanel(
             state = state,
             onGoogleSync = onGoogleSync
         )
 
-        SettingSectionTitle("03 · Cập nhật", "Kiểm tra bản Android mới trên GitHub.")
+        SettingSectionTitle("04 · Cập nhật", "Kiểm tra bản Android mới trên GitHub.")
         UpdatePanel(
             state = state,
             onCheckUpdate = onCheckUpdate,
             onOpenUpdate = onOpenUpdate
         )
 
-        SettingSectionTitle("04 · Nhật ký gần đây", "Theo dõi discover, reconnect và lần sync mới nhất.")
+        SettingSectionTitle("05 · Nhật ký gần đây", "Theo dõi discover, reconnect và lần sync mới nhất.")
         ConnectionLogPanel(state = state)
 
         Spacer(Modifier.height(20.dp))
@@ -870,6 +901,179 @@ private fun HistoryHeader(
 }
 
 @Composable
+private fun TransferPanel(state: UiState) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            state.transfers.forEach { transfer ->
+                val fraction = if (transfer.totalBytes > 0) {
+                    (transfer.sentBytes.toFloat() / transfer.totalBytes.toFloat()).coerceIn(0f, 1f)
+                } else 0f
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            transfer.label.ifBlank { "Ảnh / tệp" },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "${if (transfer.direction == "upload") "Gửi" else "Tải"} · ${transfer.status} · ${(fraction * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
+                        )
+                    }
+                }
+                LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairingPanel(
+    state: UiState,
+    onScanPairingQr: () -> Unit
+) {
+    val paired = state.pairedDeviceCount > 0
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (paired) GreenConnected.copy(alpha = 0.09f)
+            else MaterialTheme.colorScheme.surface
+        ),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (paired) Icons.Default.CheckCircle else Icons.Default.QrCodeScanner,
+                        contentDescription = null,
+                        tint = if (paired) GreenConnected else MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (paired) "Đã ghép đôi ${state.pairedDeviceCount} PC" else "Chưa ghép đôi",
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        state.pairingMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.66f)
+                    )
+                }
+            }
+            Button(onClick = onScanPairingQr, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (paired) "Ghép đôi PC khác" else "Quét QR trên PC")
+            }
+            Text(
+                "QR dùng một lần. Mỗi PC có root key riêng; mỗi reconnect tạo P-256 ECDH session mới để có forward secrecy.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SecurityPanel(
+    state: UiState,
+    onSetPassphrase: (String) -> Unit,
+    onSetEnabled: (Boolean) -> Unit
+) {
+    var passphrase by rememberSaveable { mutableStateOf("") }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (state.e2eeEnabled) {
+                GreenConnected.copy(alpha = 0.09f)
+            } else {
+                MaterialTheme.colorScheme.surface
+            }
+        ),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (state.e2eeEnabled) Icons.Default.CheckCircle else Icons.Default.CloudOff,
+                    contentDescription = null,
+                    tint = if (state.e2eeEnabled) GreenConnected else OrangeConnecting
+                )
+                Spacer(Modifier.width(9.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (state.e2eeEnabled) "Drive E2EE đang bật" else "Drive E2EE chưa bật",
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        state.e2eeMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.66f)
+                    )
+                    if (state.e2eeKeyId.isNotBlank()) {
+                        Text(
+                            "Mã khoá: ${state.e2eeKeyId}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+            OutlinedTextField(
+                value = passphrase,
+                onValueChange = { passphrase = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Khoá khôi phục Drive") },
+                placeholder = { Text("Dùng khi cài lại hoặc thêm thiết bị") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation()
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        onSetPassphrase(passphrase)
+                        passphrase = ""
+                    },
+                    enabled = passphrase.length >= 10,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(if (state.e2eeEnabled) "Xác nhận khoá" else "Mã hoá Drive")
+                }
+                if (state.e2eeKeyId.isNotBlank()) {
+                    OutlinedButton(
+                        onClick = { onSetEnabled(!state.e2eeEnabled) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (state.e2eeEnabled) "Tắt" else "Bật lại")
+                    }
+                }
+            }
+            Text(
+                "Khoá này chỉ bảo vệ bản sao Drive. Kết nối PC dùng khoá thiết bị từ QR, không dùng mật khẩu chung.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f)
+            )
+        }
+    }
+}
+
+@Composable
 private fun UndoHistoryBanner(count: Int, onUndo: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1115,15 +1319,39 @@ private fun EditHistoryDialog(
         title = { Text("Sửa clipboard") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (entry.payloadType != "text") {
+                    SourceBadge(
+                        text = when (entry.payloadType) {
+                            "image" -> "Ảnh · sửa chú thích, giữ nguyên dữ liệu"
+                            "files" -> "Tệp · sửa chú thích, giữ nguyên dữ liệu"
+                            "html" -> "Rich text"
+                            else -> entry.payloadType
+                        },
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
                 OutlinedTextField(
                     value = content,
                     onValueChange = { content = it },
-                    label = { Text("Nội dung") },
+                    label = { Text(if (entry.payloadType in setOf("image", "files")) "Chú thích" else "Nội dung") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(180.dp),
                     minLines = 5
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    TextButton(onClick = { content = content.trim() }) { Text("Gọn") }
+                    TextButton(onClick = { content = content.lowercase() }) { Text("a") }
+                    TextButton(onClick = { content = content.uppercase() }) { Text("A") }
+                    TextButton(onClick = {
+                        content = content.lines().joinToString("\n") { line ->
+                            if (line.isBlank()) "" else "- ${line.trim().removePrefix("- ")}"
+                        }
+                    }) { Text("• Dòng") }
+                }
                 OutlinedTextField(
                     value = folder,
                     onValueChange = { folder = it },
@@ -1133,7 +1361,7 @@ private fun EditHistoryDialog(
                     singleLine = true
                 )
                 Text(
-                    "${content.length} ký tự",
+                    "${content.length} ký tự · ${content.lines().size} dòng",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f)
                 )
@@ -1159,6 +1387,8 @@ private fun HistoryItem(
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val isLocal = entry.source == "LOCAL"
     var confirmDelete by remember(entry.id) { mutableStateOf(false) }
+    var previewOpen by remember(entry.id) { mutableStateOf(false) }
+    val thumbnail = remember(entry.thumbnail) { decodeDataUriImage(entry.thumbnail) }
 
     Surface(
         modifier = Modifier
@@ -1175,12 +1405,26 @@ private fun HistoryItem(
             verticalAlignment = Alignment.Top
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    entry.content,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    thumbnail?.let { preview ->
+                        Image(
+                            bitmap = preview,
+                            contentDescription = "Xem trước ảnh",
+                            modifier = Modifier
+                                .size(width = 86.dp, height = 64.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { previewOpen = true },
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                    Text(
+                        entry.content,
+                        modifier = Modifier.weight(1f),
+                        maxLines = if (thumbnail == null) 4 else 3,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -1236,10 +1480,7 @@ private fun HistoryItem(
                         }
                     }
                     if (entry.sourceApp.isNotBlank()) {
-                        SourceBadge(
-                            text = entry.sourceApp,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
+                        SourceAppBadge(entry.sourceApp, entry.sourceIcon)
                     }
                     Text(
                         timeFormat.format(Date(entry.timestamp)),
@@ -1315,6 +1556,38 @@ private fun HistoryItem(
             }
         )
     }
+
+    if (previewOpen && entry.payloadType == "image") {
+        val fullPreview = remember(entry.payloadData) {
+            decodeBase64Image(entry.payloadData) ?: thumbnail
+        }
+        AlertDialog(
+            onDismissRequest = { previewOpen = false },
+            title = { Text("Xem trước ảnh") },
+            text = {
+                fullPreview?.let { image ->
+                    Image(
+                        bitmap = image,
+                        contentDescription = "Ảnh clipboard",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(360.dp)
+                            .clip(RoundedCornerShape(10.dp)),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    onCopy()
+                    previewOpen = false
+                }) { Text("Sao chép") }
+            },
+            dismissButton = {
+                TextButton(onClick = { previewOpen = false }) { Text("Đóng") }
+            }
+        )
+    }
 }
 
 @Composable
@@ -1331,6 +1604,64 @@ private fun SourceBadge(text: String, color: Color) {
             fontWeight = FontWeight.Bold
         )
     }
+}
+
+@Composable
+private fun SourceAppBadge(appName: String, iconData: String) {
+    val appIcon = remember(iconData) { decodeDataUriImage(iconData) }
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            if (appIcon != null) {
+                Image(
+                    bitmap = appIcon,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                )
+            } else {
+                Text(
+                    appName.removeSuffix(".exe").take(1).uppercase(),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
+            Text(
+                appName.removeSuffix(".exe"),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.secondary,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+private fun decodeDataUriImage(value: String): ImageBitmap? {
+    if (!value.startsWith("data:image/") || value.length > 512 * 1024) return null
+    val encoded = value.substringAfter(',', "")
+    if (encoded.isBlank()) return null
+    return runCatching {
+        val bytes = Base64.decode(encoded, Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+    }.getOrNull()
+}
+
+private fun decodeBase64Image(value: String): ImageBitmap? {
+    if (value.isBlank() || value.length > 12 * 1024 * 1024) return null
+    return runCatching {
+        val bytes = Base64.decode(value, Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+    }.getOrNull()
 }
 
 private data class HistoryFilterOption(

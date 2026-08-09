@@ -29,18 +29,22 @@ interface ClipboardDao {
     @Query("SELECT * FROM clipboard_history WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): ClipboardEntry?
 
+    @Query("SELECT * FROM clipboard_history WHERE blobId = :blobId ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getByBlobId(blobId: String): ClipboardEntry?
+
     @Query("SELECT * FROM clipboard_history WHERE content = :content ORDER BY pinned DESC, timestamp DESC LIMIT 1")
     suspend fun getByContent(content: String): ClipboardEntry?
 
     @Query("UPDATE clipboard_history SET pinned = :pinned WHERE id = :id")
     suspend fun updatePinned(id: Long, pinned: Boolean)
 
-    @Query("UPDATE clipboard_history SET source = :source, sourceApp = :sourceApp, sourceTitle = :sourceTitle, timestamp = :timestamp, pinned = :pinned, folder = :folder, payloadType = :payloadType, mimeType = :mimeType, htmlContent = :htmlContent, payloadData = :payloadData, filesJson = :filesJson WHERE id = :id")
+    @Query("UPDATE clipboard_history SET source = :source, sourceApp = :sourceApp, sourceTitle = :sourceTitle, sourceIcon = :sourceIcon, timestamp = :timestamp, pinned = :pinned, folder = :folder, payloadType = :payloadType, mimeType = :mimeType, htmlContent = :htmlContent, payloadData = :payloadData, thumbnail = :thumbnail, filesJson = :filesJson, blobId = :blobId, blobSize = :blobSize, blobReady = :blobReady WHERE id = :id")
     suspend fun updateEntryById(
         id: Long,
         source: String,
         sourceApp: String,
         sourceTitle: String,
+        sourceIcon: String,
         timestamp: Long,
         pinned: Boolean,
         folder: String,
@@ -48,7 +52,11 @@ interface ClipboardDao {
         mimeType: String,
         htmlContent: String,
         payloadData: String,
-        filesJson: String
+        thumbnail: String,
+        filesJson: String,
+        blobId: String,
+        blobSize: Long,
+        blobReady: Boolean
     )
 
     @Query("DELETE FROM clipboard_history WHERE content = :content AND id != :keepId AND pinned = 0")
@@ -63,6 +71,6 @@ interface ClipboardDao {
     @Query("DELETE FROM clipboard_history WHERE pinned = 0 AND id IN (:ids)")
     suspend fun deleteUnpinnedByIds(ids: List<Long>): Int
 
-    @Query("UPDATE clipboard_history SET content = :content, folder = :folder, source = 'LOCAL', timestamp = :timestamp, payloadType = 'text', mimeType = 'text/plain', htmlContent = '', payloadData = '', filesJson = '[]' WHERE id = :id")
+    @Query("UPDATE clipboard_history SET content = :content, folder = :folder, source = 'LOCAL', timestamp = :timestamp WHERE id = :id")
     suspend fun updateEditedEntry(id: Long, content: String, folder: String, timestamp: Long)
 }

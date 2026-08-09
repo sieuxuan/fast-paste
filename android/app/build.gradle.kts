@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -18,22 +20,24 @@ android {
     }
 
     signingConfigs {
-        create("githubRelease") {
-            storeFile = file("fastpaste-release.keystore")
-            storePassword = "fastpaste"
-            keyAlias = "fastpaste"
-            keyPassword = "fastpaste"
+        if (releaseSigningReady) {
+            create("githubRelease") {
+                storeFile = signingStoreFile
+                storePassword = signingStorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
+            }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("githubRelease")
+            if (releaseSigningReady) signingConfig = signingConfigs.getByName("githubRelease")
         }
 
         release {
             isMinifyEnabled = true
-            signingConfig = signingConfigs.getByName("githubRelease")
+            if (releaseSigningReady) signingConfig = signingConfigs.getByName("githubRelease")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -54,6 +58,20 @@ android {
         compose = true
         buildConfig = true
     }
+
+    lint {
+        // AGP 8.5's Compose detector cannot read Kotlin metadata 2.1 from a
+        // transitive library and crashes before reporting the other checks.
+        disable += "CoroutineCreationDuringComposition"
+    }
+}
+
+tasks.matching { it.name == "packageRelease" }.configureEach {
+    doFirst {
+        check(releaseSigningReady) {
+            "Thiếu Android signing secrets; không tạo APK release unsigned."
+        }
+    }
 }
 
 dependencies {
@@ -73,9 +91,30 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
+    implementation(libs.sqlcipher)
+    implementation(libs.androidx.sqlite)
 
     implementation(libs.okhttp)
     implementation(libs.play.services.auth)
+    implementation(libs.play.services.code.scanner)
 
     debugImplementation(libs.compose.ui.tooling)
+    testImplementation(libs.junit)
 }
+
+val localSigning = Properties().apply {
+    rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
+}
+
+fun signingSecret(name: String): String? =
+    providers.environmentVariable(name).orNull
+        ?: localSigning.getProperty(name)?.takeIf(String::isNotBlank)
+
+val signingStoreFile = signingSecret("FASTPASTE_ANDROID_KEYSTORE_PATH")
+    ?.let(rootProject::file)
+    ?: file("fastpaste-release.keystore")
+val signingStorePassword = signingSecret("FASTPASTE_ANDROID_STORE_PASSWORD")
+val signingKeyAlias = signingSecret("FASTPASTE_ANDROID_KEY_ALIAS")
+val signingKeyPassword = signingSecret("FASTPASTE_ANDROID_KEY_PASSWORD")
+val releaseSigningReady = signingStoreFile.exists() &&
+    signingStorePassword != null && signingKeyAlias != null && signingKeyPassword != null

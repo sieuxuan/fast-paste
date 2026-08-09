@@ -18,6 +18,8 @@ pub(crate) struct HistoryItem {
     pub(crate) source_app: String,
     #[serde(default, rename = "sourceTitle", alias = "source_title")]
     pub(crate) source_title: String,
+    #[serde(default, rename = "sourceIcon", alias = "source_icon")]
+    pub(crate) source_icon: String,
     #[serde(default)]
     pub(crate) pinned: bool,
     #[serde(default)]
@@ -26,6 +28,16 @@ pub(crate) struct HistoryItem {
     pub(crate) folder: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) payload: Option<ClipboardPayload>,
+    #[serde(default, rename = "blobId", alias = "blob_id")]
+    pub(crate) blob_id: String,
+    #[serde(default, rename = "blobSize", alias = "blob_size")]
+    pub(crate) blob_size: usize,
+    #[serde(
+        default = "default_blob_ready",
+        rename = "blobReady",
+        alias = "blob_ready"
+    )]
+    pub(crate) blob_ready: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -37,12 +49,28 @@ pub(crate) struct SyncEntry {
     pub(crate) source_app: String,
     #[serde(default, rename = "sourceTitle", alias = "source_title")]
     pub(crate) source_title: String,
+    #[serde(default, rename = "sourceIcon", alias = "source_icon")]
+    pub(crate) source_icon: String,
     #[serde(default)]
     pub(crate) pinned: bool,
     #[serde(default)]
     pub(crate) folder: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) payload: Option<ClipboardPayload>,
+    #[serde(default, rename = "blobId", alias = "blob_id")]
+    pub(crate) blob_id: String,
+    #[serde(default, rename = "blobSize", alias = "blob_size")]
+    pub(crate) blob_size: usize,
+    #[serde(
+        default = "default_blob_ready",
+        rename = "blobReady",
+        alias = "blob_ready"
+    )]
+    pub(crate) blob_ready: bool,
+}
+
+fn default_blob_ready() -> bool {
+    true
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -241,6 +269,18 @@ pub(crate) fn hydrate_running_app_icons(data: &mut AppStateData) -> bool {
         OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
+    let mut changed = false;
+    for item in &mut data.history {
+        if item.source_icon.is_empty() {
+            if let Some(icon) = data
+                .app_icons
+                .get(&item.source_app.trim().to_ascii_lowercase())
+            {
+                item.source_icon = icon.clone();
+                changed = true;
+            }
+        }
+    }
     let mut missing: std::collections::HashSet<String> = data
         .history
         .iter()
@@ -248,10 +288,9 @@ pub(crate) fn hydrate_running_app_icons(data: &mut AppStateData) -> bool {
         .filter(|app| !app.is_empty() && !data.app_icons.contains_key(app))
         .collect();
     if missing.is_empty() {
-        return false;
+        return changed;
     }
 
-    let mut changed = false;
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snapshot == INVALID_HANDLE_VALUE {
@@ -288,6 +327,17 @@ pub(crate) fn hydrate_running_app_icons(data: &mut AppStateData) -> bool {
             has_process = Process32NextW(snapshot, &mut process) != 0;
         }
         CloseHandle(snapshot);
+    }
+    for item in &mut data.history {
+        if item.source_icon.is_empty() {
+            if let Some(icon) = data
+                .app_icons
+                .get(&item.source_app.trim().to_ascii_lowercase())
+            {
+                item.source_icon = icon.clone();
+                changed = true;
+            }
+        }
     }
     changed
 }
@@ -332,10 +382,14 @@ pub(crate) fn make_history_item_at(
         source: source.to_string(),
         source_app: metadata.app,
         source_title: metadata.title,
+        source_icon: metadata.icon,
         pinned: false,
         quick_slot: None,
         folder: String::new(),
         payload: None,
+        blob_id: String::new(),
+        blob_size: 0,
+        blob_ready: true,
     }
 }
 
@@ -353,6 +407,10 @@ pub(crate) fn make_history_item_from_sync(entry: &SyncEntry) -> HistoryItem {
     item.pinned = entry.pinned;
     item.folder = clean_folder_name(&entry.folder);
     item.payload = entry.payload.clone();
+    item.blob_id = entry.blob_id.clone();
+    item.blob_size = entry.blob_size;
+    item.blob_ready = entry.blob_ready;
+    item.source_icon = entry.source_icon.clone();
     item
 }
 
@@ -370,6 +428,10 @@ pub(crate) fn make_history_item_from_cloud(entry: &cloud::CloudEntry) -> History
     item.pinned = entry.pinned;
     item.folder = clean_folder_name(&entry.folder);
     item.payload = entry.payload.clone();
+    item.blob_id = entry.blob_id.clone();
+    item.blob_size = entry.blob_size;
+    item.blob_ready = entry.blob_ready;
+    item.source_icon = entry.source_icon.clone();
     item
 }
 
@@ -408,6 +470,7 @@ pub(crate) fn promote_or_insert_history(data: &mut AppStateData, text: &str, sou
             && data.history[index].source == source
             && data.history[index].source_app == metadata.app
             && data.history[index].source_title == metadata.title
+            && (metadata.icon.is_empty() || data.history[index].source_icon == metadata.icon)
         {
             return icon_changed;
         }
@@ -417,6 +480,7 @@ pub(crate) fn promote_or_insert_history(data: &mut AppStateData, text: &str, sou
         if source == "PC" {
             item.source_app = metadata.app;
             item.source_title = metadata.title;
+            item.source_icon = metadata.icon;
         }
         data.history.insert(0, item);
     } else {
@@ -469,15 +533,22 @@ pub(crate) fn promote_or_insert_payload(
         item.source = source.to_string();
         item.text = payload.text.clone();
         item.payload = Some(payload.clone());
+        item.blob_id = key.clone();
+        item.blob_size = payload.encoded_size();
+        item.blob_ready = true;
         if source == "PC" {
             item.source_app = metadata.app;
             item.source_title = metadata.title;
+            item.source_icon = metadata.icon;
         }
         data.history.insert(0, item);
     } else {
         let mut item =
             make_history_item_at(&payload.text, source, now.timestamp_millis(), metadata);
         item.payload = Some(payload.clone());
+        item.blob_id = key;
+        item.blob_size = payload.encoded_size();
+        item.blob_ready = true;
         data.history.insert(0, item);
     }
     trim_history(&mut data.history);
@@ -485,6 +556,9 @@ pub(crate) fn promote_or_insert_payload(
 }
 
 pub(crate) fn history_item_key(item: &HistoryItem) -> String {
+    if !item.blob_id.is_empty() {
+        return item.blob_id.clone();
+    }
     item.payload
         .as_ref()
         .map(ClipboardPayload::fingerprint)
@@ -492,6 +566,9 @@ pub(crate) fn history_item_key(item: &HistoryItem) -> String {
 }
 
 fn sync_entry_key(entry: &SyncEntry) -> String {
+    if !entry.blob_id.is_empty() {
+        return entry.blob_id.clone();
+    }
     entry
         .payload
         .as_ref()
@@ -505,11 +582,13 @@ pub(crate) fn apply_sync_metadata(
     folder: &str,
     source_app: &str,
     source_title: &str,
+    source_icon: &str,
 ) -> bool {
     let before_pinned = item.pinned;
     let before_folder = item.folder.clone();
     let before_source_app = item.source_app.clone();
     let before_source_title = item.source_title.clone();
+    let before_source_icon = item.source_icon.clone();
 
     item.pinned = item.pinned || pinned;
     let folder = clean_folder_name(folder);
@@ -522,11 +601,25 @@ pub(crate) fn apply_sync_metadata(
     if !source_title.trim().is_empty() {
         item.source_title = source_title.trim().chars().take(160).collect();
     }
+    if is_safe_image_data_uri(source_icon) && source_icon.len() <= 256 * 1024 {
+        item.source_icon = source_icon.to_string();
+    }
 
     item.pinned != before_pinned
         || item.folder != before_folder
         || item.source_app != before_source_app
         || item.source_title != before_source_title
+        || item.source_icon != before_source_icon
+}
+
+fn is_safe_image_data_uri(value: &str) -> bool {
+    let lower = value
+        .get(..40.min(value.len()))
+        .unwrap_or(value)
+        .to_ascii_lowercase();
+    lower.starts_with("data:image/png;base64,")
+        || lower.starts_with("data:image/jpeg;base64,")
+        || lower.starts_with("data:image/webp;base64,")
 }
 
 pub(crate) fn clean_folder_name(folder: &str) -> String {
@@ -650,6 +743,7 @@ pub(crate) fn timestamp_to_millis(timestamp: &str) -> i64 {
         .unwrap_or(0)
 }
 
+#[allow(dead_code)] // Kept for importing protocol-v1 backups; LAN sync uses delta v2.
 pub(crate) fn make_history_sync_payload(
     data: &mut AppStateData,
     current_clipboard: Option<ClipboardPayload>,
@@ -682,9 +776,13 @@ pub(crate) fn make_history_sync_payload(
             source: item.source.clone(),
             source_app: item.source_app.clone(),
             source_title: item.source_title.clone(),
+            source_icon: item.source_icon.clone(),
             pinned: item.pinned,
             folder: item.folder.clone(),
             payload: item.payload.clone(),
+            blob_id: item.blob_id.clone(),
+            blob_size: item.blob_size,
+            blob_ready: item.blob_ready,
         })
         .collect();
 
@@ -692,6 +790,108 @@ pub(crate) fn make_history_sync_payload(
         serde_json::json!({
             "app": "fastpaste",
             "type": "history_sync",
+            "entries": entries,
+        })
+        .to_string(),
+    )
+}
+
+/// Protocol v2 sends only entries newer than the peer cursor. Binary bodies are
+/// replaced by metadata + thumbnail; the receiver asks for `blobId` only when
+/// it needs to apply or preview the full clipboard payload.
+pub(crate) fn make_history_delta_payload(
+    data: &mut AppStateData,
+    current_clipboard: Option<ClipboardPayload>,
+    since: i64,
+) -> Option<String> {
+    if let Some(payload) = current_clipboard {
+        let key = if payload.kind == "text" {
+            payload.text.clone()
+        } else {
+            payload.fingerprint()
+        };
+        let already_known = data
+            .history
+            .iter()
+            .any(|item| history_item_key(item) == key);
+        if !payload.text.is_empty()
+            && !has_deleted_text_marker(data, &key)
+            && !already_known
+            && promote_or_insert_payload(data, &payload, "PC")
+        {
+            save_state(data);
+        }
+    }
+
+    let mut metadata_changed = false;
+    for item in &mut data.history {
+        if let Some(payload) = item
+            .payload
+            .as_ref()
+            .filter(|payload| payload.kind != "text")
+        {
+            if item.blob_id.is_empty() {
+                item.blob_id = payload.fingerprint();
+                metadata_changed = true;
+            }
+            let size = payload.encoded_size();
+            if item.blob_size != size || !item.blob_ready {
+                item.blob_size = size;
+                item.blob_ready = true;
+                metadata_changed = true;
+            }
+        }
+    }
+    if metadata_changed {
+        save_state(data);
+    }
+
+    let cursor = data
+        .history
+        .iter()
+        .map(|item| timestamp_to_millis(&item.timestamp))
+        .max()
+        .unwrap_or(since);
+    let entries: Vec<SyncEntry> = data
+        .history
+        .iter()
+        .filter(|item| timestamp_to_millis(&item.timestamp) > since)
+        .map(|item| {
+            let is_blob = item
+                .payload
+                .as_ref()
+                .map(|payload| payload.kind != "text")
+                .unwrap_or(false);
+            SyncEntry {
+                text: item.text.clone(),
+                timestamp: timestamp_to_millis(&item.timestamp),
+                source: item.source.clone(),
+                source_app: item.source_app.clone(),
+                source_title: item.source_title.clone(),
+                source_icon: item.source_icon.clone(),
+                pinned: item.pinned,
+                folder: item.folder.clone(),
+                payload: item.payload.as_ref().map(|payload| {
+                    if is_blob {
+                        payload.sanitized_for_ui()
+                    } else {
+                        payload.clone()
+                    }
+                }),
+                blob_id: item.blob_id.clone(),
+                blob_size: item.blob_size,
+                blob_ready: !is_blob,
+            }
+        })
+        .collect();
+
+    Some(
+        serde_json::json!({
+            "app": "fastpaste",
+            "type": "history_delta",
+            "version": 2,
+            "since": since,
+            "cursor": cursor,
             "entries": entries,
         })
         .to_string(),
@@ -747,6 +947,7 @@ pub(crate) fn merge_sync_entries(
                 &entry.folder,
                 &entry.source_app,
                 &entry.source_title,
+                &entry.source_icon,
             );
             if entry.timestamp > timestamp_to_millis(&existing.timestamp) {
                 existing.timestamp =
@@ -754,7 +955,12 @@ pub(crate) fn merge_sync_entries(
                         .unwrap_or_else(chrono::Utc::now)
                         .to_rfc3339();
                 existing.source = entry.source.clone();
-                existing.payload = entry.payload.clone();
+                if !existing.blob_ready || entry.blob_ready {
+                    existing.payload = entry.payload.clone();
+                }
+                existing.blob_id = entry.blob_id.clone();
+                existing.blob_size = entry.blob_size;
+                existing.blob_ready = existing.blob_ready || entry.blob_ready;
                 history_changed = true;
             }
         } else {
@@ -781,9 +987,13 @@ pub(crate) fn history_to_cloud_entries(history: &[HistoryItem]) -> Vec<cloud::Cl
             source: item.source.clone(),
             source_app: item.source_app.clone(),
             source_title: item.source_title.clone(),
+            source_icon: item.source_icon.clone(),
             pinned: item.pinned,
             folder: item.folder.clone(),
             payload: item.payload.clone(),
+            blob_id: item.blob_id.clone(),
+            blob_size: item.blob_size,
+            blob_ready: item.blob_ready,
         })
         .collect()
 }
@@ -823,6 +1033,7 @@ pub(crate) fn merge_cloud_entries_into_history(
                 &entry.folder,
                 &entry.source_app,
                 &entry.source_title,
+                &entry.source_icon,
             );
             if entry.timestamp > timestamp_to_millis(&existing.timestamp) {
                 existing.timestamp =
@@ -830,7 +1041,12 @@ pub(crate) fn merge_cloud_entries_into_history(
                         .unwrap_or_else(chrono::Utc::now)
                         .to_rfc3339();
                 existing.source = entry.source;
-                existing.payload = entry.payload.clone();
+                if !existing.blob_ready || entry.blob_ready {
+                    existing.payload = entry.payload.clone();
+                }
+                existing.blob_id = entry.blob_id.clone();
+                existing.blob_size = entry.blob_size;
+                existing.blob_ready = existing.blob_ready || entry.blob_ready;
                 changed = true;
             }
         } else {

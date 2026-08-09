@@ -2,7 +2,8 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub(crate) const MAX_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
+const MAX_THUMBNAIL_CHARS: usize = 512 * 1024;
 
 #[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ClipboardFile {
@@ -26,6 +27,8 @@ pub(crate) struct ClipboardPayload {
     #[serde(default)]
     pub(crate) data: String,
     #[serde(default)]
+    pub(crate) thumbnail: String,
+    #[serde(default)]
     pub(crate) files: Vec<ClipboardFile>,
 }
 
@@ -40,7 +43,27 @@ impl ClipboardPayload {
     }
 
     pub(crate) fn fingerprint(&self) -> String {
-        let bytes = serde_json::to_vec(self).unwrap_or_else(|_| self.text.as_bytes().to_vec());
+        // A preview can be regenerated with a different codec on Android and
+        // Windows. It is metadata, not clipboard identity.
+        #[derive(Serialize)]
+        struct ClipboardIdentity<'a> {
+            kind: &'a str,
+            text: &'a str,
+            html: &'a str,
+            #[serde(rename = "mimeType")]
+            mime_type: &'a str,
+            data: &'a str,
+            files: &'a [ClipboardFile],
+        }
+        let bytes = serde_json::to_vec(&ClipboardIdentity {
+            kind: &self.kind,
+            text: &self.text,
+            html: &self.html,
+            mime_type: &self.mime_type,
+            data: &self.data,
+            files: &self.files,
+        })
+        .unwrap_or_else(|_| self.text.as_bytes().to_vec());
         format!("{:x}", Sha256::digest(bytes))
     }
 
@@ -54,6 +77,12 @@ impl ClipboardPayload {
     }
 
     pub(crate) fn is_within_limit(&self) -> bool {
+        self.encoded_size() <= MAX_PAYLOAD_BYTES
+            && self.files.len() <= 16
+            && self.thumbnail.len() <= MAX_THUMBNAIL_CHARS
+    }
+
+    pub(crate) fn encoded_size(&self) -> usize {
         let encoded_bytes = |value: &str| {
             let padding = if value.ends_with("==") {
                 2
@@ -70,7 +99,7 @@ impl ClipboardPayload {
                 .map(|file| encoded_bytes(&file.data))
                 .sum::<usize>(),
         );
-        self.files.len() <= 16 && total <= MAX_PAYLOAD_BYTES
+        total
     }
 
     pub(crate) fn sanitized_for_ui(&self) -> Self {
@@ -99,7 +128,7 @@ pub(crate) fn read_clipboard() -> Option<ClipboardPayload> {
 #[cfg(windows)]
 pub(crate) fn write_clipboard(payload: &ClipboardPayload) -> Result<(), String> {
     if !payload.is_within_limit() {
-        return Err("Clipboard đa định dạng vượt giới hạn 8 MB.".to_string());
+        return Err("Clipboard đa định dạng vượt giới hạn 64 MB.".to_string());
     }
     match payload.kind.as_str() {
         "image" => write_image(payload),
@@ -132,9 +161,8 @@ fn read_image() -> Option<ClipboardPayload> {
     let height = image.height as u32;
     let rgba = RgbaImage::from_raw(width, height, image.bytes.into_owned())?;
     let mut output = Cursor::new(Vec::new());
-    DynamicImage::ImageRgba8(rgba)
-        .write_to(&mut output, ImageFormat::Png)
-        .ok()?;
+    let dynamic = DynamicImage::ImageRgba8(rgba);
+    dynamic.write_to(&mut output, ImageFormat::Png).ok()?;
     let bytes = output.into_inner();
     if bytes.len() > MAX_PAYLOAD_BYTES {
         return None;
@@ -145,8 +173,21 @@ fn read_image() -> Option<ClipboardPayload> {
         text: format!("[Hình ảnh {width}×{height} · {}]", &hash[..8]),
         mime_type: "image/png".to_string(),
         data: STANDARD.encode(bytes),
+        thumbnail: image_thumbnail(&dynamic).unwrap_or_default(),
         ..ClipboardPayload::default()
     })
+}
+
+#[cfg(windows)]
+fn image_thumbnail(image: &image::DynamicImage) -> Option<String> {
+    use image::ImageFormat;
+    use std::io::Cursor;
+
+    let thumbnail = image.thumbnail(256, 256);
+    let mut output = Cursor::new(Vec::new());
+    thumbnail.write_to(&mut output, ImageFormat::Png).ok()?;
+    let bytes = output.into_inner();
+    (bytes.len() <= 384 * 1024).then(|| format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
 }
 
 #[cfg(windows)]
@@ -545,6 +586,25 @@ mod tests {
             ..allowed
         };
         assert!(!oversized.is_within_limit());
+    }
+
+    #[test]
+    fn thumbnail_does_not_change_clipboard_identity() {
+        let payload = ClipboardPayload {
+            kind: "image".to_string(),
+            text: "image".to_string(),
+            mime_type: "image/png".to_string(),
+            data: STANDARD.encode(b"same-image"),
+            thumbnail: "data:image/png;base64,AAAA".to_string(),
+            ..ClipboardPayload::default()
+        };
+        let mut other_codec_preview = payload.clone();
+        other_codec_preview.thumbnail = "data:image/jpeg;base64,BBBB".to_string();
+        assert_eq!(payload.fingerprint(), other_codec_preview.fingerprint());
+        assert_eq!(
+            payload.fingerprint(),
+            "8dcaf5bbd5246cc74a016dff65cc86f1d5fd39883f9cdff7df53a1eb1e4e7b9f"
+        );
     }
 
     #[test]

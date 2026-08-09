@@ -22,6 +22,7 @@ data class ClipboardPayload(
     val html: String = "",
     val mimeType: String = "text/plain",
     val data: String = "",
+    val thumbnail: String = "",
     val files: List<ClipboardFilePayload> = emptyList()
 ) {
     fun toJson(): JSONObject = JSONObject()
@@ -30,11 +31,32 @@ data class ClipboardPayload(
         .put("html", html)
         .put("mimeType", mimeType)
         .put("data", data)
+        .put("thumbnail", thumbnail)
         .put("files", JSONArray().also { array -> files.forEach { array.put(it.toJson()) } })
 
+    fun metadataJson(): JSONObject = JSONObject()
+        .put("kind", kind)
+        .put("text", text)
+        .put("html", html)
+        .put("mimeType", mimeType)
+        .put("data", "")
+        .put("thumbnail", thumbnail)
+        .put("files", JSONArray().also { array ->
+            files.forEach { file ->
+                array.put(JSONObject().put("name", file.name).put("mime", file.mime).put("data", ""))
+            }
+        })
+
     fun fingerprint(): String {
+        val identity = JSONObject()
+            .put("kind", kind)
+            .put("text", text)
+            .put("html", html)
+            .put("mimeType", mimeType)
+            .put("data", data)
+            .put("files", JSONArray().also { array -> files.forEach { array.put(it.toJson()) } })
         val digest = MessageDigest.getInstance("SHA-256")
-            .digest(toJson().toString().toByteArray(Charsets.UTF_8))
+            .digest(identity.toString().toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
@@ -49,6 +71,11 @@ data class ClipboardPayload(
     }.toString()
 
     fun isWithinLimit(): Boolean {
+        return encodedSize() <= MAX_PAYLOAD_BYTES && files.size <= 16 &&
+            thumbnail.length <= MAX_THUMBNAIL_CHARS
+    }
+
+    fun encodedSize(): Long {
         fun decodedSize(value: String): Long {
             val padding = when {
                 value.endsWith("==") -> 2L
@@ -58,7 +85,7 @@ data class ClipboardPayload(
             return (value.length.toLong() / 4L * 3L - padding).coerceAtLeast(0L)
         }
         val totalBytes = decodedSize(data) + files.sumOf { decodedSize(it.data) }
-        return files.size <= 16 && totalBytes <= MAX_PAYLOAD_BYTES
+        return totalBytes
     }
 
     companion object {
@@ -66,7 +93,8 @@ data class ClipboardPayload(
         const val KIND_HTML = "html"
         const val KIND_IMAGE = "image"
         const val KIND_FILES = "files"
-        const val MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
+        const val MAX_PAYLOAD_BYTES = 64 * 1024 * 1024
+        const val MAX_THUMBNAIL_CHARS = 512 * 1024
 
         fun text(value: String) = ClipboardPayload(text = value)
 
@@ -90,6 +118,7 @@ data class ClipboardPayload(
                 html = json.optString("html"),
                 mimeType = json.optString("mimeType", json.optString("mime_type", "text/plain")),
                 data = json.optString("data"),
+                thumbnail = json.optString("thumbnail").take(MAX_THUMBNAIL_CHARS),
                 files = files
             )
         }
@@ -103,6 +132,7 @@ data class ClipboardPayload(
                     .put("html", entry.htmlContent)
                     .put("mimeType", entry.mimeType)
                     .put("data", entry.payloadData)
+                    .put("thumbnail", entry.thumbnail)
                     .put("files", files)
             )
         }

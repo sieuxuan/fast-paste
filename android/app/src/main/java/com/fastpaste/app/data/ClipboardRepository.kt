@@ -12,11 +12,15 @@ class ClipboardRepository(private val dao: ClipboardDao) {
         source: String,
         sourceApp: String = "",
         sourceTitle: String = "",
+        sourceIcon: String = "",
         timestamp: Long = System.currentTimeMillis(),
         pinned: Boolean = false,
         folder: String = "",
         promoteExisting: Boolean = false,
-        payload: ClipboardPayload? = null
+        payload: ClipboardPayload? = null,
+        blobId: String = "",
+        blobSize: Long = 0L,
+        blobReady: Boolean = true
     ): HistoryMergeResult {
         if (content.isEmpty()) {
             return HistoryMergeResult(inserted = false, changed = false)
@@ -31,6 +35,7 @@ class ClipboardRepository(private val dao: ClipboardDao) {
                     source = source,
                     sourceApp = sourceApp.cleanSourceMeta(96),
                     sourceTitle = sourceTitle.cleanSourceMeta(160),
+                    sourceIcon = sourceIcon.cleanIcon(),
                     timestamp = timestamp,
                     pinned = pinned,
                     folder = cleanFolder,
@@ -38,7 +43,13 @@ class ClipboardRepository(private val dao: ClipboardDao) {
                     mimeType = payload?.mimeType ?: "text/plain",
                     htmlContent = payload?.html.orEmpty(),
                     payloadData = payload?.data.orEmpty(),
-                    filesJson = payload?.filesJson().orEmpty().ifBlank { "[]" }
+                    thumbnail = payload?.thumbnail.orEmpty(),
+                    filesJson = payload?.filesJson().orEmpty().ifBlank { "[]" },
+                    blobId = blobId.ifBlank {
+                        payload?.takeIf { it.kind != ClipboardPayload.KIND_TEXT }?.fingerprint().orEmpty()
+                    },
+                    blobSize = blobSize.takeIf { it > 0 } ?: payload?.encodedSize() ?: 0L,
+                    blobReady = blobReady
                 )
             )
             return HistoryMergeResult(inserted = true, changed = true)
@@ -57,24 +68,39 @@ class ClipboardRepository(private val dao: ClipboardDao) {
         } else {
             existing.sourceTitle
         }
+        val nextSourceIcon = if (shouldUseIncomingTime && sourceIcon.isNotBlank()) {
+            sourceIcon.cleanIcon()
+        } else {
+            existing.sourceIcon
+        }
         val nextPinned = existing.pinned || pinned
         val nextFolder = existing.folder.ifBlank { cleanFolder }
-        val nextPayload = if (shouldUseIncomingTime && payload != null) {
+        val nextPayload = if (shouldUseIncomingTime && payload != null &&
+            (blobReady || !existing.blobReady)
+        ) {
             payload
         } else {
             ClipboardPayload.fromEntry(existing)
         }
+        val nextBlobId = blobId.ifBlank { existing.blobId }
+        val nextBlobSize = blobSize.takeIf { it > 0 } ?: existing.blobSize
+        val nextBlobReady = existing.blobReady || blobReady
         val changed = existing.timestamp != nextTimestamp ||
             existing.source != nextSource ||
             existing.sourceApp != nextSourceApp ||
             existing.sourceTitle != nextSourceTitle ||
+            existing.sourceIcon != nextSourceIcon ||
             existing.pinned != nextPinned ||
             existing.folder != nextFolder ||
             existing.payloadType != nextPayload.kind ||
             existing.mimeType != nextPayload.mimeType ||
             existing.htmlContent != nextPayload.html ||
             existing.payloadData != nextPayload.data ||
-            existing.filesJson != nextPayload.filesJson()
+            existing.thumbnail != nextPayload.thumbnail ||
+            existing.filesJson != nextPayload.filesJson() ||
+            existing.blobId != nextBlobId ||
+            existing.blobSize != nextBlobSize ||
+            existing.blobReady != nextBlobReady
 
         if (changed) {
             dao.updateEntryById(
@@ -82,6 +108,7 @@ class ClipboardRepository(private val dao: ClipboardDao) {
                 source = nextSource,
                 sourceApp = nextSourceApp,
                 sourceTitle = nextSourceTitle,
+                sourceIcon = nextSourceIcon,
                 timestamp = nextTimestamp,
                 pinned = nextPinned,
                 folder = nextFolder,
@@ -89,7 +116,11 @@ class ClipboardRepository(private val dao: ClipboardDao) {
                 mimeType = nextPayload.mimeType,
                 htmlContent = nextPayload.html,
                 payloadData = nextPayload.data,
-                filesJson = nextPayload.filesJson()
+                thumbnail = nextPayload.thumbnail,
+                filesJson = nextPayload.filesJson(),
+                blobId = nextBlobId,
+                blobSize = nextBlobSize,
+                blobReady = nextBlobReady
             )
         }
         val removedDuplicates = dao.deleteDuplicatesByContent(content, existing.id)
@@ -104,6 +135,13 @@ class ClipboardRepository(private val dao: ClipboardDao) {
 
         private fun String.cleanSourceMeta(maxLength: Int): String {
             return trim().replace(Regex("\\s+"), " ").take(maxLength)
+        }
+
+        private fun String.cleanIcon(): String {
+            val allowed = startsWith("data:image/png;base64,", ignoreCase = true) ||
+                startsWith("data:image/jpeg;base64,", ignoreCase = true) ||
+                startsWith("data:image/webp;base64,", ignoreCase = true)
+            return takeIf { allowed }?.take(256 * 1024).orEmpty()
         }
 
         private const val MAX_FOLDER_LENGTH = 48

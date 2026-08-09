@@ -34,6 +34,14 @@ base64 = "0.22"
 rand = "0.8"
 reqwest = { version = "0.12", features = ["json"] }
 sha2 = "0.10"
+aes-gcm = "0.10"
+pbkdf2 = "0.12"
+hkdf = "0.12"
+hmac = "0.12"
+p256 = { version = "0.13", features = ["ecdh"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+zeroize = "1"
+hex = "0.4"
 url = "2"
 urlencoding = "2"
 
@@ -45,4 +53,4 @@ tauri-plugin-single-instance = "2"
 [target.'cfg(windows)'.dependencies]
 arboard = "3.6"
 image = { version = "0.25", default-features = false, features = ["png"] }
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_DataExchange", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security_Cryptography", "Win32_System_DataExchange", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

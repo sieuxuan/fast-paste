@@ -672,6 +672,43 @@
       white-space:pre-wrap;
       word-break:break-all;
     }
+    .history-content-row { display:flex; align-items:flex-start; gap:11px; min-width:0; }
+    .history-content-row .htext { flex:1; min-width:0; }
+    .media-thumb {
+      width:96px;
+      height:68px;
+      flex:0 0 auto;
+      object-fit:cover;
+      border:1px solid var(--bd2);
+      border-radius:9px;
+      background:var(--g2);
+    }
+    .media-preview-btn { padding:0; border:0; background:transparent; cursor:zoom-in; }
+    .image-preview-modal { width:min(92vw, 920px); max-height:88vh; }
+    .image-preview-body { min-height:0; padding:12px; display:grid; place-items:center; overflow:auto; }
+    .image-preview-body img { max-width:100%; max-height:72vh; object-fit:contain; border-radius:10px; }
+    .app-toast {
+      position:fixed;
+      z-index:60;
+      left:50%;
+      bottom:22px;
+      max-width:min(460px, calc(100vw - 32px));
+      padding:10px 14px;
+      border:1px solid rgba(52,211,153,.32);
+      border-radius:10px;
+      background:rgba(14,20,38,.96);
+      color:var(--tx);
+      box-shadow:0 16px 48px rgba(0,0,0,.34);
+      font-size:12px;
+      font-weight:800;
+      transform:translate(-50%, 16px);
+      opacity:0;
+      pointer-events:none;
+      transition:opacity .18s ease, transform .18s ease;
+    }
+    body.light .app-toast { background:rgba(248,251,255,.98); }
+    .app-toast.show { opacity:1; transform:translate(-50%, 0); }
+    .app-toast.error { border-color:rgba(248,113,113,.42); color:var(--red); }
     .color-preview {
       display:flex;
       align-items:center;
@@ -822,10 +859,28 @@
     .button-row { display:flex; flex-wrap:wrap; gap:8px; }
     .settings-wrap {
       max-width:980px;
-      display:flex;
-      flex-direction:column;
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
       gap:14px;
+      align-items:start;
     }
+    .setting-card.wide { grid-column:1 / -1; }
+    .security-card { border-color:rgba(52,211,153,.28); }
+    .security-key { font-family:var(--mono); color:var(--grn); font-size:11px; }
+    .pair-device-list { display:grid; gap:7px; margin-top:10px; }
+    .pair-device {
+      display:flex; align-items:center; gap:10px; padding:9px 10px;
+      border:1px solid var(--bd); border-radius:9px; background:var(--g);
+    }
+    .pair-device .label { flex:1; min-width:0; }
+    .pair-qr-body { display:grid; justify-items:center; gap:12px; padding:20px; text-align:center; }
+    .pair-qr { width:280px; max-width:75vw; padding:12px; border-radius:14px; background:#fff; }
+    .pair-qr svg { display:block; width:100%; height:auto; }
+    .pair-uri { width:100%; overflow-wrap:anywhere; color:var(--txf); font:10px/1.4 var(--mono); }
+    .transfer-strip { display:grid; gap:7px; padding:8px 18px; border-bottom:1px solid var(--bd); background:rgba(99,102,241,.06); }
+    .transfer-item { display:grid; grid-template-columns:minmax(120px,1fr) 2fr auto; gap:10px; align-items:center; font-size:11px; }
+    .transfer-track { height:5px; overflow:hidden; border-radius:99px; background:var(--bd); }
+    .transfer-track span { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--ac),var(--grn)); }
     .setting-card h2 {
       margin-bottom:12px;
       color:var(--tx);
@@ -919,6 +974,10 @@
       background:var(--grn);
     }
     .auto-row { align-items:center; }
+    @media (max-width:900px) {
+      .settings-wrap { grid-template-columns:1fr; }
+      .setting-card.wide { grid-column:auto; }
+    }
 
     .overlay {
       position:fixed;
@@ -1000,11 +1059,13 @@
       margin-bottom:12px;
     }
     .fmt-btn {
-      min-height:30px;
+      width:34px;
+      height:32px;
       display:inline-flex;
       align-items:center;
       gap:6px;
-      padding:0 9px;
+      padding:0;
+      justify-content:center;
       border:1px solid var(--bd);
       border-radius:8px;
       background:var(--g);
@@ -1013,7 +1074,9 @@
       font-size:12px;
       font-weight:800;
     }
-    .fmt-btn svg { width:14px; height:14px; color:var(--ac); }
+    .fmt-btn svg { display:none; }
+    .fmt-btn span { display:none; }
+    .fmt-btn::after { content:attr(data-short); font-family:var(--mono); font-size:10px; color:var(--tx); }
     .fmt-btn:hover { border-color:var(--bd2); color:var(--tx); background:var(--g2); }
     .editor-text {
       min-height:220px;
@@ -1024,6 +1087,20 @@
       font-size:13px;
       line-height:1.52;
     }
+    .editor-media-preview {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin-bottom:10px;
+      padding:8px;
+      border:1px solid var(--bd);
+      border-radius:10px;
+      background:var(--g);
+      color:var(--txd);
+      font-size:12px;
+    }
+    .editor-media-preview[hidden] { display:none; }
+    .editor-media-preview img { width:72px; height:52px; object-fit:cover; border-radius:7px; }
     .editor-count {
       margin-top:7px;
       color:var(--txf);
@@ -1282,14 +1359,14 @@
       </div>
 
       <nav class="sb-nav" aria-label="Điều hướng">
-        <button id="nav-history" class="nav-btn active" type="button" data-panel="history"><svg><use href="#i-clipboard"></use></svg><span data-i18n="navClipboard">Lịch sử</span><span id="history-count" class="sb-nav-count">0</span></button>
-        <button id="nav-devices" class="nav-btn" type="button" data-panel="devices"><svg><use href="#i-devices"></use></svg><span data-i18n="navDevices">Thiết bị</span><span id="device-online-count" class="sb-nav-count">0</span></button>
-        <button id="nav-settings" class="nav-btn" type="button" data-panel="settings"><svg><use href="#i-settings"></use></svg><span data-i18n="navSettings">Cài đặt</span></button>
+        <button id="nav-history" class="nav-btn active" type="button" data-panel="history" data-i18n-title="navClipboard" data-i18n-aria-label="navClipboard"><svg><use href="#i-clipboard"></use></svg><span data-i18n="navClipboard">Lịch sử</span><span id="history-count" class="sb-nav-count">0</span></button>
+        <button id="nav-devices" class="nav-btn" type="button" data-panel="devices" data-i18n-title="navDevices" data-i18n-aria-label="navDevices"><svg><use href="#i-devices"></use></svg><span data-i18n="navDevices">Thiết bị</span><span id="device-online-count" class="sb-nav-count">0</span></button>
+        <button id="nav-settings" class="nav-btn" type="button" data-panel="settings" data-i18n-title="navSettings" data-i18n-aria-label="navSettings"><svg><use href="#i-settings"></use></svg><span data-i18n="navSettings">Cài đặt</span></button>
       </nav>
 
       <div class="divider"></div>
 
-      <button id="pinned-launch" class="pinned-launch" type="button"><svg><use href="#i-star"></use></svg><span data-i18n="pinnedPalette">Bảng ghim</span></button>
+      <button id="pinned-launch" class="pinned-launch" type="button" data-i18n-title="pinnedPalette" data-i18n-aria-label="pinnedPalette"><svg><use href="#i-star"></use></svg><span data-i18n="pinnedPalette">Bảng ghim</span></button>
 
       <div class="spacer"></div>
 
@@ -1331,6 +1408,7 @@
           <div class="undo-row-copy"><svg><use href="#i-shield"></use></svg><span id="history-undo-text"></span></div>
           <div class="undo-row-actions"><button id="undo-history-delete" class="btn" type="button"><svg><use href="#i-undo"></use></svg><span data-i18n="undo">Hoàn tác</span></button><button id="dismiss-history-undo" class="icon-btn" type="button" title="Đóng" data-i18n-title="close"><svg><use href="#i-x"></use></svg></button></div>
         </div>
+        <div id="transfer-strip" class="transfer-strip" hidden></div>
         <div id="history-container" class="scroll"></div>
       </section>
 
@@ -1369,7 +1447,7 @@
         <header class="phead"><div class="phead-row"><h1 data-i18n="settingsTitle">Cài đặt</h1></div></header>
         <div class="scroll sbody">
           <div class="settings-wrap">
-            <div class="setting-card card card-pad">
+            <div class="setting-card card card-pad wide">
               <h2 data-i18n="globalHotkeys">Phím tắt</h2>
               <div class="hotkey-row">
                 <div class="label"><strong data-i18n="mainHotkeyTitle">Mở cửa sổ chính</strong><span data-i18n="mainHotkeyDesc">Hiện hoặc ẩn FastPaste.</span></div>
@@ -1413,6 +1491,25 @@
               <div id="always-on-top-status" class="status-line"></div>
             </div>
 
+            <div class="setting-card security-card card card-pad">
+              <h2>Ghép đôi thiết bị</h2>
+              <div class="label"><strong>Khoá riêng từng Android</strong><span>Quét QR một lần; mỗi reconnect tạo P-256 ECDH session mới với forward secrecy.</span></div>
+              <div class="button-row" style="margin-top:12px"><button id="begin-pairing" class="btn primary" type="button"><svg><use href="#i-devices"></use></svg><span>Tạo QR ghép đôi</span></button></div>
+              <div id="pairing-status" class="status-line"></div>
+              <div id="paired-device-list" class="pair-device-list"></div>
+            </div>
+
+            <div class="setting-card security-card card card-pad">
+              <h2>Mã hoá Google Drive</h2>
+              <div class="auto-row">
+                <div class="label"><strong id="e2ee-title">Chưa bật mã hoá Drive</strong><span id="e2ee-copy">Khoá khôi phục AES-256-GCM cho bản sao Google Drive.</span></div>
+                <button id="e2ee-toggle" class="toggle-btn" type="button" data-on="false" aria-label="Bật hoặc tắt E2EE"><span class="tthumb"></span></button>
+              </div>
+              <div class="input-line" style="margin-top:12px"><input id="e2ee-passphrase" class="tinput" type="password" autocomplete="new-password" placeholder="Khoá khôi phục Drive (ít nhất 10 ký tự)"><button id="save-e2ee" class="btn primary" type="button">Mã hoá Drive</button></div>
+              <div id="e2ee-key" class="security-key"></div>
+              <div id="e2ee-status" class="status-line"></div>
+            </div>
+
             <div class="setting-card card card-pad">
               <h2 data-i18n="privacyAppsTitle">Ứng dụng không lưu lịch sử</h2>
               <div class="label"><span data-i18n="privacyAppsDesc">Clipboard từ các ứng dụng này vẫn được đồng bộ tức thời nhưng không được ghi vào lịch sử.</span></div>
@@ -1436,6 +1533,21 @@
     </main>
   </div>
 
+  <div id="pairing-backdrop" class="overlay" hidden>
+    <div class="emodal" role="dialog" aria-modal="true" aria-labelledby="pairing-title">
+      <div class="modal-head">
+        <div class="modal-title"><strong id="pairing-title">Quét bằng FastPaste Android</strong><span>QR tự hết hạn sau 5 phút và chỉ dùng được một lần.</span></div>
+        <button id="pairing-close" class="icon-btn" type="button" title="Đóng"><svg><use href="#i-x"></use></svg></button>
+      </div>
+      <div class="pair-qr-body">
+        <div id="pairing-qr" class="pair-qr"></div>
+        <strong id="pairing-countdown">Còn 5:00</strong>
+        <div class="faint">Android → Cài đặt → Ghép đôi an toàn → Quét QR trên PC</div>
+        <div id="pairing-uri" class="pair-uri"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="editor-backdrop" class="overlay" hidden>
     <div class="emodal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
       <div class="modal-head">
@@ -1449,19 +1561,20 @@
       </div>
       <div class="emodal-body">
         <div class="efmt">
-          <button class="fmt-btn" type="button" data-format="trim"><svg><use href="#i-type"></use></svg><span data-i18n="formatTrim">Cắt gọn</span></button>
-          <button class="fmt-btn" type="button" data-format="lowercase"><svg><use href="#i-type"></use></svg><span data-i18n="formatLower">chữ thường</span></button>
-          <button class="fmt-btn" type="button" data-format="uppercase"><svg><use href="#i-type"></use></svg><span data-i18n="formatUpper">CHỮ HOA</span></button>
-          <button class="fmt-btn" type="button" data-format="titlecase"><svg><use href="#i-type"></use></svg><span data-i18n="formatTitle">Tiêu đề</span></button>
-          <button class="fmt-btn" type="button" data-format="one-line"><svg><use href="#i-list"></use></svg><span data-i18n="formatOneLine">Một dòng</span></button>
-          <button class="fmt-btn" type="button" data-format="collapse-spaces"><svg><use href="#i-list"></use></svg><span data-i18n="formatSpaces">Gọn cách</span></button>
-          <button class="fmt-btn" type="button" data-format="remove-spaces"><svg><use href="#i-x"></use></svg><span data-i18n="formatNoSpaces">Bỏ cách</span></button>
-          <button class="fmt-btn" type="button" data-format="bullets"><svg><use href="#i-list"></use></svg><span data-i18n="formatBullets">Gạch dòng</span></button>
-          <button class="fmt-btn" type="button" data-format="numbers"><svg><use href="#i-list-ordered"></use></svg><span data-i18n="formatNumbers">Đánh số</span></button>
-          <button class="fmt-btn" type="button" data-format="quote"><svg><use href="#i-quote"></use></svg><span data-i18n="formatQuote">Trích dẫn</span></button>
-          <button class="fmt-btn" type="button" data-format="code"><svg><use href="#i-code"></use></svg><span data-i18n="formatCode">Mã</span></button>
-          <button class="fmt-btn" type="button" data-format="json"><svg><use href="#i-code"></use></svg><span>JSON</span></button>
+          <button class="fmt-btn" type="button" data-format="trim" data-short="↔" title="Cắt khoảng trắng"><svg><use href="#i-type"></use></svg><span data-i18n="formatTrim">Cắt gọn</span></button>
+          <button class="fmt-btn" type="button" data-format="lowercase" data-short="a" title="Chữ thường"><svg><use href="#i-type"></use></svg><span data-i18n="formatLower">chữ thường</span></button>
+          <button class="fmt-btn" type="button" data-format="uppercase" data-short="A" title="CHỮ HOA"><svg><use href="#i-type"></use></svg><span data-i18n="formatUpper">CHỮ HOA</span></button>
+          <button class="fmt-btn" type="button" data-format="titlecase" data-short="Aa" title="Viết hoa tiêu đề"><svg><use href="#i-type"></use></svg><span data-i18n="formatTitle">Tiêu đề</span></button>
+          <button class="fmt-btn" type="button" data-format="one-line" data-short="1↔" title="Gộp thành một dòng"><svg><use href="#i-list"></use></svg><span data-i18n="formatOneLine">Một dòng</span></button>
+          <button class="fmt-btn" type="button" data-format="collapse-spaces" data-short="⌁" title="Gọn khoảng trắng"><svg><use href="#i-list"></use></svg><span data-i18n="formatSpaces">Gọn cách</span></button>
+          <button class="fmt-btn" type="button" data-format="remove-spaces" data-short="∅" title="Bỏ khoảng trắng"><svg><use href="#i-x"></use></svg><span data-i18n="formatNoSpaces">Bỏ cách</span></button>
+          <button class="fmt-btn" type="button" data-format="bullets" data-short="•" title="Danh sách gạch đầu dòng"><svg><use href="#i-list"></use></svg><span data-i18n="formatBullets">Gạch dòng</span></button>
+          <button class="fmt-btn" type="button" data-format="numbers" data-short="1." title="Danh sách đánh số"><svg><use href="#i-list-ordered"></use></svg><span data-i18n="formatNumbers">Đánh số</span></button>
+          <button class="fmt-btn" type="button" data-format="quote" data-short="❞" title="Trích dẫn"><svg><use href="#i-quote"></use></svg><span data-i18n="formatQuote">Trích dẫn</span></button>
+          <button class="fmt-btn" type="button" data-format="code" data-short="&lt;/&gt;" title="Khối mã"><svg><use href="#i-code"></use></svg><span data-i18n="formatCode">Mã</span></button>
+          <button class="fmt-btn" type="button" data-format="json" data-short="{}" title="Định dạng JSON"><svg><use href="#i-code"></use></svg><span>JSON</span></button>
         </div>
+        <div id="editor-media-preview" class="editor-media-preview" hidden><img id="editor-media-image" alt="Xem trước ảnh"><span>Đang sửa chú thích; dữ liệu ảnh/tệp gốc vẫn được giữ nguyên.</span></div>
         <textarea id="editor-text" class="editor-text" spellcheck="false"></textarea>
         <div id="editor-count" class="editor-count">0 ký tự · 1 dòng</div>
         <div class="editor-meta-strip">
@@ -1497,6 +1610,13 @@
         <div id="palette-hotkey-status" class="status-line"></div>
       </div>
       <div id="pinned-list" class="pinned-list"></div>
+    </div>
+  </div>
+  <div id="app-toast" class="app-toast" role="status" aria-live="polite"></div>
+  <div id="image-preview-backdrop" class="overlay" hidden>
+    <div class="pmodal image-preview-modal" role="dialog" aria-modal="true" aria-label="Xem trước ảnh">
+      <div class="modal-head"><div class="modal-title"><strong>Xem trước ảnh</strong><span>Ảnh gốc trong lịch sử</span></div><button id="image-preview-close" class="icon-btn" type="button" title="Đóng"><svg><use href="#i-x"></use></svg></button></div>
+      <div class="image-preview-body"><img id="image-preview-full" alt="Ảnh clipboard"></div>
     </div>
   </div>
 
@@ -1584,6 +1704,7 @@
         moreHistory: () => 'Còn mục khác, cuộn để tải thêm',
         pinBadge: 'Ghim',
         copyTitle: 'Sao chép',
+        copySuccess: 'Đã sao chép vào clipboard',
         unpinTitle: 'Bỏ ghim',
         pinTitle: 'Ghim',
         editTitle: 'Sửa',
@@ -1729,6 +1850,7 @@
         moreHistory: () => 'More items, scroll to load',
         pinBadge: 'Pinned',
         copyTitle: 'Copy',
+        copySuccess: 'Copied to clipboard',
         unpinTitle: 'Unpin',
         pinTitle: 'Pin',
         editTitle: 'Edit',
@@ -1815,6 +1937,7 @@
       hoveredHistoryIndex: null,
       editingEntryId: null,
       pendingDelete: null,
+      pairingTimer: null,
       editorDraft: { initial: '', last: '', undo: [], redo: [], applying: false },
       pinnedPalette: { items: [], selectedIndex: 0 },
       updateUrl: 'https://github.com/sieuxuan/fast-paste/releases/latest',
@@ -1828,6 +1951,7 @@
       navButtons: document.querySelectorAll('.nav-btn'),
       panels: document.querySelectorAll('.panel'),
       historyCount: document.getElementById('history-count'),
+      transferStrip: document.getElementById('transfer-strip'),
       deviceOnlineCount: document.getElementById('device-online-count'),
       sidebarHotkeyKeys: document.getElementById('sidebar-hotkey-keys'),
       sidebarCloudDot: document.getElementById('sidebar-cloud-dot'),
@@ -1879,6 +2003,21 @@
       alwaysOnTopCopy: document.getElementById('always-on-top-copy'),
       alwaysOnTopStatus: document.getElementById('always-on-top-status'),
       alwaysOnTopToggle: document.getElementById('always-on-top-toggle'),
+      beginPairing: document.getElementById('begin-pairing'),
+      pairingStatus: document.getElementById('pairing-status'),
+      pairedDeviceList: document.getElementById('paired-device-list'),
+      pairingBackdrop: document.getElementById('pairing-backdrop'),
+      pairingClose: document.getElementById('pairing-close'),
+      pairingQr: document.getElementById('pairing-qr'),
+      pairingCountdown: document.getElementById('pairing-countdown'),
+      pairingUri: document.getElementById('pairing-uri'),
+      e2eeTitle: document.getElementById('e2ee-title'),
+      e2eeCopy: document.getElementById('e2ee-copy'),
+      e2eeToggle: document.getElementById('e2ee-toggle'),
+      e2eePassphrase: document.getElementById('e2ee-passphrase'),
+      saveE2ee: document.getElementById('save-e2ee'),
+      e2eeKey: document.getElementById('e2ee-key'),
+      e2eeStatus: document.getElementById('e2ee-status'),
       excludedAppInput: document.getElementById('excluded-app-input'),
       sourceAppOptions: document.getElementById('source-app-options'),
       addExcludedApp: document.getElementById('add-excluded-app'),
@@ -1893,6 +2032,8 @@
       editorMeta: document.getElementById('editor-meta'),
       editorClose: document.getElementById('editor-close'),
       editorText: document.getElementById('editor-text'),
+      editorMediaPreview: document.getElementById('editor-media-preview'),
+      editorMediaImage: document.getElementById('editor-media-image'),
       editorCount: document.getElementById('editor-count'),
       editorFolder: document.getElementById('editor-folder'),
       folderOptions: document.getElementById('folder-options'),
@@ -1909,7 +2050,10 @@
       savePaletteHotkey: document.getElementById('save-palette-hotkey'),
       paletteHotkeyStatus: document.getElementById('palette-hotkey-status'),
       pinnedList: document.getElementById('pinned-list'),
-      pinnedClose: document.getElementById('pinned-close')
+      pinnedClose: document.getElementById('pinned-close'),
+      imagePreviewBackdrop: document.getElementById('image-preview-backdrop'),
+      imagePreviewClose: document.getElementById('image-preview-close'),
+      imagePreviewFull: document.getElementById('image-preview-full')
     };
 
     function t(key, ...args) {
@@ -2174,6 +2318,8 @@
         item.source || '',
         item.sourceApp || item.source_app || '',
         item.sourceTitle || item.source_title || '',
+        textFingerprint(item.sourceIcon || item.source_icon || ''),
+        textFingerprint(item.payload?.thumbnail || ''),
         item.pinned ? 1 : 0,
         item.quick_slot || '',
         cleanFolderName(item.folder),
@@ -2267,7 +2413,8 @@
       const sourceTitle = String(item.sourceTitle || item.source_title || '').trim();
       const tooltip = [sourceApp.replace(/\.exe$/i, ''), sourceTitle].filter(Boolean).join(' · ');
       const appIcons = state.data?.appIcons || state.data?.app_icons || {};
-      const iconData = appIcons[sourceApp.toLowerCase()] || '';
+      const iconCandidate = String(item.sourceIcon || item.source_icon || appIcons[sourceApp.toLowerCase()] || '');
+      const iconData = /^data:image\/(?:png|jpeg|webp);base64,/i.test(iconCandidate) ? iconCandidate : '';
       const fallback = sourceApp.replace(/\.exe$/i, '').trim().charAt(0).toUpperCase() || '?';
       return `<span class="app-logo-badge" title="${escapeHtml(tooltip)}"><span class="app-logo">${iconData ? `<img src="${escapeHtml(iconData)}" alt="">` : escapeHtml(fallback)}</span></span>`;
     }
@@ -2278,6 +2425,30 @@
       if (kind === 'files') return `<span class="badge b-url">${icon('i-folder')}${escapeHtml(t('mediaFiles'))} · ${item.payload.files?.length || 0}</span>`;
       if (kind === 'html') return `<span class="badge b-url">${icon('i-code')}${escapeHtml(t('mediaRichText'))}</span>`;
       return '';
+    }
+
+    function payloadThumbnail(item) {
+      const thumbnail = String(item.payload?.thumbnail || '');
+      return item.payload?.kind === 'image' && /^data:image\/(?:png|jpeg|webp);base64,/i.test(thumbnail)
+        ? `<button class="media-preview-btn" type="button" data-preview-index="${item.index}" title="Xem ảnh gốc"><img class="media-thumb" src="${escapeHtml(thumbnail)}" alt="${escapeHtml(t('mediaImage'))}"></button>`
+        : '';
+    }
+
+    async function openImagePreview(index) {
+      const entry = state.currentHistory[index];
+      if (!entry) return;
+      try {
+        els.imagePreviewFull.src = await invoke('get_history_image_preview', { id: entry.id });
+        els.imagePreviewBackdrop.hidden = false;
+      } catch (error) {
+        const message = String(error);
+        showToast(message, !message.includes('Đang tải'));
+      }
+    }
+
+    function closeImagePreview() {
+      els.imagePreviewBackdrop.hidden = true;
+      els.imagePreviewFull.removeAttribute('src');
     }
 
     function renderHistory({ force = false } = {}) {
@@ -2350,7 +2521,7 @@
                       ${sourceMetaBadge(item)}
                       <span class="time">${escapeHtml(formatTime(item.timestamp))}</span>
                     </div>
-                    <div class="htext">${escapeHtml(displayText)}</div>
+                    <div class="history-content-row">${payloadThumbnail(item)}<div class="htext">${escapeHtml(displayText)}</div></div>
                     ${isHexColor(text) ? `<div class="color-preview"><span class="swatch" style="background:${escapeHtml(text.trim())}"></span><span>${escapeHtml(text.trim().toUpperCase())}</span></div>` : ''}
                   </div>
                   <div class="hactions">
@@ -2468,6 +2639,15 @@
         ? t('alwaysOnTopOnDesc')
         : t('alwaysOnTopOffDesc');
 
+      const e2eeEnabled = Boolean(settings.e2eeEnabled ?? settings.e2ee_enabled);
+      const e2eeKeyId = String(settings.e2eeKeyId || settings.e2ee_key_id || '');
+      setToggle(els.e2eeToggle, e2eeEnabled);
+      els.e2eeTitle.textContent = e2eeEnabled ? 'Drive E2EE đang bật' : 'Drive E2EE chưa bật';
+      els.e2eeCopy.textContent = e2eeEnabled
+        ? 'File Google Drive chỉ chứa ciphertext AES-256-GCM.'
+        : 'Kết nối thiết bị dùng QR; khoá này chỉ bảo vệ dữ liệu Drive.';
+      els.e2eeKey.textContent = e2eeKeyId ? `Mã khoá: ${e2eeKeyId}` : '';
+
       els.folderOptions.innerHTML = getFolders().map(folder => `<option value="${escapeHtml(folder)}"></option>`).join('');
       const excludedApps = settings.excludedApps || settings.excluded_apps || [];
       const knownApps = Array.from(new Set([...getSourceApps(), ...excludedApps]))
@@ -2496,10 +2676,26 @@
 
     function render({ forceHistory = false } = {}) {
       renderHistory({ force: forceHistory });
+      renderTransfers();
       renderSettings();
       renderDevices();
       updateSidebar();
       renderPinnedPalette();
+    }
+
+    function renderTransfers() {
+      const transfers = Array.isArray(state.data?.transfers) ? state.data.transfers : [];
+      els.transferStrip.hidden = transfers.length === 0;
+      els.transferStrip.innerHTML = transfers.map(transfer => {
+        const total = Math.max(0, Number(transfer.totalBytes || 0));
+        const sent = Math.max(0, Number(transfer.sentBytes || 0));
+        const percent = total ? Math.min(100, Math.round(sent / total * 100)) : 0;
+        return `<div class="transfer-item">
+          <strong>${escapeHtml(transfer.label || 'Ảnh / tệp')}</strong>
+          <div class="transfer-track"><span style="width:${percent}%"></span></div>
+          <span>${transfer.direction === 'upload' ? 'Gửi' : 'Tải'} · ${percent}% · ${escapeHtml(transfer.status || '')}</span>
+        </div>`;
+      }).join('');
     }
 
     async function copyHistoryItem(index) {
@@ -2507,9 +2703,21 @@
       if (!entry) return;
       try {
         await invoke('copy_history_item', { id: entry.id });
+        showToast(entry.payload?.kind === 'image' ? 'Đã sao chép ảnh vào clipboard' : t('copySuccess'));
       } catch (error) {
-        console.error(error);
+        showToast(String(error), true);
       }
+    }
+
+    let toastTimer = null;
+    function showToast(message, isError = false) {
+      const toast = document.getElementById('app-toast');
+      if (!toast) return;
+      toast.textContent = message;
+      toast.classList.toggle('error', isError);
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
     }
 
     async function deleteHistoryItem(index) {
@@ -2546,6 +2754,10 @@
       els.editorTitle.textContent = isNew ? t('editorAddTitle') : t('editorEditTitle');
       els.editorMeta.textContent = isNew ? t('editorNewMeta') : `${entry.source || 'PC'} · ${formatDateTime(entry.timestamp)}`;
       els.editorText.value = state.editorDraft.last;
+      const mediaThumbnail = String(entry?.payload?.thumbnail || '');
+      els.editorMediaPreview.hidden = isNew || !entry?.payload || entry.payload.kind === 'text';
+      els.editorMediaImage.hidden = !mediaThumbnail.startsWith('data:image/');
+      if (!els.editorMediaImage.hidden) els.editorMediaImage.src = mediaThumbnail;
       els.editorFolder.value = cleanFolderName(entry?.folder);
       setToggle(els.editorAutocopyBtn, true);
       setStatus(els.editorStatus, '');
@@ -2835,6 +3047,106 @@
       }
     }
 
+    async function refreshPairedDevices() {
+      try {
+        const devices = await invoke('list_paired_devices');
+        const list = Array.isArray(devices) ? devices : [];
+        els.pairedDeviceList.innerHTML = list.length
+          ? list.map(device => `
+              <div class="pair-device">
+                <svg><use href="#i-phone"></use></svg>
+                <div class="label"><strong>${escapeHtml(device.name || 'Android')}</strong><span>${device.lastSeenAt ? `Xác thực ${escapeHtml(formatDateTime(device.lastSeenAt))}` : 'Đã có khoá riêng'}</span></div>
+                <button class="btn ghost" type="button" data-forget-device="${encodeURIComponent(device.deviceId || '')}">Quên</button>
+              </div>`).join('')
+          : '<div class="faint">Chưa có Android nào được ghép đôi.</div>';
+        if (list.length) setStatus(els.pairingStatus, `${list.length} thiết bị · forward secrecy đang sẵn sàng`, 'ok');
+      } catch (error) {
+        setStatus(els.pairingStatus, String(error), 'error');
+      }
+    }
+
+    function closePairing() {
+      els.pairingBackdrop.hidden = true;
+      if (state.pairingTimer) clearInterval(state.pairingTimer);
+      state.pairingTimer = null;
+      refreshPairedDevices();
+    }
+
+    async function beginPairing() {
+      els.beginPairing.disabled = true;
+      setStatus(els.pairingStatus, 'Đang tạo lời mời dùng một lần…');
+      try {
+        const pairing = await invoke('begin_device_pairing');
+        els.pairingQr.innerHTML = pairing.svg || '';
+        els.pairingUri.textContent = `Desktop ID · ${pairing.desktopId || ''}`;
+        els.pairingBackdrop.hidden = false;
+        if (state.pairingTimer) clearInterval(state.pairingTimer);
+        let refreshTicks = 0;
+        const updateCountdown = () => {
+          const remaining = Math.max(0, Number(pairing.expiresAt || 0) - Date.now());
+          const seconds = Math.ceil(remaining / 1000);
+          els.pairingCountdown.textContent = remaining
+            ? `Còn ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+            : 'QR đã hết hạn';
+          if (++refreshTicks % 4 === 0) refreshPairedDevices();
+          if (!remaining && state.pairingTimer) {
+            clearInterval(state.pairingTimer);
+            state.pairingTimer = null;
+          }
+        };
+        updateCountdown();
+        state.pairingTimer = setInterval(updateCountdown, 1000);
+        setStatus(els.pairingStatus, 'QR sẵn sàng; mở FastPaste Android để quét.', 'ok');
+      } catch (error) {
+        setStatus(els.pairingStatus, String(error), 'error');
+      } finally {
+        els.beginPairing.disabled = false;
+      }
+    }
+
+    async function forgetPairedDevice(deviceId) {
+      if (!deviceId || !window.confirm('Quên thiết bị này? Android phải quét QR mới để kết nối lại.')) return;
+      try {
+        await invoke('forget_paired_device', { deviceId });
+        await refreshPairedDevices();
+      } catch (error) {
+        setStatus(els.pairingStatus, String(error), 'error');
+      }
+    }
+
+    async function saveE2eePassphrase() {
+      const passphrase = els.e2eePassphrase.value;
+      if (passphrase.length < 10) {
+        setStatus(els.e2eeStatus, 'Mật khẩu cần ít nhất 10 ký tự.', 'error');
+        return;
+      }
+      els.saveE2ee.disabled = true;
+      setStatus(els.e2eeStatus, 'Đang tạo khoá…');
+      try {
+        const keyId = await invoke('set_e2ee_passphrase', { passphrase });
+        els.e2eePassphrase.value = '';
+        setStatus(els.e2eeStatus, `Đã bật E2EE · khoá ${keyId}`, 'ok');
+      } catch (error) {
+        setStatus(els.e2eeStatus, String(error), 'error');
+      } finally {
+        els.saveE2ee.disabled = false;
+      }
+    }
+
+    async function toggleE2ee() {
+      const nextValue = !getToggle(els.e2eeToggle);
+      if (!nextValue && !window.confirm('Tắt E2EE? Lần đồng bộ Drive tiếp theo sẽ ghi lại dữ liệu dạng plaintext.')) return;
+      els.e2eeToggle.disabled = true;
+      try {
+        await invoke('set_e2ee_enabled', { enabled: nextValue });
+        setStatus(els.e2eeStatus, nextValue ? 'Đã bật E2EE.' : 'Đã tắt E2EE.', 'ok');
+      } catch (error) {
+        setStatus(els.e2eeStatus, String(error), 'error');
+      } finally {
+        els.e2eeToggle.disabled = false;
+      }
+    }
+
     async function checkForUpdates(silent = false) {
       els.checkUpdate.disabled = true;
       if (!silent) els.updateStatus.textContent = t('checkingUpdate');
@@ -3081,11 +3393,16 @@
       });
 
       els.historyContainer.addEventListener('click', event => {
+        const previewButton = event.target.closest('[data-preview-index]');
         const deleteButton = event.target.closest('[data-delete-index]');
         const editButton = event.target.closest('[data-edit-index]');
         const pinButton = event.target.closest('[data-pin-index]');
         const copyButton = event.target.closest('[data-index]');
 
+        if (previewButton) {
+          openImagePreview(Number(previewButton.dataset.previewIndex));
+          return;
+        }
         if (deleteButton) {
           deleteHistoryItem(Number(deleteButton.dataset.deleteIndex));
           return;
@@ -3144,6 +3461,20 @@
       els.savePaletteHotkey.addEventListener('click', saveQuickSlotHotkey);
       els.autostartToggle.addEventListener('click', saveAutoStart);
       els.alwaysOnTopToggle.addEventListener('click', saveAlwaysOnTop);
+      els.beginPairing.addEventListener('click', beginPairing);
+      els.pairingClose.addEventListener('click', closePairing);
+      els.pairingBackdrop.addEventListener('click', event => {
+        if (event.target === els.pairingBackdrop) closePairing();
+      });
+      els.pairedDeviceList.addEventListener('click', event => {
+        const button = event.target.closest('[data-forget-device]');
+        if (button) forgetPairedDevice(decodeURIComponent(button.dataset.forgetDevice || ''));
+      });
+      els.saveE2ee.addEventListener('click', saveE2eePassphrase);
+      els.e2eeToggle.addEventListener('click', toggleE2ee);
+      els.e2eePassphrase.addEventListener('keydown', event => {
+        if (event.key === 'Enter') saveE2eePassphrase();
+      });
       els.addExcludedApp.addEventListener('click', () => setAppExcluded(els.excludedAppInput.value, true));
       els.excludedAppInput.addEventListener('keydown', event => {
         if (event.key === 'Enter') setAppExcluded(els.excludedAppInput.value, true);
@@ -3170,6 +3501,10 @@
       document.querySelectorAll('[data-format]').forEach(btn => btn.addEventListener('click', () => applyFormat(btn.dataset.format)));
 
       els.pinnedClose.addEventListener('click', closePinnedPalette);
+      els.imagePreviewClose.addEventListener('click', closeImagePreview);
+      els.imagePreviewBackdrop.addEventListener('click', event => {
+        if (event.target === els.imagePreviewBackdrop) closeImagePreview();
+      });
       els.pinnedList.addEventListener('change', event => {
         const select = event.target.closest('[data-slot-id]');
         if (!select) return;
@@ -3203,6 +3538,11 @@
         if (quickSlot) {
           event.preventDefault();
           copyPinnedSlot(quickSlot);
+          return;
+        }
+
+        if (!els.imagePreviewBackdrop.hidden) {
+          if (event.key === 'Escape') closeImagePreview();
           return;
         }
 
@@ -3284,6 +3624,7 @@
     });
 
     invoke('request_state');
+    refreshPairedDevices();
     checkForUpdates(true);
   </script>
 </body>

@@ -3,6 +3,7 @@ use rand::{distributions::Alphanumeric, Rng};
 use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::error::Error;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -12,8 +13,11 @@ use tokio::net::TcpListener;
 use tokio::time::sleep;
 
 use crate::clipboard::ClipboardPayload;
+use crate::crypto;
+use crate::vault;
 
 const CLOUD_FILE_NAME: &str = "fastpaste-cloud-history.json";
+const CLOUD_BLOB_PREFIX: &str = "fastpaste-blob-";
 const DRIVE_APPDATA_SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
 const USERINFO_EMAIL_SCOPE: &str = "https://www.googleapis.com/auth/userinfo.email";
 const MAX_CLOUD_ITEMS: usize = 1_000;
@@ -56,12 +60,20 @@ pub struct CloudEntry {
     pub source_app: String,
     #[serde(default, rename = "sourceTitle", alias = "source_title")]
     pub source_title: String,
+    #[serde(default, rename = "sourceIcon", alias = "source_icon")]
+    pub source_icon: String,
     #[serde(default)]
     pub pinned: bool,
     #[serde(default)]
     pub folder: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<ClipboardPayload>,
+    #[serde(default, rename = "blobId", alias = "blob_id")]
+    pub blob_id: String,
+    #[serde(default, rename = "blobSize", alias = "blob_size")]
+    pub blob_size: usize,
+    #[serde(default = "default_blob_ready", rename = "blobReady", alias = "blob_ready")]
+    pub blob_ready: bool,
 }
 
 pub struct CloudSyncResult {
@@ -111,11 +123,19 @@ struct DriveListResponse {
 #[derive(Deserialize)]
 struct DriveFile {
     id: String,
+    #[serde(default)]
+    name: String,
 }
 
 #[derive(Deserialize)]
 struct CloudFilePayload {
+    #[serde(default)]
+    schema: u8,
     entries: Vec<CloudEntry>,
+}
+
+fn default_blob_ready() -> bool {
+    true
 }
 
 pub fn is_configured() -> bool {
@@ -133,7 +153,10 @@ pub fn is_signed_in() -> bool {
 }
 
 pub fn sign_out() {
-    let _ = std::fs::remove_file(token_path());
+    let path = token_path();
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path.with_extension("bak"));
+    let _ = std::fs::remove_file(legacy_token_path());
 }
 
 pub async fn sign_in(app: &AppHandle) -> Result<Option<String>, String> {
@@ -188,15 +211,16 @@ pub async fn sync_pruned(
     entries: Vec<CloudEntry>,
     deleted_markers: Vec<CloudDeleteMarker>,
     clear_history_at: Option<i64>,
+    e2ee_enabled: bool,
 ) -> Result<CloudSyncResult, String> {
     let access_token = ensure_access_token().await?;
     let client = http_client()?;
     let remote_file_id = find_cloud_file(&client, &access_token).await?;
-    let downloaded_remote_entries = match remote_file_id.as_deref() {
+    let (downloaded_remote_entries, remote_was_encrypted) = match remote_file_id.as_deref() {
         Some(file_id) => download_entries(&client, &access_token, file_id).await?,
-        None => vec![],
+        None => (vec![], false),
     };
-    let normalized_remote = merge_entries(downloaded_remote_entries.clone());
+    let normalized_remote = manifest_entries(&merge_entries(downloaded_remote_entries.clone()));
     let mut remote_entries = downloaded_remote_entries;
     let mut local_entries = entries;
 
@@ -206,12 +230,18 @@ pub async fn sync_pruned(
     }
 
     let merged_entries = merge_entries([remote_entries, local_entries].concat());
-    if remote_file_id.is_none() || merged_entries != normalized_remote {
+    upload_missing_blobs(&client, &access_token, &merged_entries, e2ee_enabled).await?;
+    let merged_manifest = manifest_entries(&merged_entries);
+    if remote_file_id.is_none()
+        || merged_manifest != normalized_remote
+        || remote_was_encrypted != e2ee_enabled
+    {
         upload_entries(
             &client,
             &access_token,
             remote_file_id.as_deref(),
-            &merged_entries,
+            &merged_manifest,
+            e2ee_enabled,
         )
         .await?;
     }
@@ -374,12 +404,20 @@ async fn find_cloud_file(
     client: &reqwest::Client,
     access_token: &str,
 ) -> Result<Option<String>, String> {
+    find_named_file(client, access_token, CLOUD_FILE_NAME).await
+}
+
+async fn find_named_file(
+    client: &reqwest::Client,
+    access_token: &str,
+    file_name: &str,
+) -> Result<Option<String>, String> {
     let response = client
         .get("https://www.googleapis.com/drive/v3/files")
         .bearer_auth(access_token)
         .query(&[
             ("spaces", "appDataFolder"),
-            ("q", &format!("name='{CLOUD_FILE_NAME}' and trashed=false")),
+            ("q", &format!("name='{}' and trashed=false", file_name.replace('\'', "\\'"))),
             ("fields", "files(id,name,modifiedTime)"),
             ("orderBy", "modifiedTime desc"),
         ])
@@ -401,11 +439,42 @@ async fn find_cloud_file(
     Ok(list.files.first().map(|file| file.id.clone()))
 }
 
+async fn list_blob_names(
+    client: &reqwest::Client,
+    access_token: &str,
+) -> Result<HashSet<String>, String> {
+    let response = client
+        .get("https://www.googleapis.com/drive/v3/files")
+        .bearer_auth(access_token)
+        .query(&[
+            ("spaces", "appDataFolder"),
+            ("q", "name contains 'fastpaste-blob-' and trashed=false"),
+            ("fields", "files(id,name)"),
+            ("pageSize", "1000"),
+        ])
+        .send()
+        .await
+        .map_err(|error| format!("Drive list blob lỗi: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Drive list blob HTTP {}: {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+    }
+    let list: DriveListResponse = response.json().await.map_err(|error| error.to_string())?;
+    Ok(list.files.into_iter().map(|file| file.name).collect())
+}
+
+fn blob_file_name(blob_id: &str) -> String {
+    format!("{CLOUD_BLOB_PREFIX}{blob_id}.json")
+}
+
 async fn download_entries(
     client: &reqwest::Client,
     access_token: &str,
     file_id: &str,
-) -> Result<Vec<CloudEntry>, String> {
+) -> Result<(Vec<CloudEntry>, bool), String> {
     let response = client
         .get(format!(
             "https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
@@ -422,11 +491,24 @@ async fn download_entries(
         ));
     }
 
-    let payload: CloudFilePayload = response
-        .json()
+    let wire_payload = response
+        .text()
         .await
-        .map_err(|error| format!("Drive JSON lỗi: {error}"))?;
-    Ok(payload.entries)
+        .map_err(|error| format!("Drive đọc dữ liệu lỗi: {error}"))?;
+    let decrypted = crypto::decrypt_if_encrypted(&wire_payload)?;
+    let was_encrypted = decrypted.is_some();
+    let payload_json = decrypted.unwrap_or(wire_payload);
+    let payload: CloudFilePayload =
+        serde_json::from_str(&payload_json).map_err(|error| format!("Drive JSON lỗi: {error}"))?;
+    let _schema = payload.schema;
+    Ok((
+        payload
+            .entries
+            .into_iter()
+            .map(normalize_blob_metadata)
+            .collect(),
+        was_encrypted,
+    ))
 }
 
 async fn upload_entries(
@@ -434,13 +516,19 @@ async fn upload_entries(
     access_token: &str,
     file_id: Option<&str>,
     entries: &[CloudEntry],
+    e2ee_enabled: bool,
 ) -> Result<(), String> {
-    let payload = serde_json::json!({
-        "schema": 1,
+    let plain_payload = serde_json::json!({
+        "schema": 2,
         "updatedAt": now_millis(),
         "entries": entries,
     })
     .to_string();
+    let payload = if e2ee_enabled {
+        crypto::encrypt(&plain_payload, "encrypted_drive")?
+    } else {
+        plain_payload
+    };
 
     if let Some(file_id) = file_id {
         if let Err(update_error) = update_cloud_file(client, access_token, file_id, &payload).await
@@ -459,6 +547,107 @@ async fn upload_entries(
     }
 
     Ok(())
+}
+
+fn normalize_blob_metadata(mut entry: CloudEntry) -> CloudEntry {
+    if let Some(payload) = entry.payload.as_ref().filter(|payload| payload.kind != "text") {
+        if entry.blob_id.is_empty() {
+            entry.blob_id = payload.fingerprint();
+        }
+        if entry.blob_size == 0 {
+            entry.blob_size = payload.encoded_size();
+        }
+        entry.blob_ready = payload.data.len() > 0 || payload.files.iter().any(|file| !file.data.is_empty());
+    }
+    entry
+}
+
+fn manifest_entries(entries: &[CloudEntry]) -> Vec<CloudEntry> {
+    entries
+        .iter()
+        .cloned()
+        .map(|mut entry| {
+            if let Some(payload) = entry.payload.as_ref().filter(|payload| payload.kind != "text") {
+                if entry.blob_id.is_empty() {
+                    entry.blob_id = payload.fingerprint();
+                }
+                if entry.blob_size == 0 {
+                    entry.blob_size = payload.encoded_size();
+                }
+                entry.payload = Some(payload.sanitized_for_ui());
+                entry.blob_ready = false;
+            }
+            entry
+        })
+        .collect()
+}
+
+async fn upload_missing_blobs(
+    client: &reqwest::Client,
+    access_token: &str,
+    entries: &[CloudEntry],
+    e2ee_enabled: bool,
+) -> Result<(), String> {
+    let remote_names = list_blob_names(client, access_token).await?;
+    let mut uploaded = HashSet::new();
+    for entry in entries {
+        let Some(payload) = entry.payload.as_ref().filter(|payload| {
+            payload.kind != "text"
+                && (!payload.data.is_empty() || payload.files.iter().any(|file| !file.data.is_empty()))
+        }) else {
+            continue;
+        };
+        let blob_id = if entry.blob_id.is_empty() {
+            payload.fingerprint()
+        } else {
+            entry.blob_id.clone()
+        };
+        let file_name = blob_file_name(&blob_id);
+        if remote_names.contains(&file_name) || !uploaded.insert(file_name.clone()) {
+            continue;
+        }
+        let plain = serde_json::to_string(payload)
+            .map_err(|error| format!("Không đóng gói được blob Drive: {error}"))?;
+        let wire = if e2ee_enabled {
+            crypto::encrypt(&plain, "encrypted_drive_blob")?
+        } else {
+            plain
+        };
+        create_named_cloud_file(client, access_token, &file_name, &wire).await?;
+    }
+    Ok(())
+}
+
+pub async fn download_blob(blob_id: &str) -> Result<Option<ClipboardPayload>, String> {
+    if blob_id.len() < 16 || !blob_id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("Mã blob Drive không hợp lệ.".to_string());
+    }
+    let access_token = ensure_access_token().await?;
+    let client = http_client()?;
+    let Some(file_id) = find_named_file(&client, &access_token, &blob_file_name(blob_id)).await? else {
+        return Ok(None);
+    };
+    let response = client
+        .get(format!("https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"))
+        .bearer_auth(&access_token)
+        .send()
+        .await
+        .map_err(|error| format!("Drive tải blob lỗi: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Drive tải blob HTTP {}: {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+    }
+    let wire = response.text().await.map_err(|error| error.to_string())?;
+    let plain = crypto::decrypt_if_encrypted(&wire)?.unwrap_or(wire);
+    let payload: ClipboardPayload = serde_json::from_str(&plain)
+        .map_err(|error| format!("Blob Drive JSON lỗi: {error}"))?;
+    if !payload.is_within_limit() || payload.fingerprint() != blob_id {
+        return Err("Blob Drive không qua được kiểm tra toàn vẹn.".to_string());
+    }
+    Ok(Some(payload))
 }
 
 async fn update_cloud_file(
@@ -494,8 +683,17 @@ async fn create_cloud_file(
     access_token: &str,
     payload: &str,
 ) -> Result<(), String> {
+    create_named_cloud_file(client, access_token, CLOUD_FILE_NAME, payload).await
+}
+
+async fn create_named_cloud_file(
+    client: &reqwest::Client,
+    access_token: &str,
+    file_name: &str,
+    payload: &str,
+) -> Result<(), String> {
     let metadata = serde_json::json!({
-        "name": CLOUD_FILE_NAME,
+        "name": file_name,
         "parents": ["appDataFolder"],
     })
     .to_string();
@@ -620,12 +818,20 @@ fn merge_entries(entries: Vec<CloudEntry>) -> Vec<CloudEntry> {
                 if next.folder.trim().is_empty() && !current.folder.trim().is_empty() {
                     next.folder = current.folder.clone();
                 }
+                if !payload_has_body(next.payload.as_ref()) && payload_has_body(current.payload.as_ref()) {
+                    next.payload = current.payload.clone();
+                    next.blob_ready = true;
+                }
             }
             by_text.insert(entry_key, next);
         } else if let Some(current) = by_text.get_mut(&entry_key) {
             current.pinned = current.pinned || entry.pinned;
             if current.folder.trim().is_empty() && !entry.folder.trim().is_empty() {
                 current.folder = entry.folder;
+            }
+            if !payload_has_body(current.payload.as_ref()) && payload_has_body(entry.payload.as_ref()) {
+                current.payload = entry.payload;
+                current.blob_ready = true;
             }
         }
     }
@@ -676,11 +882,21 @@ fn is_deleted_entry(
 }
 
 pub(crate) fn cloud_entry_key(entry: &CloudEntry) -> String {
+    if !entry.blob_id.is_empty() {
+        return entry.blob_id.clone();
+    }
     entry
         .payload
         .as_ref()
         .map(ClipboardPayload::fingerprint)
         .unwrap_or_else(|| entry.text.clone())
+}
+
+fn payload_has_body(payload: Option<&ClipboardPayload>) -> bool {
+    payload
+        .filter(|payload| payload.kind != "text")
+        .map(|payload| !payload.data.is_empty() || payload.files.iter().any(|file| !file.data.is_empty()))
+        .unwrap_or(false)
 }
 
 fn hash_text(text: &str) -> String {
@@ -720,13 +936,26 @@ fn http_client() -> Result<reqwest::Client, String> {
 }
 
 fn load_token() -> Option<GoogleToken> {
-    let json = std::fs::read_to_string(token_path()).ok()?;
-    serde_json::from_str(&json).ok()
+    let path = token_path();
+    if path.exists() || path.with_extension("bak").exists() {
+        let json = vault::read_protected(&path).ok()?;
+        return serde_json::from_slice(&json).ok();
+    }
+
+    // One-time migration from FastPaste <= 2.2.6. The plaintext copy is
+    // removed only after the DPAPI-protected copy is safely committed.
+    let legacy = legacy_token_path();
+    let json = std::fs::read(&legacy).ok()?;
+    let token: GoogleToken = serde_json::from_slice(&json).ok()?;
+    if save_token(&token).is_ok() {
+        let _ = std::fs::remove_file(legacy);
+    }
+    Some(token)
 }
 
 fn save_token(token: &GoogleToken) -> Result<(), String> {
-    let json = serde_json::to_string(token).map_err(|error| error.to_string())?;
-    std::fs::write(token_path(), json)
+    let json = serde_json::to_vec(token).map_err(|error| error.to_string())?;
+    vault::write_protected_atomic(&token_path(), &json)
         .map_err(|error| format!("Không lưu được Google token: {error}"))
 }
 
@@ -740,8 +969,15 @@ fn oauth_config_path() -> std::path::PathBuf {
 fn token_path() -> std::path::PathBuf {
     std::env::current_exe()
         .ok()
-        .and_then(|path| path.parent().map(|parent| parent.join("google_token.json")))
-        .unwrap_or_else(|| std::path::PathBuf::from("google_token.json"))
+        .and_then(|path| {
+            path.parent()
+                .map(|parent| parent.join("google_token.vault"))
+        })
+        .unwrap_or_else(|| std::path::PathBuf::from("google_token.vault"))
+}
+
+fn legacy_token_path() -> std::path::PathBuf {
+    token_path().with_file_name("google_token.json")
 }
 
 fn now_millis() -> i64 {

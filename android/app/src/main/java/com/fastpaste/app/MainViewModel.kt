@@ -1,7 +1,6 @@
 package com.fastpaste.app
 
 import android.app.Application
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -14,8 +13,10 @@ import com.fastpaste.app.data.ClipboardEntry
 import com.fastpaste.app.data.ClipboardPayload
 import com.fastpaste.app.data.ClipboardRepository
 import com.fastpaste.app.service.ClipboardService
-import com.fastpaste.app.sync.AndroidClipboardCodec
+import com.fastpaste.app.service.TransferProgress
+import com.fastpaste.app.security.PairingStore
 import com.fastpaste.app.sync.DeletedHistoryStore
+import com.fastpaste.app.sync.EncryptionStore
 import com.fastpaste.app.sync.HistoryBackupStore
 import com.fastpaste.app.websocket.ConnectionState
 import kotlinx.coroutines.Dispatchers
@@ -54,6 +55,12 @@ data class UiState(
     val cloudMessage: String = "Đăng nhập Google để bật tự đồng bộ",
     val lastSyncText: String = "Chưa đồng bộ",
     val deletedBackupCount: Int = 0,
+    val e2eeEnabled: Boolean = false,
+    val e2eeKeyId: String = "",
+    val e2eeMessage: String = "Chưa bật mã hoá đầu cuối",
+    val pairingMessage: String = "Chưa ghép đôi với PC",
+    val pairedDeviceCount: Int = 0,
+    val transfers: List<TransferProgress> = emptyList(),
     val connectionLogs: List<ConnectionLogEntry> = listOf(
         ConnectionLogEntry("Bây giờ", "Đang khởi động và tìm PC cùng mạng.")
     )
@@ -69,6 +76,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val googleDriveCloudSync = GoogleDriveCloudSync()
     private val deletedHistoryStore = DeletedHistoryStore(application)
     private val historyBackupStore = HistoryBackupStore(application)
+    private val encryptionStore = EncryptionStore(application)
+    private val pairingStore = PairingStore(application)
     private val cloudPrefs =
         application.getSharedPreferences("fastpaste_cloud", Context.MODE_PRIVATE)
     private var autoConnectEnabled = true
@@ -76,9 +85,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastConnectRequest: Pair<String, Long>? = null
     private var lastDeletedBatch: List<ClipboardEntry> = historyBackupStore.load()
     private val cloudSyncInFlight = AtomicBoolean(false)
+    @Volatile private var lastCloudAccessToken: String? = null
 
     private val _uiState = MutableStateFlow(
-        UiState(deletedBackupCount = lastDeletedBatch.size)
+        UiState(
+            deletedBackupCount = lastDeletedBatch.size,
+            e2eeEnabled = encryptionStore.isEnabled,
+            e2eeKeyId = encryptionStore.keyId,
+            e2eeMessage = if (encryptionStore.isEnabled) {
+                "Bản sao Google Drive đang được mã hoá"
+            } else {
+                "Chưa bật mã hoá đầu cuối"
+            },
+            pairingMessage = if (pairingStore.peers().isEmpty()) {
+                "Quét QR trên FastPaste PC để tạo khoá riêng"
+            } else {
+                "Kết nối dùng session key mới mỗi lần reconnect"
+            },
+            pairedDeviceCount = pairingStore.peers().size
+        )
     )
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
@@ -102,6 +127,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (loggedServers.add(key)) {
                         addConnectionLog("Tìm thấy PC ${server.name} tại $key")
                     }
+                    if (server.desktopId.isNotBlank()) {
+                        pairingStore.peerForDesktopId(server.desktopId)?.let { peer ->
+                            if (peer.host != server.host || peer.port != server.port) {
+                                pairingStore.rebind(server.desktopId, server.host, server.port)
+                                addConnectionLog("PC đã ghép đôi đổi IP sang $key; giữ nguyên khoá thiết bị")
+                            }
+                        }
+                    }
                 }
 
                 // Auto-connect to the first discovered server. Gate on the
@@ -110,7 +143,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // owns those — reconnecting here would reset its backoff), and
                 // throttle repeat requests for the same target.
                 if (autoConnectEnabled && servers.isNotEmpty()) {
-                    val server = servers.first()
+                    val server = servers.firstOrNull { discovered ->
+                        pairingStore.pendingForHost(discovered.host) != null ||
+                            pairingStore.peerForHost(discovered.host) != null ||
+                            discovered.desktopId.isNotBlank() &&
+                            pairingStore.peerForDesktopId(discovered.desktopId) != null
+                    }
+                    if (server == null) {
+                        _uiState.update {
+                            it.copy(connectionMessage = "Đã tìm thấy PC. Quét QR để ghép đôi an toàn.")
+                        }
+                        return@collect
+                    }
                     val target = "${server.host}:${server.port}"
                     val now = System.currentTimeMillis()
                     val recentlyRequested = lastConnectRequest?.let { (requested, at) ->
@@ -172,6 +216,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             ClipboardService.connectionEvents.collect { event ->
                 addConnectionLog(event)
+                if (event.contains("ghép đôi", ignoreCase = true) ||
+                    event.contains("forward secrecy", ignoreCase = true)
+                ) {
+                    val count = pairingStore.peers().size
+                    _uiState.update {
+                        it.copy(
+                            pairedDeviceCount = count,
+                            pairingMessage = if (count > 0) {
+                                "Đã xác thực thiết bị; session key tự đổi khi reconnect"
+                            } else it.pairingMessage
+                        )
+                    }
+                }
                 if (event.contains("đồng bộ", ignoreCase = true)) {
                     _uiState.update { it.copy(lastSyncText = "Vừa xong") }
                 }
@@ -186,6 +243,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             action = ClipboardService.ACTION_START
             putExtra(ClipboardService.EXTRA_HOST, host)
             putExtra(ClipboardService.EXTRA_PORT, port)
+        }
+
+        viewModelScope.launch {
+            ClipboardService.transferProgress.collect { transfers ->
+                _uiState.update { it.copy(transfers = transfers) }
+            }
         }
         try {
             getApplication<FastPasteApp>().startForegroundService(intent)
@@ -285,6 +348,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun installPairingQr(uri: String) {
+        runCatching { pairingStore.installInvitation(uri) }
+            .onSuccess { invitation ->
+                _uiState.update {
+                    it.copy(
+                        pairingMessage = "Đã đọc QR; đang xác thực ${invitation.host}",
+                        connectedServer = "${invitation.host}:${invitation.port}"
+                    )
+                }
+                addConnectionLog("Đã đọc QR ghép đôi; tạo khoá riêng cho PC ${invitation.host}")
+                connectToServer(invitation.host, invitation.port)
+            }
+            .onFailure { error ->
+                _uiState.update {
+                    it.copy(pairingMessage = "QR không hợp lệ: ${error.message ?: "không rõ"}")
+                }
+            }
+    }
+
     fun deleteHistoryItems(ids: List<Long>) {
         if (ids.isEmpty()) return
         viewModelScope.launch {
@@ -313,6 +395,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     source = entry.source,
                     sourceApp = entry.sourceApp,
                     sourceTitle = entry.sourceTitle,
+                    sourceIcon = entry.sourceIcon,
                     timestamp = entry.timestamp,
                     pinned = entry.pinned,
                     folder = entry.folder,
@@ -342,25 +425,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             dao.deleteDuplicatesByContent(cleanContent, id)
             val intent = Intent(getApplication(), ClipboardService::class.java).apply {
-                action = ClipboardService.ACTION_SEND_TEXT
-                putExtra(ClipboardService.EXTRA_TEXT, cleanContent)
+                action = ClipboardService.ACTION_COPY_HISTORY_ITEM
+                putExtra(ClipboardService.EXTRA_ENTRY_ID, id)
             }
             getApplication<FastPasteApp>().startService(intent)
         }
     }
 
     fun copyHistoryItem(id: Long) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val entry = dao.getById(id) ?: return@launch
-            val payload = ClipboardPayload.fromEntry(entry)
-            val clip = runCatching {
-                AndroidClipboardCodec.write(getApplication(), payload)
-            }.getOrNull() ?: return@launch
-            withContext(Dispatchers.Main) {
-                val clipboard = getApplication<FastPasteApp>()
-                    .getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(clip)
+        viewModelScope.launch {
+            val entry = dao.getById(id)
+            if (entry != null && !entry.blobReady && entry.blobId.isNotBlank()) {
+                val token = lastCloudAccessToken
+                if (!token.isNullOrBlank()) {
+                    runCatching {
+                        googleDriveCloudSync.downloadBlob(token, entry.blobId, encryptionStore)
+                    }.getOrNull()?.let { payload ->
+                        historyRepository.mergeEntry(
+                            content = entry.content,
+                            source = entry.source,
+                            sourceApp = entry.sourceApp,
+                            sourceTitle = entry.sourceTitle,
+                            sourceIcon = entry.sourceIcon,
+                            timestamp = entry.timestamp,
+                            pinned = entry.pinned,
+                            folder = entry.folder,
+                            promoteExisting = true,
+                            payload = payload,
+                            blobId = entry.blobId,
+                            blobSize = payload.encodedSize(),
+                            blobReady = true
+                        )
+                    }
+                }
             }
+            val intent = Intent(getApplication(), ClipboardService::class.java).apply {
+                action = ClipboardService.ACTION_COPY_HISTORY_ITEM
+                putExtra(ClipboardService.EXTRA_ENTRY_ID, id)
+            }
+            getApplication<FastPasteApp>().startService(intent)
         }
     }
 
@@ -432,6 +535,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(cloudMessage = message, cloudSyncing = false) }
     }
 
+    fun setE2eePassphrase(passphrase: String) {
+        viewModelScope.launch(Dispatchers.Default) {
+            runCatching { encryptionStore.setPassphrase(passphrase) }
+                .onSuccess { keyId ->
+                    _uiState.update {
+                        it.copy(
+                            e2eeEnabled = true,
+                            e2eeKeyId = keyId,
+                            e2eeMessage = "Đã bật E2EE; khoá $keyId"
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(e2eeMessage = error.message ?: "Không thiết lập được E2EE")
+                    }
+                }
+        }
+    }
+
+    fun setE2eeEnabled(enabled: Boolean) {
+        runCatching { encryptionStore.setEnabled(enabled) }
+            .onSuccess {
+                _uiState.update {
+                    it.copy(
+                        e2eeEnabled = enabled,
+                        e2eeKeyId = encryptionStore.keyId,
+                        e2eeMessage = if (enabled) {
+                            "Bản sao Google Drive đang được mã hoá"
+                        } else {
+                            "Đã tắt E2EE; lần sync Drive tới sẽ chuyển về plaintext"
+                        }
+                    )
+                }
+            }
+            .onFailure { error ->
+                _uiState.update { it.copy(e2eeMessage = error.message ?: "Không đổi được E2EE") }
+            }
+    }
+
     fun isCloudSyncEnabled(): Boolean {
         return cloudPrefs.getBoolean(CLOUD_SYNC_ENABLED, false)
     }
@@ -441,6 +584,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             setCloudMessage("Không lấy được quyền Google Drive.")
             return
         }
+        lastCloudAccessToken = accessToken
         if (!cloudSyncInFlight.compareAndSet(false, true)) return
 
         viewModelScope.launch {
@@ -456,6 +600,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val result = googleDriveCloudSync.merge(
                     accessToken = accessToken,
                     localEntries = localEntries,
+                    encryptionStore = encryptionStore,
                     isDeleted = deletedHistoryStore::isDeleted
                 )
                 var inserted = 0
@@ -466,10 +611,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             source = entry.source,
                             sourceApp = entry.sourceApp,
                             sourceTitle = entry.sourceTitle,
+                            sourceIcon = entry.sourceIcon,
                             timestamp = entry.timestamp,
                             pinned = entry.pinned,
                             folder = entry.folder,
-                            payload = ClipboardPayload.fromEntry(entry)
+                            payload = ClipboardPayload.fromEntry(entry),
+                            blobId = entry.blobId,
+                            blobSize = entry.blobSize,
+                            blobReady = entry.blobReady
                         )
                         if (mergeResult.inserted) {
                             inserted++

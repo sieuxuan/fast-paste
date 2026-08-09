@@ -2,10 +2,16 @@ fn main() {
     println!("cargo:rerun-if-changed=../google_oauth.json");
     if let Ok(content) = std::fs::read_to_string("../google_oauth.json") {
         if let Some(client_id) = extract_json_value(&content, "desktopClientId") {
-            println!("cargo:rustc-env=FASTPASTE_GOOGLE_DESKTOP_CLIENT_ID={}", client_id);
+            println!(
+                "cargo:rustc-env=FASTPASTE_GOOGLE_DESKTOP_CLIENT_ID={}",
+                client_id
+            );
         }
         if let Some(client_secret) = extract_json_value(&content, "desktopClientSecret") {
-            println!("cargo:rustc-env=FASTPASTE_GOOGLE_DESKTOP_CLIENT_SECRET={}", client_secret);
+            println!(
+                "cargo:rustc-env=FASTPASTE_GOOGLE_DESKTOP_CLIENT_SECRET={}",
+                client_secret
+            );
         }
     }
     tauri_build::build()

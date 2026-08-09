@@ -3,6 +3,8 @@ package com.fastpaste.app.sync
 import android.content.ClipData
 import android.content.Context
 import android.database.Cursor
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.text.Html
@@ -92,7 +94,8 @@ object AndroidClipboardCodec {
                 kind = ClipboardPayload.KIND_IMAGE,
                 text = "[Hình ảnh · $hash]",
                 mimeType = file.mime,
-                data = file.data
+                data = file.data,
+                thumbnail = createImageThumbnail(ClipboardPayload.decode(file.data))
             )
         }
 
@@ -204,6 +207,33 @@ object AndroidClipboardCodec {
         .digest(bytes)
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
+    private fun createImageThumbnail(bytes: ByteArray): String {
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return ""
+        val longest = maxOf(bitmap.width, bitmap.height).coerceAtLeast(1)
+        val scale = minOf(1f, THUMBNAIL_EDGE.toFloat() / longest)
+        val preview = if (scale < 1f) {
+            Bitmap.createScaledBitmap(
+                bitmap,
+                (bitmap.width * scale).toInt().coerceAtLeast(1),
+                (bitmap.height * scale).toInt().coerceAtLeast(1),
+                true
+            )
+        } else {
+            bitmap
+        }
+        val output = ByteArrayOutputStream()
+        preview.compress(Bitmap.CompressFormat.JPEG, 76, output)
+        if (preview !== bitmap) preview.recycle()
+        bitmap.recycle()
+        val encoded = ClipboardPayload.encode(output.toByteArray())
+        return if (encoded.length <= ClipboardPayload.MAX_THUMBNAIL_CHARS) {
+            "data:image/jpeg;base64,$encoded"
+        } else {
+            ""
+        }
+    }
+
     private const val MAX_FILES = 16
     private const val MAX_CACHE_FOLDERS = 50
+    private const val THUMBNAIL_EDGE = 256
 }

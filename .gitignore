@@ -15,5 +15,9 @@ android/build/
 android/app/build/
 android/app/release/
 android/local.properties
+android/keystore.properties
+android/app/fastpaste-release.keystore
 *.apk
 *.aab
+.kotlin/
+android/.kotlin/

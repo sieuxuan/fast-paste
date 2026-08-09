@@ -10,6 +10,7 @@ data class ClipboardEntry(
     val source: String,   // "LOCAL" or "REMOTE"
     val sourceApp: String = "",
     val sourceTitle: String = "",
+    val sourceIcon: String = "",
     val timestamp: Long = System.currentTimeMillis(),
     val pinned: Boolean = false,
     val folder: String = "",
@@ -17,5 +18,9 @@ data class ClipboardEntry(
     val mimeType: String = "text/plain",
     val htmlContent: String = "",
     val payloadData: String = "",
-    val filesJson: String = "[]"
+    val thumbnail: String = "",
+    val filesJson: String = "[]",
+    val blobId: String = "",
+    val blobSize: Long = 0L,
+    val blobReady: Boolean = true
 )

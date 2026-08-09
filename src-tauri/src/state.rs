@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::cloud;
+use crate::crypto;
 use crate::history::{
     hydrate_running_app_icons, normalize_deleted_markers, DeletedMarker, HistoryBackup, HistoryItem,
 };
@@ -10,6 +12,48 @@ use crate::hotkeys::{
     default_edit_hotkey, default_hotkey, default_pinned_hotkey, default_quick_slot_hotkey,
     normalize_settings,
 };
+use crate::vault;
+
+const VAULT_VERSION: u8 = 1;
+static VAULT_WRITABLE: AtomicBool = AtomicBool::new(true);
+
+#[derive(Serialize, Deserialize)]
+struct SensitiveState {
+    version: u8,
+    history: Vec<HistoryItem>,
+    deleted_markers: Vec<DeletedMarker>,
+    clear_history_at: Option<i64>,
+    app_icons: std::collections::HashMap<String, String>,
+    history_backup: Option<HistoryBackup>,
+}
+
+impl SensitiveState {
+    fn from_state(data: &AppStateData) -> Self {
+        Self {
+            version: VAULT_VERSION,
+            history: data.history.clone(),
+            deleted_markers: data.deleted_markers.clone(),
+            clear_history_at: data.clear_history_at,
+            app_icons: data.app_icons.clone(),
+            history_backup: data.history_backup.clone(),
+        }
+    }
+
+    fn hydrate(self, data: &mut AppStateData) -> Result<(), String> {
+        if self.version != VAULT_VERSION {
+            return Err(format!(
+                "Phiên bản history vault {} chưa được hỗ trợ.",
+                self.version
+            ));
+        }
+        data.history = self.history;
+        data.deleted_markers = self.deleted_markers;
+        data.clear_history_at = self.clear_history_at;
+        data.app_icons = self.app_icons;
+        data.history_backup = self.history_backup;
+        Ok(())
+    }
+}
 
 pub(crate) fn default_always_on_top() -> bool {
     true
@@ -24,6 +68,8 @@ pub(crate) fn default_settings() -> AppSettings {
         always_on_top: default_always_on_top(),
         auto_start: false,
         excluded_apps: vec![],
+        e2ee_enabled: false,
+        e2ee_key_id: String::new(),
     }
 }
 
@@ -43,6 +89,10 @@ pub(crate) struct AppSettings {
     pub(crate) auto_start: bool,
     #[serde(default, rename = "excludedApps", alias = "excluded_apps")]
     pub(crate) excluded_apps: Vec<String>,
+    #[serde(default, rename = "e2eeEnabled", alias = "e2ee_enabled")]
+    pub(crate) e2ee_enabled: bool,
+    #[serde(default, rename = "e2eeKeyId", alias = "e2ee_key_id")]
+    pub(crate) e2ee_key_id: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -61,6 +111,21 @@ pub(crate) struct AppStateData {
     pub(crate) history_backup: Option<HistoryBackup>,
     #[serde(default)]
     pub(crate) cloud: cloud::CloudUiState,
+    #[serde(default)]
+    pub(crate) transfers: Vec<TransferUiState>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct TransferUiState {
+    #[serde(rename = "transferId")]
+    pub(crate) transfer_id: String,
+    pub(crate) label: String,
+    #[serde(rename = "sentBytes")]
+    pub(crate) sent_bytes: usize,
+    #[serde(rename = "totalBytes")]
+    pub(crate) total_bytes: usize,
+    pub(crate) direction: String,
+    pub(crate) status: String,
 }
 
 pub(crate) struct AppState(pub(crate) Arc<Mutex<AppStateData>>);
@@ -71,34 +136,101 @@ pub(crate) fn get_settings_path() -> std::path::PathBuf {
         .unwrap_or_else(|_| std::path::PathBuf::from("settings.json"))
 }
 
+fn get_history_vault_path() -> std::path::PathBuf {
+    get_settings_path().with_file_name("history.vault")
+}
+
 pub(crate) fn save_state(data: &AppStateData) {
+    if !VAULT_WRITABLE.load(Ordering::Acquire) {
+        eprintln!("FastPaste: history vault đang bị khoá vì lần giải mã trước thất bại; không ghi đè dữ liệu.");
+        return;
+    }
+
     let mut persisted = data.clone();
     persisted.clients.clear();
     persisted.ips.clear();
     persisted.cloud.syncing = false;
+    persisted.transfers.clear();
+    let sensitive = SensitiveState::from_state(&persisted);
+    persisted.history.clear();
+    persisted.deleted_markers.clear();
+    persisted.clear_history_at = None;
+    persisted.app_icons.clear();
+    persisted.history_backup = None;
 
-    if let Ok(json) = serde_json::to_string(&persisted) {
-        let _ = std::fs::write(get_settings_path(), json);
+    let result = (|| -> Result<(), String> {
+        let vault_json = serde_json::to_vec(&sensitive).map_err(|error| error.to_string())?;
+        // Commit the encrypted copy first. If this fails, settings.json is left
+        // untouched so a legacy plaintext installation can still recover.
+        vault::write_protected_atomic(&get_history_vault_path(), &vault_json)?;
+        let public_json = serde_json::to_vec(&persisted).map_err(|error| error.to_string())?;
+        let settings_path = get_settings_path();
+        vault::write_atomic(&settings_path, &public_json)?;
+        // The first migration may have copied legacy plaintext history into
+        // settings.bak. Replace it only after both protected and public commits.
+        std::fs::copy(&settings_path, settings_path.with_extension("bak"))
+            .map(|_| ())
+            .map_err(|error| format!("Không làm sạch settings backup cũ: {error}"))
+    })();
+    if let Err(error) = result {
+        eprintln!("FastPaste: không lưu được state an toàn: {error}");
     }
 }
 
 pub(crate) fn load_state() -> AppStateData {
-    if let Ok(json) = std::fs::read_to_string(get_settings_path()) {
-        if let Ok(mut data) = serde_json::from_str::<AppStateData>(&json) {
+    if let Ok(json) = vault::read_with_backup(&get_settings_path()) {
+        if let Ok(mut data) = serde_json::from_slice::<AppStateData>(&json) {
+            let vault_path = get_history_vault_path();
+            let vault_present = vault_path.exists() || vault_path.with_extension("bak").exists();
+            let migrated_from_plaintext = !vault_present;
+            if vault_present {
+                let loaded = vault::read_protected(&vault_path)
+                    .and_then(|plain| {
+                        serde_json::from_slice::<SensitiveState>(&plain)
+                            .map_err(|error| error.to_string())
+                    })
+                    .and_then(|sensitive| sensitive.hydrate(&mut data));
+                if let Err(error) = loaded {
+                    // Never overwrite a vault that DPAPI cannot open (different
+                    // Windows account, damaged file, or restored disk image).
+                    VAULT_WRITABLE.store(false, Ordering::Release);
+                    data.cloud.status = format!("History vault cần khôi phục: {error}");
+                    eprintln!("FastPaste: {error}");
+                }
+            }
             data.clients.clear();
             data.ips.clear();
             data.cloud.syncing = false;
-            let settings_changed = normalize_settings(&mut data.settings);
+            data.transfers.clear();
+            let mut settings_changed = normalize_settings(&mut data.settings);
+            if data.settings.e2ee_enabled {
+                match crypto::load_key() {
+                    Ok(key) => {
+                        let key_id = crypto::key_id(&key);
+                        if data.settings.e2ee_key_id != key_id {
+                            data.settings.e2ee_key_id = key_id;
+                            settings_changed = true;
+                        }
+                    }
+                    Err(_) => {
+                        data.settings.e2ee_enabled = false;
+                        data.settings.e2ee_key_id.clear();
+                        settings_changed = true;
+                    }
+                }
+            }
             normalize_deleted_markers(&mut data);
             let icons_changed = hydrate_running_app_icons(&mut data);
             refresh_cloud_state(&mut data.cloud);
-            if settings_changed || icons_changed {
+            if VAULT_WRITABLE.load(Ordering::Acquire)
+                && (migrated_from_plaintext || settings_changed || icons_changed)
+            {
                 save_state(&data);
             }
             return data;
         }
     }
-    let data = AppStateData {
+    let mut data = AppStateData {
         settings: default_settings(),
         history: vec![],
         ips: vec![],
@@ -108,8 +240,23 @@ pub(crate) fn load_state() -> AppStateData {
         app_icons: std::collections::HashMap::new(),
         history_backup: None,
         cloud: cloud::CloudUiState::default(),
+        transfers: vec![],
     };
-    save_state(&data);
+    let vault_path = get_history_vault_path();
+    if vault_path.exists() || vault_path.with_extension("bak").exists() {
+        let loaded = vault::read_protected(&vault_path)
+            .and_then(|plain| {
+                serde_json::from_slice::<SensitiveState>(&plain).map_err(|error| error.to_string())
+            })
+            .and_then(|sensitive| sensitive.hydrate(&mut data));
+        if let Err(error) = loaded {
+            VAULT_WRITABLE.store(false, Ordering::Release);
+            data.cloud.status = format!("History vault cần khôi phục: {error}");
+        }
+    }
+    if VAULT_WRITABLE.load(Ordering::Acquire) {
+        save_state(&data);
+    }
     data
 }
 
