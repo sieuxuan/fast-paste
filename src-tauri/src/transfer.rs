@@ -424,6 +424,7 @@ mod tests {
                 blob_id: blob_id.clone(),
                 next_offset: offset,
                 chunk_size: 32 * 1024,
+                window_size: DEFAULT_WINDOW_SIZE,
             };
             let wire = make_chunk(&request, &payload).unwrap();
             let chunk: BlobChunk = serde_json::from_str(&wire).unwrap();
@@ -432,7 +433,8 @@ mod tests {
                 assert!(received == payload);
                 break;
             }
-            let ack: serde_json::Value = serde_json::from_str(&result.control).unwrap();
+            let control = result.control.expect("chunk chưa đủ thì phải có ACK");
+            let ack: serde_json::Value = serde_json::from_str(&control).unwrap();
             offset = ack["nextOffset"].as_u64().unwrap() as usize;
         }
     }
