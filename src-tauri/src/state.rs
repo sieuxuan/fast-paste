@@ -199,6 +199,8 @@ pub(crate) fn flush_state_now(data: &AppStateData) {
     }
 
     let mut persisted = data.clone();
+    crate::history::trim_history(&mut persisted.history);
+    crate::history::trim_inline_payloads(&mut persisted.history);
     persisted.clients.clear();
     persisted.ips.clear();
     persisted.cloud.syncing = false;

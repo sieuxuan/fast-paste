@@ -6,7 +6,31 @@ use crate::cloud;
 use crate::state::{save_state, AppStateData};
 
 pub(crate) const MAX_HISTORY_ITEMS: usize = 1_000;
+pub(crate) const MAX_INLINE_PAYLOADS: usize = 50;
 const MAX_DELETED_MARKERS: usize = 1_000;
+
+/// Giữ dữ liệu base64 cho các payload mới nhất; mục cũ vẫn giữ nhãn và
+/// thumbnail để vault không tăng vô hạn.
+pub(crate) fn trim_inline_payloads(history: &mut [HistoryItem]) -> bool {
+    let mut kept = 0usize;
+    let mut changed = false;
+    for item in history.iter_mut() {
+        let Some(payload) = item.payload.as_mut() else {
+            continue;
+        };
+        if payload.data.is_empty() {
+            continue;
+        }
+        if kept < MAX_INLINE_PAYLOADS {
+            kept += 1;
+            continue;
+        }
+        payload.data.clear();
+        item.blob_ready = false;
+        changed = true;
+    }
+    changed
+}
 
 /// Tính năng copy file đã bị gỡ. Mục cũ giữ lại nhãn text để người dùng
 /// vẫn thấy mình từng copy gì, nhưng dữ liệu nhị phân thì bỏ đi.
@@ -1132,5 +1156,49 @@ mod history_maintenance_tests {
 
         assert!(!drop_file_payloads(&mut data));
         assert!(data.history[0].payload.is_some());
+    }
+
+    fn image_item(label: &str, millis: i64) -> HistoryItem {
+        let mut item = make_history_item_at(label, "PC", millis, SourceMetadata::default());
+        item.payload = Some(ClipboardPayload {
+            kind: "image".into(),
+            text: label.into(),
+            data: "QUJDRA==".into(),
+            thumbnail: "data:image/png;base64,AAAA".into(),
+            ..ClipboardPayload::default()
+        });
+        item
+    }
+
+    #[test]
+    fn newest_images_keep_full_data() {
+        let mut history: Vec<HistoryItem> = (0..MAX_INLINE_PAYLOADS)
+            .map(|index| image_item(&format!("ảnh {index}"), 1_000 + index as i64))
+            .collect();
+
+        assert!(!trim_inline_payloads(&mut history));
+        assert!(history
+            .iter()
+            .all(|item| !item.payload.as_ref().unwrap().data.is_empty()));
+    }
+
+    #[test]
+    fn images_past_the_cap_keep_only_thumbnail_and_label() {
+        let mut history: Vec<HistoryItem> = (0..MAX_INLINE_PAYLOADS + 3)
+            .map(|index| image_item(&format!("ảnh {index}"), 1_000 + index as i64))
+            .collect();
+        history.sort_by_key(|item| std::cmp::Reverse(timestamp_to_millis(&item.timestamp)));
+
+        assert!(trim_inline_payloads(&mut history));
+        assert!(!history[0].payload.as_ref().unwrap().data.is_empty());
+
+        let dropped_index = MAX_INLINE_PAYLOADS + 1;
+        let dropped = history[dropped_index].payload.as_ref().unwrap();
+        assert!(dropped.data.is_empty());
+        assert!(!dropped.thumbnail.is_empty());
+        assert_eq!(
+            history[dropped_index].text,
+            format!("ảnh {}", MAX_INLINE_PAYLOADS + 3 - 1 - dropped_index)
+        );
     }
 }
