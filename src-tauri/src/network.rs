@@ -665,7 +665,9 @@ async fn handle_client(
         }
 
         // Raw plain text = immediate clipboard paste from the device.
-        let _ = app.clipboard().write_text(text.clone());
+        if app.clipboard().write_text(text.clone()).is_ok() {
+            crate::clipboard::mark_self_write();
+        }
         let history_changed = {
             let mut d = data.lock().unwrap();
             let changed = history::promote_or_insert_history(&mut d, &text, "ANDROID");
@@ -747,7 +749,9 @@ fn handle_history_sync(app: &AppHandle, data: &Mutex<AppStateData>, entries: Vec
             if let Some(payload) = entry.payload {
                 let _ = clipboard::write_clipboard(&payload);
             } else {
-                let _ = app.clipboard().write_text(entry.text);
+                if app.clipboard().write_text(entry.text).is_ok() {
+                    crate::clipboard::mark_self_write();
+                }
             }
         }
     }

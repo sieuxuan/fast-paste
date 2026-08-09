@@ -8,6 +8,7 @@ mod pairing;
 mod state;
 mod transfer;
 mod vault;
+mod watcher;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -22,7 +23,6 @@ use hotkeys::*;
 use state::*;
 
 const AUTOSTART_HIDDEN_ARG: &str = "--fastpaste-hidden";
-const CLIPBOARD_POLL_INTERVAL_MS: u64 = 250;
 const CLOUD_SYNC_DEBOUNCE_MS: u64 = 3_000;
 const STARTUP_CLOUD_SYNC_DELAY_MS: u64 = 1_500;
 
@@ -220,7 +220,9 @@ fn set_e2ee_enabled(
 
 #[tauri::command]
 fn copy_text(text: String, app: AppHandle, state: State<'_, AppState>) {
-    let _ = app.clipboard().write_text(text.clone());
+    if app.clipboard().write_text(text.clone()).is_ok() {
+        crate::clipboard::mark_self_write();
+    }
     let history_changed = {
         let mut data = state.0.lock().unwrap();
         let changed = promote_or_insert_history(&mut data, &text, "PC");
@@ -311,6 +313,7 @@ async fn copy_history_item(
         app.clipboard()
             .write_text(text.clone())
             .map_err(|error| error.to_string())?;
+        crate::clipboard::mark_self_write();
         text
     };
     if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
@@ -405,6 +408,7 @@ fn update_history_item(
             app.clipboard()
                 .write_text(text.clone())
                 .map_err(|error| error.to_string())?;
+            crate::clipboard::mark_self_write();
             text.clone()
         };
         if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
@@ -682,7 +686,9 @@ fn add_history_item(
     }
     broadcast_state(&app);
     if copy_after_save {
-        let _ = app.clipboard().write_text(text.clone());
+        if app.clipboard().write_text(text.clone()).is_ok() {
+            crate::clipboard::mark_self_write();
+        }
         if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
             let _ = tx.send(text);
         }
@@ -1100,37 +1106,31 @@ pub fn run() {
             network::spawn_udp_broadcaster(&app_handle, data_arc.clone());
             network::spawn_ws_server(&app_handle, data_arc.clone(), ws_tx.clone());
 
-            // ── Clipboard Poller ──
+            // ── Clipboard watcher ──
+            // LAN đi trước đĩa, UI và cloud để clipboard tới thiết bị kia
+            // mà không phải chờ DPAPI hoặc serialize toàn bộ state.
             let data_clip = data_arc.clone();
+            let mut clipboard_rx = watcher::spawn_clipboard_watcher();
             tauri::async_runtime::spawn(async move {
-                let mut last_clipboard_key = crate::clipboard::read_clipboard()
-                    .map(|payload| payload.fingerprint())
-                    .unwrap_or_default();
-                loop {
-                    if let Some(payload) = crate::clipboard::read_clipboard() {
-                        let clipboard_key = payload.fingerprint();
-                        if !payload.text.is_empty() && clipboard_key != last_clipboard_key {
-                            last_clipboard_key = clipboard_key;
-                            let history_changed = {
-                                let mut d = data_clip.lock().unwrap();
-                                let changed = promote_or_insert_payload(&mut d, &payload, "PC");
-                                if changed {
-                                    save_state(&d);
-                                }
-                                changed
-                            };
-                            if history_changed {
-                                broadcast_state(&app_handle_clip);
-                                queue_cloud_sync(&app_handle_clip);
-                            }
-                            let _ = ws_tx.send(if payload.kind == "text" {
-                                payload.text.clone()
-                            } else {
-                                payload.protocol_json()
-                            });
+                while let Some(payload) = clipboard_rx.recv().await {
+                    let _ = ws_tx.send(if payload.kind == "text" {
+                        payload.text.clone()
+                    } else {
+                        payload.protocol_json()
+                    });
+
+                    let history_changed = {
+                        let mut d = data_clip.lock().unwrap();
+                        let changed = promote_or_insert_payload(&mut d, &payload, "PC");
+                        if changed {
+                            save_state(&d);
                         }
+                        changed
+                    };
+                    if history_changed {
+                        broadcast_state(&app_handle_clip);
+                        queue_cloud_sync(&app_handle_clip);
                     }
-                    sleep(Duration::from_millis(CLIPBOARD_POLL_INTERVAL_MS)).await;
                 }
             });
 
