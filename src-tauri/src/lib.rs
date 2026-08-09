@@ -823,6 +823,8 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
 
 #[tauri::command]
 async fn google_sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    // Manual sync must also check for changes made by another device in Drive.
+    LAST_SYNCED_REVISION.store(0, Ordering::Release);
     {
         let mut data = state.0.lock().unwrap();
         data.cloud.syncing = false;
