@@ -241,8 +241,8 @@ fn copy_text(text: String, app: AppHandle, state: State<'_, AppState>) {
         broadcast_state_now(&app);
         queue_cloud_sync(&app);
     }
-    if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
-        let _ = tx.send(text);
+    if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<Arc<String>>>() {
+        let _ = tx.send(Arc::new(text));
     }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
@@ -294,8 +294,8 @@ async fn copy_history_item(
                 status: "Đang yêu cầu".into(),
             });
         }
-        if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
-            let _ = tx.send(request);
+        if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<Arc<String>>>() {
+            let _ = tx.send(Arc::new(request));
         }
         broadcast_state_now(&app);
         return Ok(status::info(
@@ -330,8 +330,8 @@ async fn copy_history_item(
         crate::clipboard::mark_self_write();
         text
     };
-    if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
-        let _ = tx.send(message);
+    if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<Arc<String>>>() {
+        let _ = tx.send(Arc::new(message));
     }
     broadcast_state_now(&app);
     if let Some(window) = app.get_webview_window("main") {
@@ -438,8 +438,8 @@ fn update_history_item(
             crate::clipboard::mark_self_write();
             text.clone()
         };
-        if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
-            let _ = tx.send(message);
+        if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<Arc<String>>>() {
+            let _ = tx.send(Arc::new(message));
         }
     }
     queue_cloud_sync(&app);
@@ -721,8 +721,8 @@ fn add_history_item(
         if app.clipboard().write_text(text.clone()).is_ok() {
             crate::clipboard::mark_self_write();
         }
-        if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
-            let _ = tx.send(text);
+        if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<Arc<String>>>() {
+            let _ = tx.send(Arc::new(text));
         }
     }
     queue_cloud_sync(&app);
@@ -1070,7 +1070,7 @@ mod startup_state_tests {
 pub fn run() {
     // Cửa sổ khởi động trên state rỗng; vault thật được nạp ở thread nền.
     let data_arc = Arc::new(Mutex::new(state::empty_state()));
-    let (ws_tx, _ws_rx) = tokio::sync::broadcast::channel::<String>(100);
+    let (ws_tx, _ws_rx) = tokio::sync::broadcast::channel::<Arc<String>>(100);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_os::init())
@@ -1210,7 +1210,7 @@ pub fn run() {
             let mut clipboard_rx = watcher::spawn_clipboard_watcher();
             tauri::async_runtime::spawn(async move {
                 while let Some(payload) = clipboard_rx.recv().await {
-                    let _ = ws_tx.send(crate::network::outgoing_clipboard_message(&payload));
+                    let _ = ws_tx.send(Arc::new(crate::network::outgoing_clipboard_message(&payload)));
 
                     let history_changed = {
                         let mut d = data_clip.lock().unwrap();

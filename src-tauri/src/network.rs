@@ -207,7 +207,7 @@ fn set_clients_from_counts(counts: &HashMap<String, usize>, data: &Mutex<AppStat
 pub(crate) fn spawn_ws_server(
     app: &AppHandle,
     data: Arc<Mutex<AppStateData>>,
-    ws_tx: broadcast::Sender<String>,
+    ws_tx: broadcast::Sender<Arc<String>>,
 ) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -245,7 +245,7 @@ async fn handle_client(
     app: AppHandle,
     data: Arc<Mutex<AppStateData>>,
     client_counts: Arc<Mutex<HashMap<String, usize>>>,
-    mut rx: broadcast::Receiver<String>,
+    mut rx: broadcast::Receiver<Arc<String>>,
 ) {
     let Ok(Ok(ws_stream)) =
         tokio::time::timeout(HANDSHAKE_TIMEOUT, tokio_tungstenite::accept_async(stream)).await
@@ -282,7 +282,7 @@ async fn handle_client(
                             if write.send(Message::Text(message.into())).await.is_err() { break; }
                         }
                         DirectMessage::App(message) => {
-                            if let Some(message) = protect_for_client(&data_sync, &sender_session, message) {
+                            if let Some(message) = protect_for_client(&data_sync, &sender_session, &message) {
                                 if write.send(Message::Text(message.into())).await.is_err() { break; }
                             }
                         }
@@ -295,7 +295,7 @@ async fn handle_client(
                 }
                 received = rx.recv() => match received {
                     Ok(message) => {
-                        if let Some(message) = protect_for_client(&data_sync, &sender_session, message) {
+                        if let Some(message) = protect_for_client(&data_sync, &sender_session, message.as_str()) {
                             if write.send(Message::Text(message.into())).await.is_err() { break; }
                         }
                     }
@@ -802,10 +802,10 @@ async fn apply_clipboard_text(app: AppHandle, text: String) -> Result<(), String
 fn protect_for_client(
     _data: &Mutex<AppStateData>,
     session: &Mutex<Option<SessionCipher>>,
-    message: String,
+    message: &str,
 ) -> Option<String> {
     if let Some(cipher) = session.lock().unwrap().as_mut() {
-        cipher.encrypt(&message).ok()
+        cipher.encrypt(message).ok()
     } else {
         None
     }
