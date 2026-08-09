@@ -96,6 +96,7 @@ pub(crate) fn current_offset(blob_id: &str) -> Option<usize> {
         .map(|item| item.data.len())
 }
 
+#[cfg(test)]
 pub(crate) fn make_chunk(
     request: &BlobRequest,
     payload: &ClipboardPayload,
