@@ -7,6 +7,23 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val localSigning = Properties().apply {
+    rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
+}
+
+fun signingSecret(name: String): String? =
+    providers.environmentVariable(name).orNull
+        ?: localSigning.getProperty(name)?.takeIf(String::isNotBlank)
+
+val signingStoreFile = signingSecret("FASTPASTE_ANDROID_KEYSTORE_PATH")
+    ?.let(rootProject::file)
+    ?: file("fastpaste-release.keystore")
+val signingStorePassword = signingSecret("FASTPASTE_ANDROID_STORE_PASSWORD")
+val signingKeyAlias = signingSecret("FASTPASTE_ANDROID_KEY_ALIAS")
+val signingKeyPassword = signingSecret("FASTPASTE_ANDROID_KEY_PASSWORD")
+val releaseSigningReady = signingStoreFile.exists() &&
+    signingStorePassword != null && signingKeyAlias != null && signingKeyPassword != null
+
 android {
     namespace = "com.fastpaste.app"
     compileSdk = 34
@@ -102,20 +119,3 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation("org.json:json:20240303")
 }
-
-val localSigning = Properties().apply {
-    rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
-}
-
-fun signingSecret(name: String): String? =
-    providers.environmentVariable(name).orNull
-        ?: localSigning.getProperty(name)?.takeIf(String::isNotBlank)
-
-val signingStoreFile = signingSecret("FASTPASTE_ANDROID_KEYSTORE_PATH")
-    ?.let(rootProject::file)
-    ?: file("fastpaste-release.keystore")
-val signingStorePassword = signingSecret("FASTPASTE_ANDROID_STORE_PASSWORD")
-val signingKeyAlias = signingSecret("FASTPASTE_ANDROID_KEY_ALIAS")
-val signingKeyPassword = signingSecret("FASTPASTE_ANDROID_KEY_PASSWORD")
-val releaseSigningReady = signingStoreFile.exists() &&
-    signingStorePassword != null && signingKeyAlias != null && signingKeyPassword != null
