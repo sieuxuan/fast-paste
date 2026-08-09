@@ -11,8 +11,8 @@ mod transfer;
 mod vault;
 mod watcher;
 
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
@@ -309,7 +309,10 @@ async fn copy_history_item(
     let (payload, text) = {
         let mut data = state.0.lock().unwrap();
         let Some(index) = data.history.iter().position(|item| item.id == id) else {
-            return Err(status::error("historyItemMissing", "Không tìm thấy mục clipboard."));
+            return Err(status::error(
+                "historyItemMissing",
+                "Không tìm thấy mục clipboard.",
+            ));
         };
         let mut item = data.history.remove(index);
         item.timestamp = chrono::Utc::now().to_rfc3339();
@@ -944,7 +947,8 @@ async fn sync_google_drive(
             return Err("Chưa đăng nhập Google.".to_string());
         }
 
-        let revision = history_revision(&data.history, &data.deleted_markers, data.clear_history_at);
+        let revision =
+            history_revision(&data.history, &data.deleted_markers, data.clear_history_at);
         if revision != 0 && revision == LAST_SYNCED_REVISION.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -985,11 +989,8 @@ async fn sync_google_drive(
                     "Tự đồng bộ Google Drive: {} mục, tải về {} mục mới.",
                     result.merged_count, inserted
                 );
-                let current_revision = history_revision(
-                    &data.history,
-                    &data.deleted_markers,
-                    data.clear_history_at,
-                );
+                let current_revision =
+                    history_revision(&data.history, &data.deleted_markers, data.clear_history_at);
                 LAST_SYNCED_REVISION.store(current_revision, Ordering::Release);
                 save_state();
                 inserted
@@ -1054,7 +1055,9 @@ mod startup_state_tests {
         let mut current = state::empty_state();
         current.ips = vec!["192.168.1.10".into()];
         current.clients = vec!["192.168.1.20".into()];
-        current.history.push(make_history_item("copied during startup", "PC"));
+        current
+            .history
+            .push(make_history_item("copied during startup", "PC"));
 
         let loaded = state::empty_state();
         install_loaded_state(&mut current, loaded);
@@ -1170,10 +1173,14 @@ pub fn run() {
                         if remaining <= 0 {
                             break;
                         }
-                        if matches!(tokio::time::timeout(
-                            Duration::from_millis(remaining as u64),
-                            cloud_sync_rx.recv(),
-                        ).await, Ok(None)) {
+                        if matches!(
+                            tokio::time::timeout(
+                                Duration::from_millis(remaining as u64),
+                                cloud_sync_rx.recv(),
+                            )
+                            .await,
+                            Ok(None)
+                        ) {
                             return;
                         }
                     }
@@ -1212,7 +1219,9 @@ pub fn run() {
             let mut clipboard_rx = watcher::spawn_clipboard_watcher();
             tauri::async_runtime::spawn(async move {
                 while let Some(payload) = clipboard_rx.recv().await {
-                    let _ = ws_tx.send(Arc::new(crate::network::outgoing_clipboard_message(&payload)));
+                    let _ = ws_tx.send(Arc::new(crate::network::outgoing_clipboard_message(
+                        &payload,
+                    )));
 
                     let history_changed = {
                         let mut d = data_clip.lock().unwrap();
@@ -1326,6 +1335,9 @@ mod cloud_debounce_tests {
     #[test]
     fn late_request_opens_a_new_window() {
         let late = 1_000 + CLOUD_SYNC_DEBOUNCE_MS as i64 + 1;
-        assert_eq!(next_sync_deadline(late, late), late + CLOUD_SYNC_DEBOUNCE_MS as i64);
+        assert_eq!(
+            next_sync_deadline(late, late),
+            late + CLOUD_SYNC_DEBOUNCE_MS as i64
+        );
     }
 }

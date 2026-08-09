@@ -46,7 +46,8 @@ pub(crate) fn outgoing_clipboard_message(payload: &ClipboardPayload) -> String {
         "blobId": payload.fingerprint(),
         "blobSize": payload.encoded_size(),
         "payload": payload.sanitized_for_cloud(),
-    }).to_string()
+    })
+    .to_string()
 }
 
 #[derive(Deserialize)]
@@ -269,14 +270,9 @@ async fn handle_client(
     let notice_ip = ip.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(250)).await;
-        if notice_session.lock().unwrap().is_none()
-            && !notice_sent.swap(true, Ordering::AcqRel)
-        {
+        if notice_session.lock().unwrap().is_none() && !notice_sent.swap(true, Ordering::AcqRel) {
             let _ = notice_tx.send(DirectMessage::Plain(pair_required_notice()));
-            let _ = notice_app.emit(
-                "pairing_required",
-                serde_json::json!({ "ip": notice_ip }),
-            );
+            let _ = notice_app.emit("pairing_required", serde_json::json!({ "ip": notice_ip }));
         }
     });
 
@@ -504,10 +500,10 @@ async fn handle_client(
                                 .iter()
                                 .find(|item| item.blob_id == request.blob_id && item.blob_ready)
                                 .and_then(|item| item.payload.clone())
-                        }.or_else(|| {
-                            crate::watcher::latest_payload().filter(|payload| {
-                                payload.fingerprint() == request.blob_id
-                            })
+                        }
+                        .or_else(|| {
+                            crate::watcher::latest_payload()
+                                .filter(|payload| payload.fingerprint() == request.blob_id)
                         });
                         if let Some(payload) = payload {
                             if transfer::serialized_size(&payload).ok() == Some(request.next_offset)
@@ -809,7 +805,10 @@ async fn apply_clipboard(payload: ClipboardPayload) -> Result<(), String> {
 
 async fn apply_clipboard_text(app: AppHandle, text: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let result = app.clipboard().write_text(text).map_err(|error| error.to_string());
+        let result = app
+            .clipboard()
+            .write_text(text)
+            .map_err(|error| error.to_string());
         if result.is_ok() {
             clipboard::mark_self_write();
         }
@@ -843,11 +842,7 @@ fn protect_binary_for_client(
         .and_then(|cipher| cipher.encrypt_binary(&frame).ok())
 }
 
-async fn handle_history_sync(
-    app: &AppHandle,
-    data: &Mutex<AppStateData>,
-    entries: Vec<SyncEntry>,
-) {
+async fn handle_history_sync(app: &AppHandle, data: &Mutex<AppStateData>, entries: Vec<SyncEntry>) {
     let (newest_incoming, history_changed, latest_local_timestamp) = {
         let mut d = data.lock().unwrap();
         let result = history::merge_sync_entries(&mut d, entries);
@@ -915,7 +910,10 @@ mod outgoing_tests {
 
     #[test]
     fn text_goes_out_raw() {
-        assert_eq!(outgoing_clipboard_message(&ClipboardPayload::text("hello".into())), "hello");
+        assert_eq!(
+            outgoing_clipboard_message(&ClipboardPayload::text("hello".into())),
+            "hello"
+        );
     }
 
     #[test]
@@ -926,7 +924,8 @@ mod outgoing_tests {
             data: "A".repeat((BLOB_OFFER_THRESHOLD_BYTES + 1) * 2),
             ..Default::default()
         };
-        let value: serde_json::Value = serde_json::from_str(&outgoing_clipboard_message(&payload)).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(&outgoing_clipboard_message(&payload)).unwrap();
         assert_eq!(value["type"], "clipboard_blob_offer");
         assert_eq!(value["blobId"], payload.fingerprint());
         assert_eq!(value["payload"]["data"], "");

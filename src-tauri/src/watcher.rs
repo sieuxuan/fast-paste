@@ -36,11 +36,7 @@ pub(crate) fn spawn_clipboard_watcher() -> tokio::sync::mpsc::UnboundedReceiver<
                 if current != previous {
                     last_seen = current;
                 }
-                if !clipboard::should_read(
-                    current,
-                    previous,
-                    clipboard::self_write_sequence(),
-                ) {
+                if !clipboard::should_read(current, previous, clipboard::self_write_sequence()) {
                     continue;
                 }
                 let Some(payload) = clipboard::read_clipboard() else {

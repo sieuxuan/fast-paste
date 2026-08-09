@@ -443,13 +443,23 @@ impl SessionCipher {
     }
 
     pub(crate) fn encrypt_binary(&mut self, plain: &[u8]) -> Result<Vec<u8>, String> {
-        self.send_sequence = self.send_sequence.checked_add(1).ok_or("Session sequence đã đầy.")?;
+        self.send_sequence = self
+            .send_sequence
+            .checked_add(1)
+            .ok_or("Session sequence đã đầy.")?;
         let seq = self.send_sequence;
-        let cipher = Aes256Gcm::new_from_slice(self.key.as_slice()).map_err(|error| error.to_string())?;
+        let cipher =
+            Aes256Gcm::new_from_slice(self.key.as_slice()).map_err(|error| error.to_string())?;
         let nonce = wire_nonce(*b"PCV2", seq);
         let aad = format!("fastpaste-secure-v2|{}|{}", self.device_id, seq);
         let ciphertext = cipher
-            .encrypt(Nonce::from_slice(&nonce), Payload { msg: plain, aad: aad.as_bytes() })
+            .encrypt(
+                Nonce::from_slice(&nonce),
+                Payload {
+                    msg: plain,
+                    aad: aad.as_bytes(),
+                },
+            )
             .map_err(|_| "Không mã hoá được binary session message.".to_string())?;
         let mut wire = Vec::with_capacity(12 + ciphertext.len());
         wire.extend_from_slice(b"FPS3");
@@ -466,13 +476,17 @@ impl SessionCipher {
         if seq <= self.receive_sequence {
             return Err("Đã chặn binary session message bị phát lại.".to_string());
         }
-        let cipher = Aes256Gcm::new_from_slice(self.key.as_slice()).map_err(|error| error.to_string())?;
+        let cipher =
+            Aes256Gcm::new_from_slice(self.key.as_slice()).map_err(|error| error.to_string())?;
         let nonce = wire_nonce(*b"ANV2", seq);
         let aad = format!("fastpaste-secure-v2|{}|{}", self.device_id, seq);
         let plain = cipher
             .decrypt(
                 Nonce::from_slice(&nonce),
-                Payload { msg: &wire[12..], aad: aad.as_bytes() },
+                Payload {
+                    msg: &wire[12..],
+                    aad: aad.as_bytes(),
+                },
             )
             .map_err(|_| "Binary session authentication thất bại.".to_string())?;
         self.receive_sequence = seq;

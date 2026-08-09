@@ -141,13 +141,15 @@ pub(crate) fn make_binary_chunks(
     while offset < bytes.len() && frames.len() < window_size {
         let end = (offset + chunk_size).min(bytes.len());
         frames.push(encode_binary_chunk(
-            &request.transfer_id,
-            &request.blob_id,
-            offset,
-            bytes.len(),
-            &hash,
-            end == bytes.len(),
-            window_size,
+            BinaryChunkMetadata {
+                transfer_id: &request.transfer_id,
+                blob_id: &request.blob_id,
+                offset,
+                total: bytes.len(),
+                hash: &hash,
+                eof: end == bytes.len(),
+                window_size,
+            },
             &bytes[offset..end],
         )?);
         offset = end;
@@ -211,12 +213,14 @@ pub(crate) fn receive_chunk(chunk: BlobChunk) -> Result<ReceiveOutcome, String> 
     }
     map.remove(&chunk.blob_id);
     Ok(ReceiveOutcome {
-        control: Some(serde_json::json!({
-            "app": "fastpaste", "type": "blob_complete", "version": 2,
-            "transferId": chunk.transfer_id, "blobId": chunk.blob_id,
-            "total": chunk.total,
-        })
-        .to_string()),
+        control: Some(
+            serde_json::json!({
+                "app": "fastpaste", "type": "blob_complete", "version": 2,
+                "transferId": chunk.transfer_id, "blobId": chunk.blob_id,
+                "total": chunk.total,
+            })
+            .to_string(),
+        ),
         payload: Some(payload),
     })
 }
@@ -318,30 +322,34 @@ struct DecodedBinaryChunk {
     window_size: usize,
 }
 
-fn encode_binary_chunk(
-    transfer_id: &str,
-    blob_id: &str,
+struct BinaryChunkMetadata<'a> {
+    transfer_id: &'a str,
+    blob_id: &'a str,
     offset: usize,
     total: usize,
-    hash: &[u8],
+    hash: &'a [u8],
     eof: bool,
     window_size: usize,
-    data: &[u8],
-) -> Result<Vec<u8>, String> {
-    let transfer = transfer_id.as_bytes();
-    let blob = blob_id.as_bytes();
-    if transfer.len() > u8::MAX as usize || blob.len() > u8::MAX as usize || hash.len() != 32 {
+}
+
+fn encode_binary_chunk(metadata: BinaryChunkMetadata<'_>, data: &[u8]) -> Result<Vec<u8>, String> {
+    let transfer = metadata.transfer_id.as_bytes();
+    let blob = metadata.blob_id.as_bytes();
+    if transfer.len() > u8::MAX as usize
+        || blob.len() > u8::MAX as usize
+        || metadata.hash.len() != 32
+    {
         return Err("Header blob binary quá dài.".to_string());
     }
     let mut frame = Vec::with_capacity(56 + transfer.len() + blob.len() + data.len());
     frame.extend_from_slice(BINARY_MAGIC);
-    frame.push(u8::from(eof));
+    frame.push(u8::from(metadata.eof));
     frame.push(transfer.len() as u8);
     frame.push(blob.len() as u8);
-    frame.push(window_size.clamp(1, MAX_WINDOW_SIZE) as u8);
-    frame.extend_from_slice(&(offset as u64).to_be_bytes());
-    frame.extend_from_slice(&(total as u64).to_be_bytes());
-    frame.extend_from_slice(hash);
+    frame.push(metadata.window_size.clamp(1, MAX_WINDOW_SIZE) as u8);
+    frame.extend_from_slice(&(metadata.offset as u64).to_be_bytes());
+    frame.extend_from_slice(&(metadata.total as u64).to_be_bytes());
+    frame.extend_from_slice(metadata.hash);
     frame.extend_from_slice(transfer);
     frame.extend_from_slice(blob);
     frame.extend_from_slice(data);

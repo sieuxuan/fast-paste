@@ -1,16 +1,16 @@
 {
-  "version": "2.2.6",
-  "releaseUrl": "https://github.com/sieuxuan/fast-paste/releases/tag/v2.2.6",
-  "notes": "Adds image, file and rich-text clipboard sync, 1000-item history, private-app exclusions, safer delete/undo, editing, app icons, improved filters and a modernized Android UI.",
+  "version": "2.2.7",
+  "releaseUrl": "https://github.com/sieuxuan/fast-paste/releases/tag/v2.2.7",
+  "notes": "Stabilizes Windows and Android clipboard sync with safer pairing, bounded memory use, faster state updates, more reliable reconnects, and improved Google Drive synchronization.",
   "desktop": {
-    "version": "2.2.6",
-    "downloadUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.6/FastPaste_2.2.6_x64-setup.exe",
-    "portableUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.6/FastPaste-Portable.exe",
-    "installerUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.6/FastPaste_2.2.6_x64-setup.exe"
+    "version": "2.2.7",
+    "downloadUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.7/FastPaste_2.2.7_x64-setup.exe",
+    "portableUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.7/FastPaste-Portable.exe",
+    "installerUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.7/FastPaste_2.2.7_x64-setup.exe"
   },
   "android": {
-    "versionName": "2.2.6",
-    "versionCode": 226,
-    "apkUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.6/FastPaste-Android.apk"
+    "versionName": "2.2.7",
+    "versionCode": 227,
+    "apkUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.7/FastPaste-Android.apk"
   }
 }

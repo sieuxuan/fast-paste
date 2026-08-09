@@ -1118,12 +1118,23 @@ pub(crate) fn merge_cloud_entries_into_history(
 impl HistoryItem {
     pub(crate) fn sanitized_for_ui(&self) -> Self {
         Self {
-            id: self.id.clone(), text: self.text.clone(), timestamp: self.timestamp.clone(),
-            source: self.source.clone(), source_app: self.source_app.clone(),
-            source_title: self.source_title.clone(), source_icon: self.source_icon.clone(),
-            pinned: self.pinned, quick_slot: self.quick_slot, folder: self.folder.clone(),
-            payload: self.payload.as_ref().map(ClipboardPayload::sanitized_for_ui),
-            blob_id: self.blob_id.clone(), blob_size: self.blob_size, blob_ready: self.blob_ready,
+            id: self.id.clone(),
+            text: self.text.clone(),
+            timestamp: self.timestamp.clone(),
+            source: self.source.clone(),
+            source_app: self.source_app.clone(),
+            source_title: self.source_title.clone(),
+            source_icon: self.source_icon.clone(),
+            pinned: self.pinned,
+            quick_slot: self.quick_slot,
+            folder: self.folder.clone(),
+            payload: self
+                .payload
+                .as_ref()
+                .map(ClipboardPayload::sanitized_for_ui),
+            blob_id: self.blob_id.clone(),
+            blob_size: self.blob_size,
+            blob_ready: self.blob_ready,
         }
     }
 }
@@ -1159,10 +1170,16 @@ mod revision_tests {
     #[test]
     fn revision_is_stable_and_changes_with_entries() {
         let first = vec![make_history_item("one", "PC")];
-        assert_eq!(history_revision(&first, &[], None), history_revision(&first, &[], None));
+        assert_eq!(
+            history_revision(&first, &[], None),
+            history_revision(&first, &[], None)
+        );
         let mut second = first.clone();
         second.push(make_history_item("two", "PC"));
-        assert_ne!(history_revision(&first, &[], None), history_revision(&second, &[], None));
+        assert_ne!(
+            history_revision(&first, &[], None),
+            history_revision(&second, &[], None)
+        );
     }
 
     #[test]
@@ -1170,11 +1187,17 @@ mod revision_tests {
         let mut first = make_history_item("image", "PC");
         first.blob_id = "abc".into();
         first.payload = Some(crate::clipboard::ClipboardPayload {
-            kind: "image".into(), text: "image".into(), data: "AAAA".into(), ..Default::default()
+            kind: "image".into(),
+            text: "image".into(),
+            data: "AAAA".into(),
+            ..Default::default()
         });
         let mut second = first.clone();
         second.payload.as_mut().unwrap().data = "BBBB".into();
-        assert_eq!(history_revision(&[first], &[], None), history_revision(&[second], &[], None));
+        assert_eq!(
+            history_revision(&[first], &[], None),
+            history_revision(&[second], &[], None)
+        );
     }
 }
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.2.7 - 2026-08-09
+
+- Stabilized Windows clipboard detection and moved OS polling off the async runtime so local copies propagate faster without blocking network work.
+- Added bounded, debounced state persistence with safe startup/shutdown coordination and lazy thumbnail loading to reduce UI and memory pressure.
+- Hardened pairing and reconnect behavior, including explicit unpaired/secure states and correct restoration of the active desktop identity on Android.
+- Added chunked large-payload delivery from Windows to Android while capping in-memory and persisted inline data.
+- Improved WebSocket liveness, history merging, clipboard echo protection, discovery ownership, and Google Drive debounce/revision handling.
+- Removed legacy file clipboard transfer while preserving compatible history metadata, and split large Android service/UI modules for maintainability.
+
 ## 2.2.6 - 2026-07-17
 
 - Added image, file, and rich-text clipboard sync between Windows and Android, including history and Google Drive metadata.

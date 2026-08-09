@@ -8,15 +8,27 @@ pub(crate) struct StatusMessage {
 }
 
 pub(crate) fn ok(code: &str, text: impl Into<String>) -> StatusMessage {
-    StatusMessage { code: code.into(), text: text.into(), tone: "ok".into() }
+    StatusMessage {
+        code: code.into(),
+        text: text.into(),
+        tone: "ok".into(),
+    }
 }
 
 pub(crate) fn info(code: &str, text: impl Into<String>) -> StatusMessage {
-    StatusMessage { code: code.into(), text: text.into(), tone: "info".into() }
+    StatusMessage {
+        code: code.into(),
+        text: text.into(),
+        tone: "info".into(),
+    }
 }
 
 pub(crate) fn error(code: &str, text: impl Into<String>) -> StatusMessage {
-    StatusMessage { code: code.into(), text: text.into(), tone: "error".into() }
+    StatusMessage {
+        code: code.into(),
+        text: text.into(),
+        tone: "error".into(),
+    }
 }
 
 #[cfg(test)]

@@ -48,7 +48,11 @@ impl Default for CloudUiState {
             } else {
                 "Chưa bật đồng bộ Google trong bản build này.".to_string()
             },
-            status_code: if is_configured() { "needsSignIn".into() } else { "notConfigured".into() },
+            status_code: if is_configured() {
+                "needsSignIn".into()
+            } else {
+                "notConfigured".into()
+            },
             last_sync_at: None,
         }
     }
@@ -75,7 +79,11 @@ pub struct CloudEntry {
     pub blob_id: String,
     #[serde(default, rename = "blobSize", alias = "blob_size")]
     pub blob_size: usize,
-    #[serde(default = "default_blob_ready", rename = "blobReady", alias = "blob_ready")]
+    #[serde(
+        default = "default_blob_ready",
+        rename = "blobReady",
+        alias = "blob_ready"
+    )]
     pub blob_ready: bool,
 }
 
@@ -420,7 +428,13 @@ async fn find_named_file(
         .bearer_auth(access_token)
         .query(&[
             ("spaces", "appDataFolder"),
-            ("q", &format!("name='{}' and trashed=false", file_name.replace('\'', "\\'"))),
+            (
+                "q",
+                &format!(
+                    "name='{}' and trashed=false",
+                    file_name.replace('\'', "\\'")
+                ),
+            ),
             ("fields", "files(id,name,modifiedTime)"),
             ("orderBy", "modifiedTime desc"),
         ])
@@ -553,7 +567,11 @@ async fn upload_entries(
 }
 
 fn normalize_blob_metadata(mut entry: CloudEntry) -> CloudEntry {
-    if let Some(payload) = entry.payload.as_ref().filter(|payload| payload.kind != "text") {
+    if let Some(payload) = entry
+        .payload
+        .as_ref()
+        .filter(|payload| payload.kind != "text")
+    {
         if entry.blob_id.is_empty() {
             entry.blob_id = payload.fingerprint();
         }
@@ -570,7 +588,11 @@ fn manifest_entries(entries: &[CloudEntry]) -> Vec<CloudEntry> {
         .iter()
         .cloned()
         .map(|mut entry| {
-            if let Some(payload) = entry.payload.as_ref().filter(|payload| payload.kind != "text") {
+            if let Some(payload) = entry
+                .payload
+                .as_ref()
+                .filter(|payload| payload.kind != "text")
+            {
                 if entry.blob_id.is_empty() {
                     entry.blob_id = payload.fingerprint();
                 }
@@ -594,9 +616,11 @@ async fn upload_missing_blobs(
     let remote_names = list_blob_names(client, access_token).await?;
     let mut uploaded = HashSet::new();
     for entry in entries {
-        let Some(payload) = entry.payload.as_ref().filter(|payload| {
-            payload.kind != "text" && !payload.data.is_empty()
-        }) else {
+        let Some(payload) = entry
+            .payload
+            .as_ref()
+            .filter(|payload| payload.kind != "text" && !payload.data.is_empty())
+        else {
             continue;
         };
         let blob_id = if entry.blob_id.is_empty() {
@@ -626,11 +650,14 @@ pub async fn download_blob(blob_id: &str) -> Result<Option<ClipboardPayload>, St
     }
     let access_token = ensure_access_token().await?;
     let client = http_client()?;
-    let Some(file_id) = find_named_file(&client, &access_token, &blob_file_name(blob_id)).await? else {
+    let Some(file_id) = find_named_file(&client, &access_token, &blob_file_name(blob_id)).await?
+    else {
         return Ok(None);
     };
     let response = client
-        .get(format!("https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"))
+        .get(format!(
+            "https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+        ))
         .bearer_auth(&access_token)
         .send()
         .await
@@ -644,8 +671,8 @@ pub async fn download_blob(blob_id: &str) -> Result<Option<ClipboardPayload>, St
     }
     let wire = response.text().await.map_err(|error| error.to_string())?;
     let plain = crypto::decrypt_if_encrypted(&wire)?.unwrap_or(wire);
-    let payload: ClipboardPayload = serde_json::from_str(&plain)
-        .map_err(|error| format!("Blob Drive JSON lỗi: {error}"))?;
+    let payload: ClipboardPayload =
+        serde_json::from_str(&plain).map_err(|error| format!("Blob Drive JSON lỗi: {error}"))?;
     if !payload.is_within_limit() || payload.fingerprint() != blob_id {
         return Err("Blob Drive không qua được kiểm tra toàn vẹn.".to_string());
     }
@@ -820,7 +847,9 @@ fn merge_entries(entries: Vec<CloudEntry>) -> Vec<CloudEntry> {
                 if next.folder.trim().is_empty() && !current.folder.trim().is_empty() {
                     next.folder = current.folder.clone();
                 }
-                if !payload_has_body(next.payload.as_ref()) && payload_has_body(current.payload.as_ref()) {
+                if !payload_has_body(next.payload.as_ref())
+                    && payload_has_body(current.payload.as_ref())
+                {
                     next.payload = current.payload.clone();
                     next.blob_ready = true;
                 }
@@ -831,7 +860,9 @@ fn merge_entries(entries: Vec<CloudEntry>) -> Vec<CloudEntry> {
             if current.folder.trim().is_empty() && !entry.folder.trim().is_empty() {
                 current.folder = entry.folder;
             }
-            if !payload_has_body(current.payload.as_ref()) && payload_has_body(entry.payload.as_ref()) {
+            if !payload_has_body(current.payload.as_ref())
+                && payload_has_body(entry.payload.as_ref())
+            {
                 current.payload = entry.payload;
                 current.blob_ready = true;
             }

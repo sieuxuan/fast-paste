@@ -184,7 +184,9 @@ pub(crate) fn spawn_state_writer(data: Arc<Mutex<AppStateData>>) {
                 continue;
             }
             let _flush = FLUSH_LOCK.lock().unwrap();
-            if !take_dirty() { continue; }
+            if !take_dirty() {
+                continue;
+            }
             let snapshot = {
                 let mut live = data.lock().unwrap();
                 crate::history::trim_history(&mut live.history);
@@ -217,15 +219,27 @@ pub(crate) fn flush_on_exit(data: &Mutex<AppStateData>) {
 fn ui_snapshot(data: &AppStateData) -> AppStateData {
     AppStateData {
         settings: data.settings.clone(),
-        history: data.history.iter().map(HistoryItem::sanitized_for_ui).collect(),
-        ips: data.ips.clone(), clients: data.clients.clone(),
-        deleted_markers: data.deleted_markers.clone(), clear_history_at: data.clear_history_at,
+        history: data
+            .history
+            .iter()
+            .map(HistoryItem::sanitized_for_ui)
+            .collect(),
+        ips: data.ips.clone(),
+        clients: data.clients.clone(),
+        deleted_markers: data.deleted_markers.clone(),
+        clear_history_at: data.clear_history_at,
         app_icons: data.app_icons.clone(),
         history_backup: data.history_backup.as_ref().map(|backup| HistoryBackup {
-            items: backup.items.iter().map(HistoryItem::sanitized_for_ui).collect(),
-            deleted_at: backup.deleted_at, label: backup.label.clone(),
+            items: backup
+                .items
+                .iter()
+                .map(HistoryItem::sanitized_for_ui)
+                .collect(),
+            deleted_at: backup.deleted_at,
+            label: backup.label.clone(),
         }),
-        cloud: data.cloud.clone(), transfers: data.transfers.clone(),
+        cloud: data.cloud.clone(),
+        transfers: data.transfers.clone(),
     }
 }
 
@@ -427,8 +441,11 @@ mod persistence_tests {
         let mut data = empty_state();
         let mut item = crate::history::make_history_item("image", "PC");
         item.payload = Some(crate::clipboard::ClipboardPayload {
-            kind: "image".into(), text: "image".into(), data: "AAAA".into(),
-            thumbnail: "BBBB".into(), ..Default::default()
+            kind: "image".into(),
+            text: "image".into(),
+            data: "AAAA".into(),
+            thumbnail: "BBBB".into(),
+            ..Default::default()
         });
         data.history.push(item);
         let snapshot = ui_snapshot(&data);
@@ -464,30 +481,36 @@ mod cloud_status_tests {
 
     #[test]
     fn unconfigured_build_reports_a_stable_code() {
-        let mut value = cloud::CloudUiState::default();
-        value.configured = false;
+        let mut value = cloud::CloudUiState {
+            configured: false,
+            ..Default::default()
+        };
         apply_cloud_status(&mut value);
         assert_eq!(value.status_code, "notConfigured");
     }
 
     #[test]
     fn signed_out_asks_for_sign_in_regardless_of_previous_text() {
-        let mut value = cloud::CloudUiState::default();
-        value.configured = true;
-        value.signed_in = false;
-        value.status_code.clear();
-        value.status = "arbitrary previous text".into();
+        let mut value = cloud::CloudUiState {
+            configured: true,
+            signed_in: false,
+            status_code: String::new(),
+            status: "arbitrary previous text".into(),
+            ..Default::default()
+        };
         apply_cloud_status(&mut value);
         assert_eq!(value.status_code, "needsSignIn");
     }
 
     #[test]
     fn fresh_sync_result_is_preserved() {
-        let mut value = cloud::CloudUiState::default();
-        value.configured = true;
-        value.signed_in = true;
-        value.status_code = "synced".into();
-        value.status = "Đã đồng bộ 12 mục.".into();
+        let mut value = cloud::CloudUiState {
+            configured: true,
+            signed_in: true,
+            status_code: "synced".into(),
+            status: "Đã đồng bộ 12 mục.".into(),
+            ..Default::default()
+        };
         apply_cloud_status(&mut value);
         assert_eq!(value.status_code, "synced");
         assert_eq!(value.status, "Đã đồng bộ 12 mục.");
