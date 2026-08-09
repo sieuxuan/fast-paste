@@ -412,6 +412,7 @@ fn update_history_item(
 
         refresh_cloud_state(&mut data.cloud);
         if data.cloud.configured && data.cloud.signed_in {
+            data.cloud.status_code = "syncing".into();
             data.cloud.status = "Đã sửa mục. Google Drive sẽ cập nhật sau vài giây.".to_string();
         }
 
@@ -518,6 +519,7 @@ async fn delete_history_item(
         mark_deleted_item(&mut data, &item);
         refresh_cloud_state(&mut data.cloud);
         if data.cloud.configured && data.cloud.signed_in {
+            data.cloud.status_code = "syncing".into();
             data.cloud.status = "Đã xóa mục. Google Drive sẽ cập nhật sau vài giây.".to_string();
         }
 
@@ -558,6 +560,7 @@ async fn clear_history(app: AppHandle, state: State<'_, AppState>) -> Result<(),
         });
         refresh_cloud_state(&mut data.cloud);
         if data.cloud.configured && data.cloud.signed_in {
+            data.cloud.status_code = "syncing".into();
             data.cloud.status =
                 "Đã xóa lịch sử chưa ghim. Google Drive sẽ cập nhật sau vài giây.".to_string();
         }
@@ -616,6 +619,7 @@ async fn delete_history_items(
         });
         refresh_cloud_state(&mut data.cloud);
         if data.cloud.configured && data.cloud.signed_in {
+            data.cloud.status_code = "syncing".into();
             data.cloud.status =
                 format!("Đã xóa {count} mục theo bộ lọc. Google Drive sẽ cập nhật sau vài giây.");
         }
@@ -656,6 +660,7 @@ fn undo_history_delete(app: AppHandle, state: State<'_, AppState>) -> Result<usi
         trim_history(&mut data.history);
         refresh_cloud_state(&mut data.cloud);
         if data.cloud.configured && data.cloud.signed_in {
+            data.cloud.status_code = "syncing".into();
             data.cloud.status =
                 "Đã hoàn tác xóa lịch sử. Google Drive sẽ cập nhật sau vài giây.".to_string();
         }
@@ -699,6 +704,7 @@ fn add_history_item(
         trim_history(&mut data.history);
         refresh_cloud_state(&mut data.cloud);
         if data.cloud.configured && data.cloud.signed_in {
+            data.cloud.status_code = "syncing".into();
             data.cloud.status =
                 "Đã thêm mục mới. Google Drive sẽ cập nhật sau vài giây.".to_string();
         }
@@ -764,6 +770,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
         let mut data = data_arc.lock().unwrap();
         refresh_cloud_state(&mut data.cloud);
         if !data.cloud.configured {
+            data.cloud.status_code = "notConfigured".into();
             data.cloud.status = "Chưa bật đồng bộ Google trong bản build này.".to_string();
             save_state();
             drop(data);
@@ -772,6 +779,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
         }
 
         data.cloud.syncing = true;
+        data.cloud.status_code = "syncing".into();
         data.cloud.status = "Đang mở đăng nhập Google...".to_string();
         save_state();
     }
@@ -785,6 +793,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
                 data.cloud.signed_in = true;
                 data.cloud.account_email = email;
                 data.cloud.syncing = false;
+                data.cloud.status_code = "syncing".into();
                 data.cloud.status = "Đã đăng nhập Google, đang đồng bộ...".to_string();
                 save_state();
             }
@@ -796,6 +805,7 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
             data.cloud.syncing = false;
             data.cloud.signed_in = cloud::is_signed_in();
             data.cloud.account_email = cloud::signed_in_email();
+            data.cloud.status_code = "syncError".into();
             data.cloud.status = format!("Đăng nhập Google lỗi: {error}");
             save_state();
             drop(data);
@@ -810,6 +820,7 @@ async fn google_sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<(
     {
         let mut data = state.0.lock().unwrap();
         data.cloud.syncing = false;
+        data.cloud.status_code = "syncing".into();
         data.cloud.status = "Đang thử đồng bộ lại Google Drive...".to_string();
         save_state();
     }
@@ -825,6 +836,7 @@ fn google_sign_out(app: AppHandle, state: State<'_, AppState>) {
     data.cloud.account_email = None;
     data.cloud.syncing = false;
     data.cloud.configured = cloud::is_configured();
+    data.cloud.status_code = "needsSignIn".into();
     data.cloud.status = "Đã đăng xuất Google Drive.".to_string();
     save_state();
     drop(data);
@@ -903,6 +915,7 @@ async fn sync_google_drive(
         refresh_cloud_state(&mut data.cloud);
 
         if !data.cloud.configured {
+            data.cloud.status_code = "notConfigured".into();
             data.cloud.status = "Chưa bật đồng bộ Google trong bản build này.".to_string();
             save_state();
             drop(data);
@@ -915,6 +928,7 @@ async fn sync_google_drive(
         }
 
         if !data.cloud.signed_in {
+            data.cloud.status_code = "needsSignIn".into();
             data.cloud.status = "Cần đăng nhập Google trước khi đồng bộ.".to_string();
             save_state();
             drop(data);
@@ -923,6 +937,7 @@ async fn sync_google_drive(
         }
 
         data.cloud.syncing = true;
+        data.cloud.status_code = "syncing".into();
         data.cloud.status = "Đang đồng bộ Google Drive...".to_string();
         save_state();
         (
@@ -952,6 +967,7 @@ async fn sync_google_drive(
                 data.cloud.signed_in = true;
                 data.cloud.account_email = cloud::signed_in_email();
                 data.cloud.last_sync_at = Some(chrono::Utc::now().timestamp_millis());
+                data.cloud.status_code = "synced".into();
                 data.cloud.status = format!(
                     "Tự đồng bộ Google Drive: {} mục, tải về {} mục mới.",
                     result.merged_count, inserted
@@ -969,6 +985,7 @@ async fn sync_google_drive(
             data.cloud.syncing = false;
             data.cloud.signed_in = cloud::is_signed_in();
             data.cloud.account_email = cloud::signed_in_email();
+            data.cloud.status_code = "syncError".into();
             data.cloud.status = format!("Đồng bộ Google lỗi: {error}");
             save_state();
             drop(data);

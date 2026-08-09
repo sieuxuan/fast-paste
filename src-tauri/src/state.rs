@@ -245,6 +245,7 @@ pub(crate) fn load_state() -> AppStateData {
                     // Never overwrite a vault that DPAPI cannot open (different
                     // Windows account, damaged file, or restored disk image).
                     VAULT_WRITABLE.store(false, Ordering::Release);
+                    data.cloud.status_code = "syncError".into();
                     data.cloud.status = format!("History vault cần khôi phục: {error}");
                     eprintln!("FastPaste: {error}");
                 }
@@ -291,6 +292,7 @@ pub(crate) fn load_state() -> AppStateData {
             .and_then(|sensitive| sensitive.hydrate(&mut data));
         if let Err(error) = loaded {
             VAULT_WRITABLE.store(false, Ordering::Release);
+            data.cloud.status_code = "syncError".into();
             data.cloud.status = format!("History vault cần khôi phục: {error}");
         }
     }
@@ -317,20 +319,25 @@ pub(crate) fn refresh_cloud_state(cloud_state: &mut cloud::CloudUiState) {
     cloud_state.signed_in = cloud::is_signed_in();
     cloud_state.account_email = cloud::signed_in_email();
 
+    apply_cloud_status(cloud_state);
+}
+
+fn apply_cloud_status(cloud_state: &mut cloud::CloudUiState) {
+    const RESULT_CODES: [&str; 3] = ["synced", "syncError", "syncing"];
     if !cloud_state.configured {
-        cloud_state.status = "Chưa bật đồng bộ Google trong bản build này.".to_string();
-    } else if cloud_state.signed_in {
-        if cloud_state.status.trim().is_empty()
-            || cloud_state.status.contains("chưa được bật")
-            || cloud_state.status.contains("Chưa cấu hình")
-        {
-            cloud_state.status = "Tự đồng bộ Google Drive đang bật.".to_string();
-        }
-    } else if cloud_state.status.trim().is_empty()
-        || cloud_state.status.contains("chưa được bật")
-        || cloud_state.status.contains("Chưa cấu hình")
-    {
-        cloud_state.status = "Đăng nhập Google để bật tự đồng bộ.".to_string();
+        cloud_state.status_code = "notConfigured".into();
+        cloud_state.status = "Chưa bật đồng bộ Google trong bản build này.".into();
+        return;
+    }
+    if RESULT_CODES.contains(&cloud_state.status_code.as_str()) {
+        return;
+    }
+    if cloud_state.signed_in {
+        cloud_state.status_code = "signedInIdle".into();
+        cloud_state.status = "Tự đồng bộ Google Drive đang bật.".into();
+    } else {
+        cloud_state.status_code = "needsSignIn".into();
+        cloud_state.status = "Đăng nhập Google để bật tự đồng bộ.".into();
     }
 }
 
@@ -411,6 +418,42 @@ mod coalesce_tests {
     #[test]
     fn emits_after_the_window_pass() {
         assert!(should_emit(1_000, 1_000 + BROADCAST_COALESCE_MS as i64));
+    }
+}
+
+#[cfg(test)]
+mod cloud_status_tests {
+    use super::*;
+
+    #[test]
+    fn unconfigured_build_reports_a_stable_code() {
+        let mut value = cloud::CloudUiState::default();
+        value.configured = false;
+        apply_cloud_status(&mut value);
+        assert_eq!(value.status_code, "notConfigured");
+    }
+
+    #[test]
+    fn signed_out_asks_for_sign_in_regardless_of_previous_text() {
+        let mut value = cloud::CloudUiState::default();
+        value.configured = true;
+        value.signed_in = false;
+        value.status_code.clear();
+        value.status = "arbitrary previous text".into();
+        apply_cloud_status(&mut value);
+        assert_eq!(value.status_code, "needsSignIn");
+    }
+
+    #[test]
+    fn fresh_sync_result_is_preserved() {
+        let mut value = cloud::CloudUiState::default();
+        value.configured = true;
+        value.signed_in = true;
+        value.status_code = "synced".into();
+        value.status = "Đã đồng bộ 12 mục.".into();
+        apply_cloud_status(&mut value);
+        assert_eq!(value.status_code, "synced");
+        assert_eq!(value.status, "Đã đồng bộ 12 mục.");
     }
 }
 

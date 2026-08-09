@@ -31,6 +31,8 @@ pub struct CloudUiState {
     pub syncing: bool,
     pub account_email: Option<String>,
     pub status: String,
+    #[serde(default, rename = "statusCode", alias = "status_code")]
+    pub status_code: String,
     pub last_sync_at: Option<i64>,
 }
 
@@ -46,6 +48,7 @@ impl Default for CloudUiState {
             } else {
                 "Chưa bật đồng bộ Google trong bản build này.".to_string()
             },
+            status_code: if is_configured() { "needsSignIn".into() } else { "notConfigured".into() },
             last_sync_at: None,
         }
     }

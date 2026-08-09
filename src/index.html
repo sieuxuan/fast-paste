@@ -1740,6 +1740,10 @@
         cloudBadgeAuto: 'Tự động',
         cloudBadgeReady: 'Sẵn sàng',
         cloudBadgeOff: 'Tắt',
+        notConfigured: 'Chưa bật đồng bộ Google trong bản build này.',
+        needsSignIn: 'Đăng nhập Google để bật tự đồng bộ.',
+        signedInIdle: 'Tự đồng bộ Google Drive đang bật.',
+        syncing: 'Đang đồng bộ Google Drive…',
         cloudSignInTitle: 'Đăng nhập Google',
         cloudNotConfiguredTitle: 'Chưa bật đồng bộ Google',
         cloudWaiting: 'Đang chờ trạng thái.',
@@ -1892,6 +1896,10 @@
         cloudBadgeAuto: 'Auto',
         cloudBadgeReady: 'Ready',
         cloudBadgeOff: 'Off',
+        notConfigured: 'Google sync is not enabled in this build.',
+        needsSignIn: 'Sign in with Google to enable auto-sync.',
+        signedInIdle: 'Google Drive auto-sync is on.',
+        syncing: 'Syncing with Google Drive…',
         cloudSignInTitle: 'Sign in with Google',
         cloudNotConfiguredTitle: 'Google sync is off',
         cloudWaiting: 'Waiting for status.',
@@ -2622,8 +2630,9 @@
       const configured = Boolean(cloud.configured);
       const signedIn = Boolean(cloud.signed_in);
       const syncing = Boolean(cloud.syncing);
-      const statusText = cloud.status || '';
-      const hasError = statusText.toLowerCase().includes('lỗi') || statusText.toLowerCase().includes('error') || statusText.toLowerCase().includes('cần đăng nhập');
+      const translatedStatus = I18N[state.language]?.[cloud.statusCode];
+      const statusText = (typeof translatedStatus === 'function' ? translatedStatus() : translatedStatus) || cloud.status || '';
+      const hasError = cloud.statusCode === 'syncError';
 
       els.cloudBadge.textContent = syncing
         ? t('cloudBadgeSyncing')
