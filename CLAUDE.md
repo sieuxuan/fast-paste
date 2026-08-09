@@ -59,7 +59,7 @@ It runs four concurrent async tasks:
 | Clipboard watcher | Dedicated OS thread checks `GetClipboardSequenceNumber` every 200ms and reads content only when it changes |
 | Setup | Registers global hotkey, system tray, close-to-tray behavior |
 
-**State** is a single `Arc<Mutex<AppStateData>>` containing settings, history (max 1,000 items; at most 50 inline binary payloads), IPs, and clients. `save_state()` marks it dirty; a writer flushes settings every 500ms and on exit. Sensitive history lives in DPAPI-encrypted `history.vault`.
+**State** is a single `Arc<Mutex<AppStateData>>` containing settings, history (max 1,000 items; at most 50 inline binary payloads and 64 MiB total), IPs, and clients. `save_state()` marks it dirty; a writer flushes settings every 500ms and on exit. Sensitive history lives in DPAPI-encrypted `history.vault`.
 
 **IPC** — JS calls these Rust commands via `invoke()`:
 - `save_hotkey(hotkey)` — re-registers global shortcut
