@@ -7,12 +7,14 @@ use crate::state::{save_state, AppStateData};
 
 pub(crate) const MAX_HISTORY_ITEMS: usize = 1_000;
 pub(crate) const MAX_INLINE_PAYLOADS: usize = 50;
+pub(crate) const MAX_INLINE_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DELETED_MARKERS: usize = 1_000;
 
 /// Giữ dữ liệu base64 cho các payload mới nhất; mục cũ vẫn giữ nhãn và
 /// thumbnail để vault không tăng vô hạn.
 pub(crate) fn trim_inline_payloads(history: &mut [HistoryItem]) -> bool {
     let mut kept = 0usize;
+    let mut kept_bytes = 0usize;
     let mut changed = false;
     for item in history.iter_mut() {
         let Some(payload) = item.payload.as_mut() else {
@@ -21,8 +23,12 @@ pub(crate) fn trim_inline_payloads(history: &mut [HistoryItem]) -> bool {
         if payload.data.is_empty() {
             continue;
         }
-        if kept < MAX_INLINE_PAYLOADS {
+        let payload_bytes = payload.encoded_size();
+        if kept < MAX_INLINE_PAYLOADS
+            && kept_bytes.saturating_add(payload_bytes) <= MAX_INLINE_PAYLOAD_BYTES
+        {
             kept += 1;
+            kept_bytes = kept_bytes.saturating_add(payload_bytes);
             continue;
         }
         payload.data.clear();

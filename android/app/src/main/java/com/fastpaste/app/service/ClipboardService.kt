@@ -64,6 +64,7 @@ class ClipboardService : Service() {
     internal val deletedHistoryStore by lazy { DeletedHistoryStore(applicationContext) }
     internal val encryptionStore by lazy { EncryptionStore(applicationContext) }
     internal val pairingStore by lazy { PairingStore(applicationContext) }
+    private val servicePrefs by lazy { getSharedPreferences("fastpaste_service", Context.MODE_PRIVATE) }
     internal val transferStore by lazy { EncryptedTransferStore(applicationContext) }
     internal val outgoingPayloads = ConcurrentHashMap<String, ClipboardPayload>()
     internal val incomingTransfers = ConcurrentHashMap<String, IncomingTransfer>()
@@ -107,7 +108,9 @@ class ClipboardService : Service() {
                 startForeground(NOTIFICATION_ID, buildNotification("Đang khôi phục kết nối…"))
                 ensureBackgroundDiscovery()
                 if (currentHost == null) {
-                    pairingStore.peers().firstOrNull()?.let { peer -> startSync(peer.host, peer.port) }
+                    servicePrefs.getString(KEY_ACTIVE_DESKTOP_ID, null)
+                        ?.let(pairingStore::peerForDesktopId)
+                        ?.let { peer -> startSync(peer.host, peer.port) }
                 }
             }
             ACTION_START_DISCOVERY -> {
@@ -131,6 +134,7 @@ class ClipboardService : Service() {
             }
             ACTION_STOP -> {
                 activeTarget.value = null
+                servicePrefs.edit().remove(KEY_ACTIVE_DESKTOP_ID).apply()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -154,6 +158,9 @@ class ClipboardService : Service() {
 
         currentHost = host
         currentPort = port
+        pairingStore.peerForHost(host)?.let { peer ->
+            servicePrefs.edit().putString(KEY_ACTIVE_DESKTOP_ID, peer.desktopId).apply()
+        }
         activeTarget.value = "$host:$port"
 
         // Cancel the previous client's collectors BEFORE disconnecting, so its
@@ -191,6 +198,9 @@ class ClipboardService : Service() {
                     connectionState.value = state
                     val status = when (state) {
                         ConnectionState.CONNECTED_SECURE -> {
+                            pairingStore.peerForHost(host)?.let { peer ->
+                                servicePrefs.edit().putString(KEY_ACTIVE_DESKTOP_ID, peer.desktopId).apply()
+                            }
                             stopBackgroundDiscovery()
                             sendHistorySync(client)
                             Log.d(TAG, "Connected; exchanging clipboard history")
@@ -483,6 +493,7 @@ class ClipboardService : Service() {
         internal val BINARY_MAGIC = "FPB3".toByteArray(Charsets.US_ASCII)
         internal const val ACK_TIMEOUT_MS = 2_500L
         internal const val MAX_TRANSFER_RETRIES = 5
+        private const val KEY_ACTIVE_DESKTOP_ID = "activeDesktopId"
         const val ACTION_START = "com.fastpaste.START"
         const val ACTION_STOP = "com.fastpaste.STOP"
         const val ACTION_COPY_HISTORY_ITEM = "com.fastpaste.COPY_HISTORY_ITEM"

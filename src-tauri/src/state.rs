@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::cloud;
@@ -20,6 +20,7 @@ const STATE_FLUSH_INTERVAL_MS: u64 = 500;
 static DIRTY: AtomicBool = AtomicBool::new(false);
 static STATE_READY: AtomicBool = AtomicBool::new(false);
 static FLUSH_LOCK: Mutex<()> = Mutex::new(());
+static STATE_READY_SIGNAL: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
 const BROADCAST_COALESCE_MS: u64 = 100;
 static LAST_BROADCAST_AT: AtomicI64 = AtomicI64::new(0);
 static TRAILING_BROADCAST_PENDING: AtomicBool = AtomicBool::new(false);
@@ -173,6 +174,8 @@ fn take_dirty() -> bool {
 
 pub(crate) fn spawn_state_writer(data: Arc<Mutex<AppStateData>>) {
     STATE_READY.store(true, Ordering::Release);
+    *STATE_READY_SIGNAL.0.lock().unwrap() = true;
+    STATE_READY_SIGNAL.1.notify_all();
     std::thread::Builder::new()
         .name("fastpaste-state-writer".into())
         .spawn(move || loop {
@@ -194,11 +197,12 @@ pub(crate) fn spawn_state_writer(data: Arc<Mutex<AppStateData>>) {
 }
 
 pub(crate) fn flush_on_exit(data: &Mutex<AppStateData>) {
-    for _ in 0..100 {
-        if STATE_READY.load(Ordering::Acquire) { break; }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+    if !STATE_READY.load(Ordering::Acquire) {
+        let mut ready = STATE_READY_SIGNAL.0.lock().unwrap();
+        while !*ready {
+            ready = STATE_READY_SIGNAL.1.wait(ready).unwrap();
+        }
     }
-    if !STATE_READY.load(Ordering::Acquire) { return; }
     let _flush = FLUSH_LOCK.lock().unwrap();
     let snapshot = {
         let mut live = data.lock().unwrap();
