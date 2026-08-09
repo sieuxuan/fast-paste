@@ -582,6 +582,14 @@
       line-height:1.55;
     }
     .empty strong { display:block; margin-bottom:4px; color:var(--tx); font-size:15px; }
+    .history-skeleton { display:flex; flex-direction:column; gap:8px; padding:12px; }
+    .skeleton-row { height:56px; border-radius:10px; background:var(--surface-2, #2a2a30); animation:fpSkeleton 1.2s ease-in-out infinite; }
+    .skeleton-row:nth-child(3) { animation-delay:.1s; }
+    .skeleton-row:nth-child(4) { animation-delay:.2s; }
+    .skeleton-row:nth-child(5) { animation-delay:.3s; }
+    @keyframes fpSkeleton { 0%, 100% { opacity:.35; } 50% { opacity:.7; } }
+    .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+    @media (prefers-reduced-motion: reduce) { .skeleton-row { animation:none; opacity:.5; } }
     .date-group { margin-bottom:18px; }
     .date-header {
       margin:0 0 9px;
@@ -1698,6 +1706,7 @@
         pinned: 'Đã ghim',
         untagged: 'Chưa gắn nhãn',
         noClipboardTitle: 'Chưa có dữ liệu clipboard',
+        loadingHistory: 'Đang tải lịch sử clipboard…',
         noClipboardDesc: 'Sao chép nội dung trên PC hoặc kết nối Android để bắt đầu.',
         noResultTitle: 'Không tìm thấy kết quả',
         noResultDesc: 'Thử từ khóa khác hoặc đổi bộ lọc nhãn.',
@@ -1844,6 +1853,7 @@
         pinned: 'Pinned',
         untagged: 'Untagged',
         noClipboardTitle: 'No clipboard data yet',
+        loadingHistory: 'Loading clipboard history…',
         noClipboardDesc: 'Copy something on PC or connect Android to begin.',
         noResultTitle: 'No results found',
         noResultDesc: 'Try another keyword or tag filter.',
@@ -1927,6 +1937,7 @@
     };
 
     const state = {
+      stateLoaded: false,
       data: null,
       language: localStorage.getItem('fp-language') === 'en' ? 'en' : 'vi',
       activePanel: 'history',
@@ -2506,7 +2517,9 @@
       const shouldKeepScroll = previousScrollTop > 8;
 
       if (!allItems.length) {
-        els.historyContainer.innerHTML = `<div class="empty"><div><strong>${escapeHtml(t('noClipboardTitle'))}</strong><span>${escapeHtml(t('noClipboardDesc'))}</span></div></div>`;
+        els.historyContainer.innerHTML = state.stateLoaded
+          ? `<div class="empty"><div><strong>${escapeHtml(t('noClipboardTitle'))}</strong><span>${escapeHtml(t('noClipboardDesc'))}</span></div></div>`
+          : `<div class="history-skeleton" aria-busy="true" aria-live="polite"><span class="sr-only">${escapeHtml(t('loadingHistory'))}</span>${'<div class="skeleton-row"></div>'.repeat(5)}</div>`;
         return;
       }
 
@@ -3643,6 +3656,10 @@
     listen('update_transfers', event => {
       if (state.data) state.data.transfers = event.payload || [];
       renderTransfers();
+    });
+    listen('state_loaded', () => {
+      state.stateLoaded = true;
+      render({ forceHistory: true });
     });
     listen('edit_history_item', event => {
       openEditor(event.payload);

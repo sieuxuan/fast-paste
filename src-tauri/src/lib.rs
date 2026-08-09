@@ -1222,6 +1222,7 @@ pub fn run() {
                     }
 
                     broadcast_state(&load_handle);
+                    let _ = load_handle.emit("state_loaded", ());
                     state::hydrate_icons_later(&load_data);
                     broadcast_state(&load_handle);
 
