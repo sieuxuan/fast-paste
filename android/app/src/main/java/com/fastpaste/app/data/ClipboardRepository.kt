@@ -44,7 +44,7 @@ class ClipboardRepository(private val dao: ClipboardDao) {
                     htmlContent = payload?.html.orEmpty(),
                     payloadData = payload?.data.orEmpty(),
                     thumbnail = payload?.thumbnail.orEmpty(),
-                    filesJson = payload?.filesJson().orEmpty().ifBlank { "[]" },
+                    filesJson = "[]",
                     blobId = blobId.ifBlank {
                         payload?.takeIf { it.kind != ClipboardPayload.KIND_TEXT }?.fingerprint().orEmpty()
                     },
@@ -97,7 +97,7 @@ class ClipboardRepository(private val dao: ClipboardDao) {
             existing.htmlContent != nextPayload.html ||
             existing.payloadData != nextPayload.data ||
             existing.thumbnail != nextPayload.thumbnail ||
-            existing.filesJson != nextPayload.filesJson() ||
+            existing.filesJson != "[]" ||
             existing.blobId != nextBlobId ||
             existing.blobSize != nextBlobSize ||
             existing.blobReady != nextBlobReady
@@ -117,7 +117,7 @@ class ClipboardRepository(private val dao: ClipboardDao) {
                 htmlContent = nextPayload.html,
                 payloadData = nextPayload.data,
                 thumbnail = nextPayload.thumbnail,
-                filesJson = nextPayload.filesJson(),
+                filesJson = "[]",
                 blobId = nextBlobId,
                 blobSize = nextBlobSize,
                 blobReady = nextBlobReady

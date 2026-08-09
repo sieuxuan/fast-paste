@@ -100,6 +100,7 @@ dependencies {
 
     debugImplementation(libs.compose.ui.tooling)
     testImplementation(libs.junit)
+    testImplementation("org.json:json:20240303")
 }
 
 val localSigning = Properties().apply {

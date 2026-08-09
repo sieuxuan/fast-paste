@@ -1323,7 +1323,6 @@ private fun EditHistoryDialog(
                     SourceBadge(
                         text = when (entry.payloadType) {
                             "image" -> "Ảnh · sửa chú thích, giữ nguyên dữ liệu"
-                            "files" -> "Tệp · sửa chú thích, giữ nguyên dữ liệu"
                             "html" -> "Rich text"
                             else -> entry.payloadType
                         },
@@ -1333,7 +1332,7 @@ private fun EditHistoryDialog(
                 OutlinedTextField(
                     value = content,
                     onValueChange = { content = it },
-                    label = { Text(if (entry.payloadType in setOf("image", "files")) "Chú thích" else "Nội dung") },
+                    label = { Text(if (entry.payloadType == "image") "Chú thích" else "Nội dung") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(180.dp),
@@ -1439,7 +1438,6 @@ private fun HistoryItem(
                         SourceBadge(
                             text = when (entry.payloadType) {
                                 "image" -> "Ảnh"
-                                "files" -> "File"
                                 "html" -> "Rich text"
                                 else -> entry.payloadType
                             },

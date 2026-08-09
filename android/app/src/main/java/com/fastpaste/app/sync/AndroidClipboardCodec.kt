@@ -2,15 +2,12 @@ package com.fastpaste.app.sync
 
 import android.content.ClipData
 import android.content.Context
-import android.database.Cursor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.provider.OpenableColumns
 import android.text.Html
 import android.text.Spanned
 import androidx.core.content.FileProvider
-import com.fastpaste.app.data.ClipboardFilePayload
 import com.fastpaste.app.data.ClipboardPayload
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -61,8 +58,7 @@ object AndroidClipboardCodec {
                 payload.html.ifBlank { payload.text }
             )
 
-            ClipboardPayload.KIND_IMAGE,
-            ClipboardPayload.KIND_FILES -> writeFiles(context, payload)
+            ClipboardPayload.KIND_IMAGE -> writeImage(context, payload)
 
             else -> ClipData.newPlainText("Fast Paste", payload.text)
         }
@@ -70,83 +66,35 @@ object AndroidClipboardCodec {
 
     private fun readUris(context: Context, uris: List<Uri>): ClipboardPayload? {
         val resolver = context.contentResolver
-        var totalBytes = 0
-        val files = mutableListOf<ClipboardFilePayload>()
-        for (uri in uris.take(MAX_FILES)) {
-            val bytes = resolver.openInputStream(uri)?.use { input ->
-                readLimited(input, ClipboardPayload.MAX_PAYLOAD_BYTES - totalBytes)
-            } ?: continue
-            totalBytes += bytes.size
-            if (totalBytes > ClipboardPayload.MAX_PAYLOAD_BYTES) return null
-            val mime = resolver.getType(uri).orEmpty().ifBlank { "application/octet-stream" }
-            files += ClipboardFilePayload(
-                name = displayName(context, uri),
-                mime = mime,
-                data = ClipboardPayload.encode(bytes)
-            )
-        }
-        if (files.isEmpty()) return null
-
-        if (files.size == 1 && files[0].mime.startsWith("image/")) {
-            val file = files[0]
-            val hash = sha256(ClipboardPayload.decode(file.data)).take(8)
-            return ClipboardPayload(
-                kind = ClipboardPayload.KIND_IMAGE,
-                text = "[Hình ảnh · $hash]",
-                mimeType = file.mime,
-                data = file.data,
-                thumbnail = createImageThumbnail(ClipboardPayload.decode(file.data))
-            )
-        }
-
-        val names = files.joinToString(", ") { it.name }
-        val digestInput = files.joinToString("\u0000") { "${it.name}\u0000${it.data}" }
-        val hash = sha256(digestInput.toByteArray()).take(8)
+        // Copy file đã bị gỡ. Chỉ còn nhận một ảnh đơn từ clipboard.
+        val uri = uris.firstOrNull() ?: return null
+        val mime = resolver.getType(uri).orEmpty()
+        if (!mime.startsWith("image/")) return null
+        val bytes = resolver.openInputStream(uri)?.use { input ->
+            readLimited(input, ClipboardPayload.MAX_PAYLOAD_BYTES)
+        } ?: return null
+        val hash = sha256(bytes).take(8)
         return ClipboardPayload(
-            kind = ClipboardPayload.KIND_FILES,
-            text = "[${files.size} tệp · $names · $hash]",
-            mimeType = "application/octet-stream",
-            files = files
+            kind = ClipboardPayload.KIND_IMAGE,
+            text = "[Hình ảnh · $hash]",
+            mimeType = mime,
+            data = ClipboardPayload.encode(bytes),
+            thumbnail = createImageThumbnail(bytes)
         )
     }
 
-    private fun writeFiles(context: Context, payload: ClipboardPayload): ClipData {
-        val files = if (payload.kind == ClipboardPayload.KIND_IMAGE) {
-            listOf(
-                ClipboardFilePayload(
-                    name = "clipboard-image.${extensionForMime(payload.mimeType)}",
-                    mime = payload.mimeType.ifBlank { "image/png" },
-                    data = payload.data
-                )
-            )
-        } else {
-            payload.files
-        }
-        require(files.isNotEmpty()) { "Clipboard không có dữ liệu file." }
-
+    private fun writeImage(context: Context, payload: ClipboardPayload): ClipData {
         val root = File(context.cacheDir, "clipboard").also { it.mkdirs() }
         cleanupOldClipboardFiles(root)
-        val folder = File(root, payload.fingerprint())
-        folder.mkdirs()
-        val usedNames = mutableSetOf<String>()
-        val uris = files.mapIndexed { index, item ->
-            var fileName = sanitizeFileName(item.name, index)
-            if (!usedNames.add(fileName.lowercase())) {
-                fileName = "$index-$fileName"
-                usedNames.add(fileName.lowercase())
-            }
-            val target = File(folder, fileName)
-            target.writeBytes(ClipboardPayload.decode(item.data))
-            FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                target
-            )
-        }
-
-        return ClipData.newUri(context.contentResolver, "Fast Paste", uris.first()).also { clip ->
-            uris.drop(1).forEach { clip.addItem(ClipData.Item(it)) }
-        }
+        val folder = File(root, payload.fingerprint()).also { it.mkdirs() }
+        val target = File(folder, "clipboard-image.${extensionForMime(payload.mimeType)}")
+        target.writeBytes(ClipboardPayload.decode(payload.data))
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            target
+        )
+        return ClipData.newUri(context.contentResolver, "Fast Paste", uri)
     }
 
     private fun readLimited(input: InputStream, remaining: Int): ByteArray? {
@@ -160,32 +108,6 @@ object AndroidClipboardCodec {
             output.write(buffer, 0, read)
         }
         return output.toByteArray()
-    }
-
-    private fun displayName(context: Context, uri: Uri): String {
-        var cursor: Cursor? = null
-        return try {
-            cursor = context.contentResolver.query(
-                uri,
-                arrayOf(OpenableColumns.DISPLAY_NAME),
-                null,
-                null,
-                null
-            )
-            val column = cursor?.getColumnIndex(OpenableColumns.DISPLAY_NAME) ?: -1
-            if (column >= 0 && cursor?.moveToFirst() == true) {
-                cursor.getString(column).orEmpty().ifBlank { "clipboard-file" }
-            } else {
-                uri.lastPathSegment.orEmpty().ifBlank { "clipboard-file" }
-            }
-        } finally {
-            cursor?.close()
-        }
-    }
-
-    private fun sanitizeFileName(name: String, index: Int): String {
-        val clean = name.replace(Regex("[<>:\"/\\\\|?*]"), "_").take(180)
-        return clean.ifBlank { "clipboard-file-$index" }
     }
 
     private fun extensionForMime(mime: String): String = when (mime.lowercase()) {
@@ -233,7 +155,6 @@ object AndroidClipboardCodec {
         }
     }
 
-    private const val MAX_FILES = 16
     private const val MAX_CACHE_FOLDERS = 50
     private const val THUMBNAIL_EDGE = 256
 }

@@ -378,7 +378,6 @@ class ClipboardService : Service() {
         val sent = sendClipboardPayload(payload)
         val label = when (payload.kind) {
             ClipboardPayload.KIND_IMAGE -> "ảnh"
-            ClipboardPayload.KIND_FILES -> "tệp"
             ClipboardPayload.KIND_HTML -> "rich text"
             else -> "nội dung"
         }

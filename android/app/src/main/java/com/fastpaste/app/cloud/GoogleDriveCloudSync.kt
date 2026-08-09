@@ -66,7 +66,7 @@ class GoogleDriveCloudSync(
                     htmlContent = it.payload?.html.orEmpty(),
                     payloadData = it.payload?.data.orEmpty(),
                     thumbnail = it.payload?.thumbnail.orEmpty(),
-                    filesJson = it.payload?.filesJson().orEmpty().ifBlank { "[]" },
+                    filesJson = "[]",
                     blobId = it.blobId,
                     blobSize = it.blobSize,
                     blobReady = it.blobReady
@@ -284,7 +284,7 @@ class GoogleDriveCloudSync(
                 },
                 blobSize = item.optLong("blobSize", payload?.encodedSize() ?: 0L),
                 blobReady = if (payload != null && payload.kind != ClipboardPayload.KIND_TEXT) {
-                    payload.data.isNotBlank() || payload.files.any { it.data.isNotBlank() }
+                    payload.data.isNotBlank()
                 } else {
                     item.optBoolean("blobReady", true)
                 }
@@ -340,7 +340,7 @@ class GoogleDriveCloudSync(
 
     private fun CloudEntry.hasPayloadBody(): Boolean = payload
         ?.takeIf { it.kind != ClipboardPayload.KIND_TEXT }
-        ?.let { it.data.isNotBlank() || it.files.any { file -> file.data.isNotBlank() } }
+        ?.let { it.data.isNotBlank() }
         ?: false
 
     private fun manifestEntries(entries: List<CloudEntry>): List<CloudEntry> = entries.map { entry ->
