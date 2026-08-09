@@ -6,15 +6,6 @@ pub(crate) const MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 const MAX_THUMBNAIL_CHARS: usize = 512 * 1024;
 
 #[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct ClipboardFile {
-    pub(crate) name: String,
-    #[serde(default)]
-    pub(crate) mime: String,
-    #[serde(default)]
-    pub(crate) data: String,
-}
-
-#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ClipboardPayload {
     #[serde(default)]
     pub(crate) kind: String,
@@ -28,8 +19,6 @@ pub(crate) struct ClipboardPayload {
     pub(crate) data: String,
     #[serde(default)]
     pub(crate) thumbnail: String,
-    #[serde(default)]
-    pub(crate) files: Vec<ClipboardFile>,
 }
 
 impl ClipboardPayload {
@@ -53,7 +42,6 @@ impl ClipboardPayload {
             #[serde(rename = "mimeType")]
             mime_type: &'a str,
             data: &'a str,
-            files: &'a [ClipboardFile],
         }
         let bytes = serde_json::to_vec(&ClipboardIdentity {
             kind: &self.kind,
@@ -61,7 +49,6 @@ impl ClipboardPayload {
             html: &self.html,
             mime_type: &self.mime_type,
             data: &self.data,
-            files: &self.files,
         })
         .unwrap_or_else(|_| self.text.as_bytes().to_vec());
         format!("{:x}", Sha256::digest(bytes))
@@ -77,47 +64,32 @@ impl ClipboardPayload {
     }
 
     pub(crate) fn is_within_limit(&self) -> bool {
-        self.encoded_size() <= MAX_PAYLOAD_BYTES
-            && self.files.len() <= 16
-            && self.thumbnail.len() <= MAX_THUMBNAIL_CHARS
+        self.encoded_size() <= MAX_PAYLOAD_BYTES && self.thumbnail.len() <= MAX_THUMBNAIL_CHARS
     }
 
     pub(crate) fn encoded_size(&self) -> usize {
-        let encoded_bytes = |value: &str| {
-            let padding = if value.ends_with("==") {
-                2
-            } else if value.ends_with('=') {
-                1
-            } else {
-                0
-            };
-            (value.len() / 4).saturating_mul(3).saturating_sub(padding)
+        let padding = if self.data.ends_with("==") {
+            2
+        } else if self.data.ends_with('=') {
+            1
+        } else {
+            0
         };
-        let total = encoded_bytes(&self.data).saturating_add(
-            self.files
-                .iter()
-                .map(|file| encoded_bytes(&file.data))
-                .sum::<usize>(),
-        );
-        total
+        (self.data.len() / 4)
+            .saturating_mul(3)
+            .saturating_sub(padding)
     }
 
     pub(crate) fn sanitized_for_ui(&self) -> Self {
         let mut payload = self.clone();
         payload.data.clear();
-        for file in &mut payload.files {
-            file.data.clear();
-        }
         payload
     }
 }
 
 #[cfg(windows)]
 pub(crate) fn read_clipboard() -> Option<ClipboardPayload> {
-    read_files()
-        .or_else(read_image)
-        .or_else(read_html)
-        .or_else(read_text)
+    read_image().or_else(read_html).or_else(read_text)
 }
 
 #[cfg(not(windows))]
@@ -128,11 +100,10 @@ pub(crate) fn read_clipboard() -> Option<ClipboardPayload> {
 #[cfg(windows)]
 pub(crate) fn write_clipboard(payload: &ClipboardPayload) -> Result<(), String> {
     if !payload.is_within_limit() {
-        return Err("Clipboard đa định dạng vượt giới hạn 64 MB.".to_string());
+        return Err("Clipboard vượt giới hạn 64 MB.".to_string());
     }
     match payload.kind.as_str() {
         "image" => write_image(payload),
-        "files" => write_files(payload),
         "html" => write_html(payload),
         _ => arboard::Clipboard::new()
             .and_then(|mut clipboard| clipboard.set_text(payload.text.clone()))
@@ -211,163 +182,6 @@ fn write_image(payload: &ClipboardPayload) -> Result<(), String> {
             })
         })
         .map_err(|error| error.to_string())
-}
-
-#[cfg(windows)]
-fn read_files() -> Option<ClipboardPayload> {
-    use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
-    };
-    use windows_sys::Win32::System::Ole::CF_HDROP;
-    use windows_sys::Win32::UI::Shell::DragQueryFileW;
-
-    let paths = unsafe {
-        if IsClipboardFormatAvailable(CF_HDROP as u32) == 0
-            || OpenClipboard(std::ptr::null_mut()) == 0
-        {
-            return None;
-        }
-        let handle = GetClipboardData(CF_HDROP as u32);
-        if handle.is_null() {
-            CloseClipboard();
-            return None;
-        }
-        let count = DragQueryFileW(handle, u32::MAX, std::ptr::null_mut(), 0).min(16);
-        let mut paths = Vec::new();
-        for index in 0..count {
-            let len = DragQueryFileW(handle, index, std::ptr::null_mut(), 0);
-            let mut buffer = vec![0u16; len as usize + 1];
-            DragQueryFileW(handle, index, buffer.as_mut_ptr(), buffer.len() as u32);
-            paths.push(std::path::PathBuf::from(String::from_utf16_lossy(
-                &buffer[..len as usize],
-            )));
-        }
-        CloseClipboard();
-        paths
-    };
-
-    let mut files = Vec::new();
-    let mut total = 0usize;
-    for path in paths {
-        let Ok(bytes) = std::fs::read(&path) else {
-            continue;
-        };
-        total += bytes.len();
-        if total > MAX_PAYLOAD_BYTES {
-            break;
-        }
-        let Some(file_name) = path.file_name() else {
-            continue;
-        };
-        let name = file_name
-            .to_string_lossy()
-            .chars()
-            .take(180)
-            .collect::<String>();
-        files.push(ClipboardFile {
-            mime: mime_for_name(&name).to_string(),
-            name,
-            data: STANDARD.encode(bytes),
-        });
-    }
-    if files.is_empty() {
-        return None;
-    }
-    let names = files
-        .iter()
-        .map(|file| file.name.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let mut digest = Sha256::new();
-    for file in &files {
-        digest.update(file.name.as_bytes());
-        digest.update(file.data.as_bytes());
-    }
-    let hash = format!("{:x}", digest.finalize());
-    Some(ClipboardPayload {
-        kind: "files".to_string(),
-        text: format!("[{} tệp · {} · {}]", files.len(), names, &hash[..8]),
-        mime_type: "application/octet-stream".to_string(),
-        files,
-        ..ClipboardPayload::default()
-    })
-}
-
-#[cfg(windows)]
-fn write_files(payload: &ClipboardPayload) -> Result<(), String> {
-    use windows_sys::Win32::Foundation::GlobalFree;
-    use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
-    };
-    use windows_sys::Win32::System::Memory::{
-        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
-    };
-    use windows_sys::Win32::System::Ole::CF_HDROP;
-    use windows_sys::Win32::UI::Shell::DROPFILES;
-
-    let root = std::env::temp_dir()
-        .join("FastPaste")
-        .join("received")
-        .join(payload.fingerprint());
-    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
-    let mut paths = Vec::new();
-    for file in &payload.files {
-        let name = sanitize_file_name(&file.name);
-        let path = root.join(name);
-        let bytes = STANDARD
-            .decode(&file.data)
-            .map_err(|error| error.to_string())?;
-        std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
-        paths.push(path);
-    }
-    let mut wide = Vec::<u16>::new();
-    for path in &paths {
-        wide.extend(path.to_string_lossy().encode_utf16());
-        wide.push(0);
-    }
-    wide.push(0);
-    let header_size = std::mem::size_of::<DROPFILES>();
-    let byte_size = header_size + wide.len() * 2;
-    unsafe {
-        let memory = GlobalAlloc(GMEM_MOVEABLE, byte_size);
-        if memory.is_null() {
-            return Err("Không cấp phát được clipboard file.".to_string());
-        }
-        let pointer = GlobalLock(memory) as *mut u8;
-        if pointer.is_null() {
-            GlobalFree(memory);
-            return Err("Không khóa được clipboard file.".to_string());
-        }
-        let header = DROPFILES {
-            pFiles: header_size as u32,
-            pt: std::mem::zeroed(),
-            fNC: 0,
-            fWide: 1,
-        };
-        std::ptr::copy_nonoverlapping(
-            &header as *const DROPFILES as *const u8,
-            pointer,
-            header_size,
-        );
-        std::ptr::copy_nonoverlapping(
-            wide.as_ptr() as *const u8,
-            pointer.add(header_size),
-            wide.len() * 2,
-        );
-        GlobalUnlock(memory);
-        if OpenClipboard(std::ptr::null_mut()) == 0 {
-            GlobalFree(memory);
-            return Err("Clipboard đang bận.".to_string());
-        }
-        EmptyClipboard();
-        let result = SetClipboardData(CF_HDROP as u32, memory);
-        CloseClipboard();
-        if result.is_null() {
-            GlobalFree(memory);
-            return Err("Không ghi được danh sách file.".to_string());
-        }
-    }
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -519,46 +333,6 @@ fn build_cf_html(fragment: &str) -> Vec<u8> {
     format!("Version:1.0\r\nStartHTML:{start_html:010}\r\nEndHTML:{end_html:010}\r\nStartFragment:{start_fragment:010}\r\nEndFragment:{end_fragment:010}\r\n{body}\0").into_bytes()
 }
 
-fn sanitize_file_name(name: &str) -> String {
-    let clean = name
-        .chars()
-        .map(|character| {
-            if "<>:\"/\\|?*".contains(character) {
-                '_'
-            } else {
-                character
-            }
-        })
-        .collect::<String>();
-    if clean.trim().is_empty() {
-        "clipboard-file".to_string()
-    } else {
-        clean.chars().take(180).collect()
-    }
-}
-
-fn mime_for_name(name: &str) -> &'static str {
-    match std::path::Path::new(name)
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "pdf" => "application/pdf",
-        "json" => "application/json",
-        "txt" | "md" => "text/plain",
-        "html" | "htm" => "text/html",
-        "csv" => "text/csv",
-        "zip" => "application/zip",
-        _ => "application/octet-stream",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -601,15 +375,5 @@ mod tests {
         let mut other_codec_preview = payload.clone();
         other_codec_preview.thumbnail = "data:image/jpeg;base64,BBBB".to_string();
         assert_eq!(payload.fingerprint(), other_codec_preview.fingerprint());
-        assert_eq!(
-            payload.fingerprint(),
-            "8dcaf5bbd5246cc74a016dff65cc86f1d5fd39883f9cdff7df53a1eb1e4e7b9f"
-        );
-    }
-
-    #[test]
-    fn received_file_names_are_sanitized() {
-        assert_eq!(sanitize_file_name("a<b>:c?.txt"), "a_b__c_.txt");
-        assert_eq!(sanitize_file_name("   "), "clipboard-file");
     }
 }

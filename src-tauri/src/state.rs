@@ -130,6 +130,21 @@ pub(crate) struct TransferUiState {
 
 pub(crate) struct AppState(pub(crate) Arc<Mutex<AppStateData>>);
 
+pub(crate) fn empty_state() -> AppStateData {
+    AppStateData {
+        settings: default_settings(),
+        history: vec![],
+        ips: vec![],
+        clients: vec![],
+        deleted_markers: vec![],
+        clear_history_at: None,
+        app_icons: std::collections::HashMap::new(),
+        history_backup: None,
+        cloud: cloud::CloudUiState::default(),
+        transfers: vec![],
+    }
+}
+
 pub(crate) fn get_settings_path() -> std::path::PathBuf {
     std::env::current_exe()
         .map(|p| p.parent().unwrap().join("settings.json"))
@@ -220,28 +235,21 @@ pub(crate) fn load_state() -> AppStateData {
                 }
             }
             normalize_deleted_markers(&mut data);
+            let files_migrated = crate::history::drop_file_payloads(&mut data);
             let icons_changed = hydrate_running_app_icons(&mut data);
             refresh_cloud_state(&mut data.cloud);
             if VAULT_WRITABLE.load(Ordering::Acquire)
-                && (migrated_from_plaintext || settings_changed || icons_changed)
+                && (migrated_from_plaintext
+                    || settings_changed
+                    || icons_changed
+                    || files_migrated)
             {
                 save_state(&data);
             }
             return data;
         }
     }
-    let mut data = AppStateData {
-        settings: default_settings(),
-        history: vec![],
-        ips: vec![],
-        clients: vec![],
-        deleted_markers: vec![],
-        clear_history_at: None,
-        app_icons: std::collections::HashMap::new(),
-        history_backup: None,
-        cloud: cloud::CloudUiState::default(),
-        transfers: vec![],
-    };
+    let mut data = empty_state();
     let vault_path = get_history_vault_path();
     if vault_path.exists() || vault_path.with_extension("bak").exists() {
         let loaded = vault::read_protected(&vault_path)
@@ -254,6 +262,7 @@ pub(crate) fn load_state() -> AppStateData {
             data.cloud.status = format!("History vault cần khôi phục: {error}");
         }
     }
+    crate::history::drop_file_payloads(&mut data);
     if VAULT_WRITABLE.load(Ordering::Acquire) {
         save_state(&data);
     }

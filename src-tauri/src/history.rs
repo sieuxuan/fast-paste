@@ -8,6 +8,26 @@ use crate::state::{save_state, AppStateData};
 pub(crate) const MAX_HISTORY_ITEMS: usize = 1_000;
 const MAX_DELETED_MARKERS: usize = 1_000;
 
+/// Tính năng copy file đã bị gỡ. Mục cũ giữ lại nhãn text để người dùng
+/// vẫn thấy mình từng copy gì, nhưng dữ liệu nhị phân thì bỏ đi.
+pub(crate) fn drop_file_payloads(data: &mut AppStateData) -> bool {
+    let mut changed = false;
+    for item in &mut data.history {
+        let is_file_payload = item
+            .payload
+            .as_ref()
+            .is_some_and(|payload| payload.kind == "files");
+        if is_file_payload {
+            item.payload = None;
+            item.blob_id.clear();
+            item.blob_size = 0;
+            item.blob_ready = false;
+            changed = true;
+        }
+    }
+    changed
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct HistoryItem {
     pub(crate) id: String,
@@ -1063,4 +1083,54 @@ pub(crate) fn merge_cloud_entries_into_history(
         trim_history(&mut data.history);
     }
     (inserted, changed)
+}
+
+#[cfg(test)]
+mod history_maintenance_tests {
+    use super::*;
+    use crate::clipboard::ClipboardPayload;
+
+    fn state_with(items: Vec<HistoryItem>) -> AppStateData {
+        let mut data = crate::state::empty_state();
+        data.history = items;
+        data
+    }
+
+    #[test]
+    fn file_payloads_are_dropped_but_label_survives() {
+        let mut item = make_history_item("[2 tệp · a.txt, b.txt · abcd1234]", "PC");
+        item.payload = Some(ClipboardPayload {
+            kind: "files".into(),
+            text: "[2 tệp · a.txt, b.txt · abcd1234]".into(),
+            ..ClipboardPayload::default()
+        });
+        item.blob_id = "abcd".into();
+        item.blob_size = 4096;
+        item.blob_ready = true;
+        let mut data = state_with(vec![item]);
+
+        assert!(drop_file_payloads(&mut data));
+
+        let migrated = &data.history[0];
+        assert_eq!(migrated.text, "[2 tệp · a.txt, b.txt · abcd1234]");
+        assert!(migrated.payload.is_none());
+        assert!(migrated.blob_id.is_empty());
+        assert_eq!(migrated.blob_size, 0);
+        assert!(!migrated.blob_ready);
+    }
+
+    #[test]
+    fn image_payloads_are_left_alone() {
+        let mut item = make_history_item("[Hình ảnh 800×600 · deadbeef]", "PC");
+        item.payload = Some(ClipboardPayload {
+            kind: "image".into(),
+            text: "[Hình ảnh 800×600 · deadbeef]".into(),
+            data: "AAAA".into(),
+            ..ClipboardPayload::default()
+        });
+        let mut data = state_with(vec![item]);
+
+        assert!(!drop_file_payloads(&mut data));
+        assert!(data.history[0].payload.is_some());
+    }
 }

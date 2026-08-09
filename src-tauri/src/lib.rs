@@ -375,7 +375,7 @@ fn update_history_item(
             .retain(|existing| existing.id == item.id || existing.text != text || existing.pinned);
         item.text = text.clone();
         if let Some(payload) = &mut item.payload {
-            // For images/files this text is a caption/fallback. Keep the
+            // For images this text is a caption/fallback. Keep the
             // binary payload copyable instead of silently converting it to
             // plain text when the user edits its label.
             payload.text = text.clone();

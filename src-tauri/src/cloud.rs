@@ -557,7 +557,7 @@ fn normalize_blob_metadata(mut entry: CloudEntry) -> CloudEntry {
         if entry.blob_size == 0 {
             entry.blob_size = payload.encoded_size();
         }
-        entry.blob_ready = payload.data.len() > 0 || payload.files.iter().any(|file| !file.data.is_empty());
+        entry.blob_ready = !payload.data.is_empty();
     }
     entry
 }
@@ -592,8 +592,7 @@ async fn upload_missing_blobs(
     let mut uploaded = HashSet::new();
     for entry in entries {
         let Some(payload) = entry.payload.as_ref().filter(|payload| {
-            payload.kind != "text"
-                && (!payload.data.is_empty() || payload.files.iter().any(|file| !file.data.is_empty()))
+            payload.kind != "text" && !payload.data.is_empty()
         }) else {
             continue;
         };
@@ -895,7 +894,7 @@ pub(crate) fn cloud_entry_key(entry: &CloudEntry) -> String {
 fn payload_has_body(payload: Option<&ClipboardPayload>) -> bool {
     payload
         .filter(|payload| payload.kind != "text")
-        .map(|payload| !payload.data.is_empty() || payload.files.iter().any(|file| !file.data.is_empty()))
+        .map(|payload| !payload.data.is_empty())
         .unwrap_or(false)
 }
 
