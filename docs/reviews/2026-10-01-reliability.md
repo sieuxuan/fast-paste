@@ -21,6 +21,8 @@ Build and release results are recorded in the task response and GitHub Actions. 
 
 Local verification before release: 58 Rust tests and 17 Android tests pass; Android debug assembly and lint complete (0 errors, 44 warnings). JavaScript syntax and Git diff whitespace checks pass. Clippy completes with the two pre-existing constant-size `chunks_exact` suggestions.
 
+Published [v2.2.9](https://github.com/sieuxuan/fast-paste/releases/tag/v2.2.9) from commit `d19fefe7448147676913b59e715829e49183d64f`. [CI](https://github.com/sieuxuan/fast-paste/actions/runs/36855011339) and [Release](https://github.com/sieuxuan/fast-paste/actions/runs/36855412586) both succeeded. Windows portable metadata reports version 2.2.9; Android reports versionCode 229/versionName 2.2.9. APK signature verification passes and its certificate matches the published 2.2.7 release. SHA-256 hashes of all four published assets match the downloaded Actions artifacts; `SHA256SUMS.txt` is also available on the release.
+
 ## Further work requiring a separate design
 
 - Consistent revisions/tombstones for edits, pinning, folders, deletion and undo across both devices.

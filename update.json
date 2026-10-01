@@ -1,16 +1,16 @@
 {
-  "version": "2.2.7",
-  "releaseUrl": "https://github.com/sieuxuan/fast-paste/releases/tag/v2.2.7",
-  "notes": "Stabilizes Windows and Android clipboard sync with safer pairing, bounded memory use, faster state updates, more reliable reconnects, and improved Google Drive synchronization.",
+  "version": "2.2.9",
+  "releaseUrl": "https://github.com/sieuxuan/fast-paste/releases/tag/v2.2.9",
+  "notes": "Sửa đồng bộ ảnh hai chiều PC ↔ Android; tự dừng thông báo sau 2 phút mất kết nối; giảm RAM, lưu lịch sử an toàn và cải thiện đồng bộ Drive.",
   "desktop": {
-    "version": "2.2.7",
-    "downloadUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.7/FastPaste_2.2.7_x64-setup.exe",
-    "portableUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.7/FastPaste-Portable.exe",
-    "installerUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.7/FastPaste_2.2.7_x64-setup.exe"
+    "version": "2.2.9",
+    "downloadUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.9/FastPaste_2.2.9_x64-setup.exe",
+    "portableUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.9/FastPaste-Portable.exe",
+    "installerUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.9/FastPaste_2.2.9_x64-setup.exe"
   },
   "android": {
-    "versionName": "2.2.7",
-    "versionCode": 227,
-    "apkUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.7/FastPaste-Android.apk"
+    "versionName": "2.2.9",
+    "versionCode": 229,
+    "apkUrl": "https://github.com/sieuxuan/fast-paste/releases/download/v2.2.9/FastPaste-Android.apk"
   }
 }
