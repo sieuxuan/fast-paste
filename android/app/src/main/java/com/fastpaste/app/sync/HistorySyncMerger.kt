@@ -38,7 +38,10 @@ internal fun ClipboardService.sendHistorySync(client: WebSocketClient) {
         scope.launch {
             try {
                 val entries = dao.getRecentOnce(ClipboardService.MAX_HISTORY_ITEMS)
-                val seen = mutableSetOf<String>()
+                // A known item excluded by the delta cursor is still known.
+                // Re-stamping it as a fresh clip would overwrite the PC's
+                // newer clipboard on reconnect.
+                val seen = entries.mapTo(mutableSetOf()) { it.content }
                 val history = JSONArray()
                 val since = if (client.isSecure) client.remoteSyncCursor else 0L
                 entries.asSequence().filter { !client.isSecure || it.timestamp > since }.forEach { entry ->
@@ -68,10 +71,9 @@ internal fun ClipboardService.sendHistorySync(client: WebSocketClient) {
                     )
                 }
 
-                val currentPayload = AndroidClipboardCodec.read(
-                    this@sendHistorySync,
-                    clipboardManager.primaryClip
-                )
+                val currentPayload = runCatching {
+                    AndroidClipboardCodec.read(this@sendHistorySync, clipboardManager.primaryClip)
+                }.getOrNull()
                 val currentText = currentPayload?.text
                 if (
                     !currentText.isNullOrBlank() &&
@@ -114,10 +116,18 @@ internal fun ClipboardService.sendHistorySync(client: WebSocketClient) {
                     .put("type", if (client.isSecure) "history_delta" else "history_sync")
                     .put("version", if (client.isSecure) 2 else 1)
                     .put("since", since)
-                    .put("cursor", entries.maxOfOrNull { it.timestamp } ?: since)
+                    .put("cursor", (0 until history.length()).maxOfOrNull {
+                        history.getJSONObject(it).optLong("timestamp")
+                    } ?: since)
                     .put("entries", history)
                 if (client.isSecure) client.send(payload.toString())
                 else client.send(encryptionStore.protect(payload.toString()))
+                // A previous session may have saved metadata/cursor but lost
+                // the body. A zero-entry delta must still resume that image.
+                if (client.isSecure) {
+                    dao.getLatestOnce()?.takeIf { it.source == "REMOTE" && !it.blobReady && it.blobId.isNotBlank() }
+                        ?.let { requestBlob(it, applyToClipboard = true) }
+                }
                 ClipboardService.connectionEvents.tryEmit("Đã gửi ${history.length()} mục lịch sử sang PC")
             } catch (e: Exception) {
                 Log.e(ClipboardService.TAG, "History sync send failed: ${e.message}")
@@ -131,6 +141,7 @@ internal suspend fun ClipboardService.mergeHistorySync(entries: JSONArray, curso
         var newestIncomingPayload: ClipboardPayload? = null
         var newestIncomingTimestamp = 0L
         var newestIncomingReady = true
+        var newestIncomingBlobId = ""
         var inserted = 0
 
         for (i in 0 until entries.length()) {
@@ -158,6 +169,7 @@ internal suspend fun ClipboardService.mergeHistorySync(entries: JSONArray, curso
                 newestIncomingTimestamp = timestamp
                 newestIncomingPayload = incomingPayload
                 newestIncomingReady = blobReady
+                newestIncomingBlobId = blobId
             }
 
             val mergeResult = historyRepository.mergeEntry(
@@ -180,10 +192,14 @@ internal suspend fun ClipboardService.mergeHistorySync(entries: JSONArray, curso
         }
 
         val payloadToApply = newestIncomingPayload
-        if (newestIncomingTimestamp > latestLocalTimestamp && payloadToApply != null && newestIncomingReady) {
-            fingerprintGate.markApplied(payloadToApply.fingerprint())
-            withContext(Dispatchers.Main) {
-                clipboardManager.setPrimaryClip(AndroidClipboardCodec.write(this@mergeHistorySync, payloadToApply))
+        if (newestIncomingTimestamp > latestLocalTimestamp && payloadToApply != null) {
+            if (!newestIncomingReady && newestIncomingBlobId.isNotBlank()) {
+                dao.getByBlobId(newestIncomingBlobId)?.let { entry ->
+                    if (entry.blobReady) receiveClipboardPayload(ClipboardPayload.fromEntry(entry))
+                    else requestBlob(entry, applyToClipboard = true)
+                }
+            } else if (newestIncomingReady) {
+                receiveClipboardPayload(payloadToApply)
             }
         }
 

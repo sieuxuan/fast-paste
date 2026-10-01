@@ -14,6 +14,9 @@ class EncryptedTransferStore(context: Context) {
     private val secrets = SecureSecretStore(context.applicationContext)
 
     @Synchronized
+    fun cleanupOldTransfers() = cleanupTransferCache(root)
+
+    @Synchronized
     fun nextOffset(blobId: String): Long = chunkFiles(blobId).fold(0L) { expected, chunk ->
         if (chunk.offset != expected) return@fold expected
         expected + chunk.length

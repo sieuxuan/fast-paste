@@ -1,6 +1,11 @@
 package com.fastpaste.app.ui.screens
 
 import android.graphics.BitmapFactory
+import com.fastpaste.app.FastPasteApp
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import android.util.Base64
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
@@ -409,8 +414,14 @@ internal fun HistoryItem(
     }
 
     if (previewOpen && entry.payloadType == "image") {
-        val fullPreview = remember(entry.payloadData) {
-            decodeBase64Image(entry.payloadData) ?: thumbnail
+        val context = LocalContext.current.applicationContext
+        val fullPreview by produceState(initialValue = thumbnail, entry.id, entry.payloadData) {
+            value = withContext(Dispatchers.IO) {
+                val data = entry.payloadData.ifBlank {
+                    (context as FastPasteApp).database.clipboardDao().getById(entry.id)?.payloadData.orEmpty()
+                }
+                decodeBase64Image(data) ?: thumbnail
+            }
         }
         AlertDialog(
             onDismissRequest = { previewOpen = false },

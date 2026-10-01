@@ -40,13 +40,19 @@ internal suspend fun ClipboardService.handleBlobOffer(json: JSONObject) {
         val payloadJson = json.optJSONObject("payload") ?: return
         if (blobId.isBlank()) return
         val payload = ClipboardPayload.fromJson(payloadJson)
+        val content = json.optString("text", payload.text)
+        val blobSize = json.optLong("blobSize", 0L)
+        if (content.isBlank() || payload.kind == ClipboardPayload.KIND_TEXT ||
+            !payload.isWithinLimit() ||
+            blobSize !in 1L..ClipboardPayload.MAX_PAYLOAD_BYTES.toLong()
+        ) return
         historyRepository.mergeEntry(
-            content = json.optString("text", payload.text),
+            content = content,
             source = "REMOTE",
             timestamp = json.optLong("timestamp", System.currentTimeMillis()),
             payload = payload,
             blobId = blobId,
-            blobSize = json.optLong("blobSize", 0L),
+            blobSize = blobSize,
             blobReady = false
         )
         dao.getByBlobId(blobId)?.let { requestBlob(it, applyToClipboard = true) }
@@ -54,6 +60,7 @@ internal suspend fun ClipboardService.handleBlobOffer(json: JSONObject) {
 
 internal fun ClipboardService.requestBlob(entry: ClipboardEntry, applyToClipboard: Boolean) {
         if (entry.blobId.isBlank()) return
+        if (incomingTransfers.values.any { it.blobId == entry.blobId }) return
         val transferId = PairingStore.randomId()
         val transfer = ClipboardService.IncomingTransfer(transferId, entry.blobId, entry.id, applyToClipboard)
         incomingTransfers[transferId] = transfer
@@ -135,6 +142,10 @@ internal suspend fun ClipboardService.sendOutgoingBlobChunk(json: JSONObject) {
 
 internal suspend fun ClipboardService.handleIncomingBinaryChunk(frame: ByteArray) {
         val chunk = decodeBinaryChunk(frame) ?: return
+        if (chunk.total !in 1L..ClipboardService.MAX_TRANSFER_JSON_BYTES ||
+            chunk.offset < 0L || chunk.offset > chunk.total ||
+            chunk.data.isEmpty() || chunk.data.size.toLong() > chunk.total - chunk.offset
+        ) return
         val transfer = incomingTransfers[chunk.transferId] ?: return
         if (chunk.blobId != transfer.blobId) return
         val expectedOffset = transferStore.nextOffset(transfer.blobId)
@@ -144,6 +155,8 @@ internal suspend fun ClipboardService.handleIncomingBinaryChunk(frame: ByteArray
             sendBlobRequest(transfer, initial = false)
             return
         }
+        // A resume can change the advertised window; ACK that exact window.
+        transfer.windowSize = chunk.windowSize
         transferStore.append(transfer.blobId, chunk.offset, chunk.data)
         transfer.lastProgressAt = System.currentTimeMillis()
         transfer.chunksSinceAck++
@@ -181,8 +194,20 @@ internal suspend fun ClipboardService.completeIncomingBlob(
         total: Long,
         bytes: ByteArray
     ) {
-        val payload = ClipboardPayload.fromJson(JSONObject(bytes.toString(Charsets.UTF_8)))
-        require(payload.fingerprint() == transfer.blobId) { "Blob fingerprint không khớp metadata." }
+        val payload = runCatching {
+            ClipboardPayload.fromJson(JSONObject(bytes.toString(Charsets.UTF_8))).also {
+                require(it.isWithinLimit()) { "Ảnh vượt giới hạn clipboard." }
+                require(it.matchesFingerprint(transfer.blobId)) { "Dữ liệu ảnh không khớp; đang tải lại." }
+            }
+        }.getOrElse { error ->
+            transferStore.clear(transfer.blobId)
+            transfer.lastProgressAt = 0L
+            transfer.chunksSinceAck = 0
+            transfer.windowSize = 1
+            sendBlobRequest(transfer, initial = true)
+            ClipboardService.connectionEvents.tryEmit(error.message.orEmpty())
+            return
+        }
         val entry = dao.getById(transfer.entryId) ?: dao.getByBlobId(transfer.blobId) ?: return
         historyRepository.mergeEntry(
             content = entry.content, source = entry.source, sourceApp = entry.sourceApp,
@@ -191,9 +216,10 @@ internal suspend fun ClipboardService.completeIncomingBlob(
             blobId = transfer.blobId, blobSize = payload.encodedSize(), blobReady = true
         )
         if (transfer.applyToClipboard) {
+            val clip = AndroidClipboardCodec.write(this@completeIncomingBlob, payload)
             fingerprintGate.markApplied(payload.fingerprint())
             withContext(Dispatchers.Main) {
-                clipboardManager.setPrimaryClip(AndroidClipboardCodec.write(this@completeIncomingBlob, payload))
+                clipboardManager.setPrimaryClip(clip)
             }
         }
         incomingTransfers.remove(transferId)
@@ -213,16 +239,20 @@ internal suspend fun ClipboardService.handleIncomingBlobChunk(json: JSONObject) 
         if (json.optString("blobId") != transfer.blobId) return
         val expectedOffset = transferStore.nextOffset(transfer.blobId)
         val offset = json.optLong("offset", -1L)
+        val total = json.optLong("total", 0L)
+        if (total !in 1L..ClipboardService.MAX_TRANSFER_JSON_BYTES ||
+            offset < 0L || offset > total
+        ) return
         if (offset != expectedOffset) {
             transfer.lastProgressAt = 0L
             sendBlobRequest(transfer, initial = false)
             return
         }
         val chunk = runCatching { PairingStore.urlDecode(json.getString("data")) }.getOrNull() ?: return
+        if (chunk.isEmpty() || chunk.size.toLong() > total - offset) return
         transferStore.append(transfer.blobId, offset, chunk)
         transfer.lastProgressAt = System.currentTimeMillis()
         val nextOffset = transferStore.nextOffset(transfer.blobId)
-        val total = json.optLong("total", 0L)
         setTransferProgress(
             TransferProgress(transferId, transfer.blobId.take(12), nextOffset, total, "download", if (nextOffset >= total) "Đang kiểm tra" else "Đang tải")
         )
@@ -245,39 +275,7 @@ internal suspend fun ClipboardService.handleIncomingBlobChunk(json: JSONObject) 
             sendBlobRequest(transfer, initial = true)
             return
         }
-        val payload = ClipboardPayload.fromJson(JSONObject(bytes.toString(Charsets.UTF_8)))
-        require(payload.fingerprint() == transfer.blobId) { "Blob fingerprint không khớp metadata." }
-        val entry = dao.getById(transfer.entryId) ?: dao.getByBlobId(transfer.blobId) ?: return
-        historyRepository.mergeEntry(
-            content = entry.content,
-            source = entry.source,
-            sourceApp = entry.sourceApp,
-            sourceTitle = entry.sourceTitle,
-            sourceIcon = entry.sourceIcon,
-            timestamp = entry.timestamp,
-            pinned = entry.pinned,
-            folder = entry.folder,
-            promoteExisting = true,
-            payload = payload,
-            blobId = transfer.blobId,
-            blobSize = payload.encodedSize(),
-            blobReady = true
-        )
-        if (transfer.applyToClipboard) {
-            fingerprintGate.markApplied(payload.fingerprint())
-            withContext(Dispatchers.Main) {
-                clipboardManager.setPrimaryClip(AndroidClipboardCodec.write(this@handleIncomingBlobChunk, payload))
-            }
-        }
-        incomingTransfers.remove(transferId)
-        transferStore.clear(transfer.blobId)
-        sendBlobComplete(transferId, transfer.blobId)
-        setTransferProgress(TransferProgress(transferId, entry.content, total, total, "download", "Hoàn tất"))
-        ClipboardService.connectionEvents.tryEmit("Đã tải và xác thực blob ${transfer.blobId.take(12)}")
-        scope.launch {
-            delay(1_500)
-            ClipboardService.transferProgress.value = ClipboardService.transferProgress.value.filterNot { it.transferId == transferId }
-        }
+        completeIncomingBlob(transfer, transferId, total, bytes)
     }
 
 internal fun ClipboardService.sendBlobComplete(transferId: String, blobId: String) {
@@ -295,11 +293,11 @@ internal fun ClipboardService.sendBlobComplete(transferId: String, blobId: Strin
 internal fun ClipboardService.handleBlobComplete(json: JSONObject) {
         val transferId = json.optString("transferId")
         if (transferId.isBlank()) return
+        outgoingPayloads.remove(json.optString("blobId"))
         val previous = ClipboardService.transferProgress.value.firstOrNull { it.transferId == transferId }
         if (previous != null) {
             setTransferProgress(previous.copy(sentBytes = previous.totalBytes, status = "Hoàn tất"))
         }
-        json.optString("blobId").takeIf(String::isNotBlank)?.let(outgoingPayloads::remove)
         scope.launch {
             delay(1_500)
             ClipboardService.transferProgress.value = ClipboardService.transferProgress.value.filterNot { it.transferId == transferId }

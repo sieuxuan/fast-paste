@@ -6,7 +6,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [ClipboardEntry::class], version = 6, exportSchema = false)
+@Database(entities = [ClipboardEntry::class], version = 7, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun clipboardDao(): ClipboardDao
@@ -58,6 +58,15 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE clipboard_history ADD COLUMN blobId TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE clipboard_history ADD COLUMN blobSize INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE clipboard_history ADD COLUMN blobReady INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
+        internal val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_clipboard_history_blobId ON clipboard_history (blobId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_clipboard_history_content ON clipboard_history (content)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_clipboard_history_timestamp ON clipboard_history (timestamp)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_clipboard_history_pinned_timestamp ON clipboard_history (pinned, timestamp)")
             }
         }
     }

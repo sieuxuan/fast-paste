@@ -26,6 +26,7 @@ use state::*;
 
 const AUTOSTART_HIDDEN_ARG: &str = "--fastpaste-hidden";
 const CLOUD_SYNC_DEBOUNCE_MS: u64 = 3_000;
+const CLOUD_REMOTE_CHECK_MS: i64 = 120_000;
 static LAST_SYNCED_REVISION: AtomicU64 = AtomicU64::new(0);
 
 fn next_sync_deadline(first_request_at: i64, _now: i64) -> i64 {
@@ -107,7 +108,6 @@ fn save_autostart(
     app: AppHandle,
 ) -> Result<(), String> {
     let mut data = state.0.lock().unwrap();
-    data.settings.auto_start = autostart;
 
     let autostart_manager = app.autolaunch();
     if autostart {
@@ -121,6 +121,7 @@ fn save_autostart(
             .map_err(|error| format!("Không thể tắt tự khởi động: {error}"))?;
     }
 
+    data.settings.auto_start = autostart;
     save_state();
     drop(data);
     broadcast_state_now(&app);
@@ -228,6 +229,9 @@ fn set_e2ee_enabled(
 fn copy_text(text: String, app: AppHandle, state: State<'_, AppState>) {
     if app.clipboard().write_text(text.clone()).is_ok() {
         crate::clipboard::mark_self_write();
+        crate::watcher::store_latest_payload(crate::clipboard::ClipboardPayload::text(
+            text.clone(),
+        ));
     }
     let history_changed = {
         let mut data = state.0.lock().unwrap();
@@ -279,7 +283,8 @@ async fn copy_history_item(
         }
     }
     if let Some((blob_id, blob_size)) = pending_blob {
-        let request = crate::transfer::make_request(&blob_id);
+        let request = crate::transfer::make_request(&blob_id)
+            .map_err(|error| status::error("blobDownloadBusy", error))?;
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&request) {
             let mut data = state.0.lock().unwrap();
             data.transfers.retain(|item| {
@@ -325,12 +330,15 @@ async fn copy_history_item(
     let message = if let Some(payload) = payload {
         crate::clipboard::write_clipboard(&payload)
             .map_err(|error| status::error("clipboardWriteFailed", error))?;
-        payload.protocol_json()
+        crate::network::outgoing_clipboard_message(&payload)
     } else {
         app.clipboard()
             .write_text(text.clone())
             .map_err(|error| status::error("clipboardWriteFailed", error.to_string()))?;
         crate::clipboard::mark_self_write();
+        crate::watcher::store_latest_payload(crate::clipboard::ClipboardPayload::text(
+            text.clone(),
+        ));
         text
     };
     if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<Arc<String>>>() {
@@ -398,20 +406,16 @@ fn update_history_item(
             return Err("Không tìm thấy mục clipboard cần sửa.".to_string());
         };
 
-        let mut item = data.history.remove(index);
-        if item.text != text {
-            mark_deleted_item(&mut data, &item);
+        let mut item = data.history[index].clone();
+        edit_history_text(&mut item, &text)?;
+        if data.history[index].text != text {
+            let previous = data.history[index].clone();
+            mark_deleted_item(&mut data, &previous);
         }
+        data.history.remove(index);
 
         data.history
             .retain(|existing| existing.id == item.id || existing.text != text || existing.pinned);
-        item.text = text.clone();
-        if let Some(payload) = &mut item.payload {
-            // For images this text is a caption/fallback. Keep the
-            // binary payload copyable instead of silently converting it to
-            // plain text when the user edits its label.
-            payload.text = text.clone();
-        }
         item.folder = clean_folder_name(&folder);
         item.timestamp = chrono::Utc::now().to_rfc3339();
         item.source = "PC".to_string();
@@ -433,12 +437,15 @@ fn update_history_item(
     if copy_after_save {
         let message = if let Some(payload) = edited_payload {
             crate::clipboard::write_clipboard(&payload)?;
-            payload.protocol_json()
+            crate::network::outgoing_clipboard_message(&payload)
         } else {
             app.clipboard()
                 .write_text(text.clone())
                 .map_err(|error| error.to_string())?;
             crate::clipboard::mark_self_write();
+            crate::watcher::store_latest_payload(crate::clipboard::ClipboardPayload::text(
+                text.clone(),
+            ));
             text.clone()
         };
         if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<Arc<String>>>() {
@@ -723,6 +730,9 @@ fn add_history_item(
     if copy_after_save {
         if app.clipboard().write_text(text.clone()).is_ok() {
             crate::clipboard::mark_self_write();
+            crate::watcher::store_latest_payload(crate::clipboard::ClipboardPayload::text(
+                text.clone(),
+            ));
         }
         if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<Arc<String>>>() {
             let _ = tx.send(Arc::new(text));
@@ -774,9 +784,14 @@ fn open_update_url(app: AppHandle, url: String) -> Result<(), String> {
 #[tauri::command]
 async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let data_arc = state.0.clone();
+    let generation;
 
     {
         let mut data = data_arc.lock().unwrap();
+        if data.cloud.syncing {
+            return Ok(());
+        }
+        generation = cloud::auth_generation();
         refresh_cloud_state(&mut data.cloud);
         if !data.cloud.configured {
             data.cloud.status_code = "notConfigured".into();
@@ -794,10 +809,13 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
     }
     broadcast_state_now(&app);
 
-    match cloud::sign_in(&app).await {
+    match cloud::sign_in(&app, generation).await {
         Ok(email) => {
             {
                 let mut data = data_arc.lock().unwrap();
+                if cloud::auth_generation() != generation {
+                    return Ok(());
+                }
                 data.cloud.configured = cloud::is_configured();
                 data.cloud.signed_in = true;
                 data.cloud.account_email = email;
@@ -811,6 +829,9 @@ async fn google_sign_in(app: AppHandle, state: State<'_, AppState>) -> Result<()
         }
         Err(error) => {
             let mut data = data_arc.lock().unwrap();
+            if cloud::auth_generation() != generation {
+                return Ok(());
+            }
             data.cloud.syncing = false;
             data.cloud.signed_in = cloud::is_signed_in();
             data.cloud.account_email = cloud::signed_in_email();
@@ -830,7 +851,6 @@ async fn google_sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<(
     LAST_SYNCED_REVISION.store(0, Ordering::Release);
     {
         let mut data = state.0.lock().unwrap();
-        data.cloud.syncing = false;
         data.cloud.status_code = "syncing".into();
         data.cloud.status = "Đang thử đồng bộ lại Google Drive...".to_string();
         save_state();
@@ -921,7 +941,8 @@ async fn sync_google_drive(
     app: AppHandle,
     data_arc: Arc<Mutex<AppStateData>>,
 ) -> Result<(), String> {
-    let (entries, deleted_markers, clear_history_at, e2ee_enabled) = {
+    let generation = cloud::auth_generation();
+    let (entries, deleted_markers, clear_history_at, e2ee_enabled, requested_revision) = {
         let mut data = data_arc.lock().unwrap();
         refresh_cloud_state(&mut data.cloud);
 
@@ -949,7 +970,12 @@ async fn sync_google_drive(
 
         let revision =
             history_revision(&data.history, &data.deleted_markers, data.clear_history_at);
-        if revision != 0 && revision == LAST_SYNCED_REVISION.load(Ordering::Acquire) {
+        if !cloud_check_due(
+            revision,
+            LAST_SYNCED_REVISION.load(Ordering::Acquire),
+            chrono::Utc::now().timestamp_millis(),
+            data.cloud.last_sync_at,
+        ) {
             return Ok(());
         }
 
@@ -969,16 +995,28 @@ async fn sync_google_drive(
                 .collect::<Vec<_>>(),
             data.clear_history_at,
             data.settings.e2ee_enabled,
+            revision,
         )
     };
     broadcast_state(&app);
 
-    match cloud::sync_pruned(entries, deleted_markers, clear_history_at, e2ee_enabled).await {
+    match cloud::sync_pruned(
+        entries,
+        deleted_markers,
+        clear_history_at,
+        e2ee_enabled,
+        generation,
+    )
+    .await
+    {
         Ok(result) => {
-            let inserted = {
+            let needs_follow_up = {
                 let mut data = data_arc.lock().unwrap();
-                let (inserted, _history_changed) =
-                    merge_cloud_entries_into_history(&mut data, result.entries);
+                if cloud::auth_generation() != generation {
+                    return Ok(());
+                }
+                let (inserted, completed_revision, changed_during_upload) =
+                    finish_cloud_merge(&mut data, requested_revision, result.entries);
                 data.cloud.syncing = false;
                 data.cloud.configured = cloud::is_configured();
                 data.cloud.signed_in = true;
@@ -989,19 +1027,22 @@ async fn sync_google_drive(
                     "Tự đồng bộ Google Drive: {} mục, tải về {} mục mới.",
                     result.merged_count, inserted
                 );
-                let current_revision =
-                    history_revision(&data.history, &data.deleted_markers, data.clear_history_at);
-                LAST_SYNCED_REVISION.store(current_revision, Ordering::Release);
+                LAST_SYNCED_REVISION.store(completed_revision, Ordering::Release);
                 save_state();
-                inserted
+                changed_during_upload
             };
             broadcast_state(&app);
 
-            let _ = inserted;
+            if needs_follow_up {
+                queue_cloud_sync(&app);
+            }
             Ok(())
         }
         Err(error) => {
             let mut data = data_arc.lock().unwrap();
+            if cloud::auth_generation() != generation {
+                return Ok(());
+            }
             data.cloud.syncing = false;
             data.cloud.signed_in = cloud::is_signed_in();
             data.cloud.account_email = cloud::signed_in_email();
@@ -1013,6 +1054,31 @@ async fn sync_google_drive(
             Err(error)
         }
     }
+}
+
+fn cloud_check_due(revision: u64, synced_revision: u64, now: i64, last_sync: Option<i64>) -> bool {
+    revision == 0
+        || revision != synced_revision
+        || last_sync
+            .map(|at| now < at || now - at >= CLOUD_REMOTE_CHECK_MS)
+            .unwrap_or(true)
+}
+
+fn finish_cloud_merge(
+    data: &mut AppStateData,
+    requested_revision: u64,
+    entries: Vec<cloud::CloudEntry>,
+) -> (usize, u64, bool) {
+    let changed_during_upload =
+        history_revision(&data.history, &data.deleted_markers, data.clear_history_at)
+            != requested_revision;
+    let (inserted, _) = merge_cloud_entries_into_history(data, entries);
+    let completed_revision = if changed_during_upload {
+        0
+    } else {
+        history_revision(&data.history, &data.deleted_markers, data.clear_history_at)
+    };
+    (inserted, completed_revision, changed_during_upload)
 }
 
 fn install_loaded_state(current: &mut AppStateData, mut loaded: AppStateData) {
@@ -1162,6 +1228,30 @@ pub fn run() {
             let (cloud_sync_tx, mut cloud_sync_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
             app.manage(cloud_sync_tx.clone());
 
+            let maintenance_app = app.handle().clone();
+            let maintenance_data = data_arc.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    sleep(Duration::from_secs(60)).await;
+                    transfer::cleanup_stale_transfers();
+                    let ready = {
+                        let data = maintenance_data.lock().unwrap();
+                        data.cloud.configured
+                            && data.cloud.signed_in
+                            && !data.cloud.syncing
+                            && cloud_check_due(
+                                LAST_SYNCED_REVISION.load(Ordering::Acquire),
+                                LAST_SYNCED_REVISION.load(Ordering::Acquire),
+                                chrono::Utc::now().timestamp_millis(),
+                                data.cloud.last_sync_at,
+                            )
+                    };
+                    if ready {
+                        queue_cloud_sync(&maintenance_app);
+                    }
+                }
+            });
+
             let app_cloud = app.handle().clone();
             let data_cloud = data_arc.clone();
             tauri::async_runtime::spawn(async move {
@@ -1254,7 +1344,7 @@ pub fn run() {
                     // Writer chỉ bắt đầu sau khi vault thật đã vào bộ nhớ; nếu
                     // chạy sớm, một mutation lúc startup có thể ghi đè vault
                     // bằng state rỗng trước khi loader đọc xong.
-                    state::spawn_state_writer(load_data.clone());
+                    state::spawn_state_writer(load_data.clone(), load_handle.clone());
 
                     let hotkey_handle = load_handle.clone();
                     let hotkey_settings = settings.clone();
@@ -1323,6 +1413,38 @@ pub fn run() {
 #[cfg(test)]
 mod cloud_debounce_tests {
     use super::*;
+
+    #[test]
+    fn unchanged_local_history_still_checks_remote_periodically() {
+        assert!(!cloud_check_due(10, 10, 100_000, Some(99_000)));
+        assert!(cloud_check_due(10, 10, 220_000, Some(100_000)));
+        assert!(cloud_check_due(11, 10, 100_000, Some(99_000)));
+        assert!(cloud_check_due(10, 0, 100_000, Some(99_000)));
+        assert!(cloud_check_due(10, 10, 100_000, None));
+        assert!(cloud_check_due(10, 10, 99_000, Some(100_000)));
+    }
+
+    #[test]
+    fn copy_during_cloud_upload_is_kept_and_requires_another_sync() {
+        let mut data = state::empty_state();
+        data.history.push(make_history_item("uploaded", "PC"));
+        let revision = history_revision(&data.history, &[], None);
+        let remote = history_to_cloud_entries(&data.history);
+        data.history
+            .insert(0, make_history_item("copied while uploading", "PC"));
+        let (_, completed, pending) = finish_cloud_merge(&mut data, revision, remote);
+        assert!(pending);
+        assert_eq!(completed, 0);
+        assert!(data
+            .history
+            .iter()
+            .any(|item| item.text == "copied while uploading"));
+        let revision = history_revision(&data.history, &[], None);
+        let remote = history_to_cloud_entries(&data.history);
+        let (_, completed, pending) = finish_cloud_merge(&mut data, revision, remote);
+        assert!(!pending);
+        assert_eq!(completed, revision);
+    }
 
     #[test]
     fn deadline_is_fixed_from_the_first_request() {

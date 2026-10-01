@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::clipboard::ClipboardPayload;
 
@@ -11,6 +12,9 @@ pub(crate) const DEFAULT_WINDOW_SIZE: usize = 4;
 pub(crate) const MAX_WINDOW_SIZE: usize = 8;
 const BINARY_MAGIC: &[u8; 4] = b"FPB3";
 const MAX_TRANSFER_JSON_BYTES: usize = 96 * 1024 * 1024;
+const MAX_ACTIVE_TRANSFERS: usize = 4;
+const MAX_BUFFERED_BYTES: usize = 128 * 1024 * 1024;
+const TRANSFER_TTL: Duration = Duration::from_secs(120);
 
 #[derive(Deserialize)]
 pub(crate) struct BlobRequest {
@@ -49,6 +53,7 @@ struct InboundBlob {
     hash: String,
     chunks_since_ack: usize,
     window_size: usize,
+    last_progress: Instant,
 }
 
 pub(crate) struct ReceiveOutcome {
@@ -56,9 +61,11 @@ pub(crate) struct ReceiveOutcome {
     pub(crate) payload: Option<ClipboardPayload>,
 }
 
-pub(crate) fn make_request(blob_id: &str) -> String {
+pub(crate) fn make_request(blob_id: &str) -> Result<String, String> {
     let offset = {
         let mut map = inbound().lock().unwrap();
+        prune_inbound(&mut map, Instant::now());
+        check_slot(&map, blob_id)?;
         map.entry(blob_id.to_string())
             .or_insert_with(|| InboundBlob {
                 data: vec![],
@@ -66,11 +73,50 @@ pub(crate) fn make_request(blob_id: &str) -> String {
                 hash: String::new(),
                 chunks_since_ack: 0,
                 window_size: DEFAULT_WINDOW_SIZE,
+                last_progress: Instant::now(),
             })
             .data
             .len()
     };
-    make_resume_request(blob_id, &random_id(), offset)
+    Ok(make_resume_request(blob_id, &random_id(), offset))
+}
+
+fn prune_inbound(map: &mut HashMap<String, InboundBlob>, now: Instant) {
+    map.retain(|_, item| now.saturating_duration_since(item.last_progress) < TRANSFER_TTL);
+}
+
+fn check_slot(map: &HashMap<String, InboundBlob>, blob_id: &str) -> Result<(), String> {
+    if !map.contains_key(blob_id) && map.len() >= MAX_ACTIVE_TRANSFERS {
+        return Err("Đang tải nhiều ảnh; hãy thử lại khi ảnh trước hoàn tất.".into());
+    }
+    Ok(())
+}
+
+fn check_buffer(
+    map: &HashMap<String, InboundBlob>,
+    blob_id: &str,
+    offset: usize,
+    length: usize,
+) -> Result<(), String> {
+    let additional = match map.get(blob_id) {
+        Some(item) if offset != item.data.len() => 0,
+        _ => length,
+    };
+    let buffered = map
+        .values()
+        .fold(0usize, |size, item| size.saturating_add(item.data.len()));
+    if buffered.saturating_add(additional) > MAX_BUFFERED_BYTES {
+        return Err("Ảnh tải dở vượt giới hạn bộ nhớ; hãy thử lại sau.".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn cancel_transfer(blob_id: &str) {
+    inbound().lock().unwrap().remove(blob_id);
+}
+
+pub(crate) fn cleanup_stale_transfers() {
+    prune_inbound(&mut inbound().lock().unwrap(), Instant::now());
 }
 
 pub(crate) fn make_resume_request(blob_id: &str, transfer_id: &str, offset: usize) -> String {
@@ -164,13 +210,17 @@ pub(crate) fn serialized_size(payload: &ClipboardPayload) -> Result<usize, Strin
 }
 
 pub(crate) fn receive_chunk(chunk: BlobChunk) -> Result<ReceiveOutcome, String> {
-    if chunk.total > MAX_TRANSFER_JSON_BYTES || chunk.offset > chunk.total {
+    if chunk.total == 0 || chunk.total > MAX_TRANSFER_JSON_BYTES || chunk.offset > chunk.total {
         return Err("Kích thước blob không hợp lệ.".to_string());
     }
     let decoded = URL_SAFE_NO_PAD
         .decode(&chunk.data)
         .map_err(|_| "Chunk base64url không hợp lệ.".to_string())?;
+    validate_chunk_size(chunk.offset, chunk.total, decoded.len())?;
     let mut map = inbound().lock().unwrap();
+    prune_inbound(&mut map, Instant::now());
+    check_slot(&map, &chunk.blob_id)?;
+    check_buffer(&map, &chunk.blob_id, chunk.offset, decoded.len())?;
     let item = map
         .entry(chunk.blob_id.clone())
         .or_insert_with(|| InboundBlob {
@@ -179,6 +229,7 @@ pub(crate) fn receive_chunk(chunk: BlobChunk) -> Result<ReceiveOutcome, String> 
             hash: chunk.hash.clone(),
             chunks_since_ack: 0,
             window_size: 1,
+            last_progress: Instant::now(),
         });
     if item.total != chunk.total || item.hash != chunk.hash {
         item.data.clear();
@@ -190,6 +241,7 @@ pub(crate) fn receive_chunk(chunk: BlobChunk) -> Result<ReceiveOutcome, String> 
         // durable offset again so the sender can resume.
     } else if chunk.offset == item.data.len() {
         item.data.extend_from_slice(&decoded);
+        item.last_progress = Instant::now();
     } else {
         return Ok(ReceiveOutcome {
             control: Some(ack(&chunk.transfer_id, &chunk.blob_id, item.data.len(), 1)),
@@ -206,9 +258,15 @@ pub(crate) fn receive_chunk(chunk: BlobChunk) -> Result<ReceiveOutcome, String> 
         item.data.clear();
         return Err("SHA-256 của blob không khớp; transfer sẽ tải lại từ offset 0.".to_string());
     }
-    let payload: ClipboardPayload = serde_json::from_slice(&item.data)
-        .map_err(|error| format!("Payload blob không hợp lệ: {error}"))?;
-    if payload.fingerprint() != chunk.blob_id {
+    let payload: ClipboardPayload = match serde_json::from_slice(&item.data) {
+        Ok(payload) => payload,
+        Err(error) => {
+            item.data.clear();
+            return Err(format!("Payload blob không hợp lệ: {error}"));
+        }
+    };
+    if !payload.is_within_limit() || !payload.matches_fingerprint(&chunk.blob_id) {
+        item.data.clear();
         return Err("Fingerprint blob không khớp metadata.".to_string());
     }
     map.remove(&chunk.blob_id);
@@ -227,10 +285,11 @@ pub(crate) fn receive_chunk(chunk: BlobChunk) -> Result<ReceiveOutcome, String> 
 
 pub(crate) fn receive_binary_chunk(frame: &[u8]) -> Result<ReceiveOutcome, String> {
     let chunk = decode_binary_chunk(frame)?;
-    if chunk.total > MAX_TRANSFER_JSON_BYTES || chunk.offset > chunk.total {
-        return Err("Kích thước blob binary không hợp lệ.".to_string());
-    }
+    validate_chunk_size(chunk.offset, chunk.total, chunk.data.len())?;
     let mut map = inbound().lock().unwrap();
+    prune_inbound(&mut map, Instant::now());
+    check_slot(&map, &chunk.blob_id)?;
+    check_buffer(&map, &chunk.blob_id, chunk.offset, chunk.data.len())?;
     let item = map
         .entry(chunk.blob_id.clone())
         .or_insert_with(|| InboundBlob {
@@ -239,6 +298,7 @@ pub(crate) fn receive_binary_chunk(frame: &[u8]) -> Result<ReceiveOutcome, Strin
             hash: hex::encode(chunk.hash),
             chunks_since_ack: 0,
             window_size: chunk.window_size,
+            last_progress: Instant::now(),
         });
     if item.total != chunk.total || item.hash != hex::encode(chunk.hash) {
         item.data.clear();
@@ -270,6 +330,7 @@ pub(crate) fn receive_binary_chunk(frame: &[u8]) -> Result<ReceiveOutcome, Strin
         });
     }
     item.data.extend_from_slice(&chunk.data);
+    item.last_progress = Instant::now();
     item.chunks_since_ack += 1;
     if item.data.len() < item.total {
         let should_ack = item.chunks_since_ack >= item.window_size;
@@ -293,9 +354,17 @@ pub(crate) fn receive_binary_chunk(frame: &[u8]) -> Result<ReceiveOutcome, Strin
         item.chunks_since_ack = 0;
         return Err("SHA-256 của blob binary không khớp.".to_string());
     }
-    let payload: ClipboardPayload = serde_json::from_slice(&item.data)
-        .map_err(|error| format!("Payload blob binary không hợp lệ: {error}"))?;
-    if payload.fingerprint() != chunk.blob_id {
+    let payload: ClipboardPayload = match serde_json::from_slice(&item.data) {
+        Ok(payload) => payload,
+        Err(error) => {
+            item.data.clear();
+            item.chunks_since_ack = 0;
+            return Err(format!("Payload blob binary không hợp lệ: {error}"));
+        }
+    };
+    if !payload.is_within_limit() || !payload.matches_fingerprint(&chunk.blob_id) {
+        item.data.clear();
+        item.chunks_since_ack = 0;
         return Err("Fingerprint blob binary không khớp metadata.".to_string());
     }
     map.remove(&chunk.blob_id);
@@ -320,6 +389,18 @@ struct DecodedBinaryChunk {
     hash: [u8; 32],
     data: Vec<u8>,
     window_size: usize,
+}
+
+fn validate_chunk_size(offset: usize, total: usize, length: usize) -> Result<(), String> {
+    if total == 0
+        || total > MAX_TRANSFER_JSON_BYTES
+        || offset > total
+        || length == 0
+        || length > total - offset
+    {
+        return Err("Kích thước chunk vượt giới hạn blob.".to_string());
+    }
+    Ok(())
 }
 
 struct BinaryChunkMetadata<'a> {
@@ -414,6 +495,80 @@ fn random_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transfer_limits_keep_active_resume_and_release_stale_buffers() {
+        let now = Instant::now();
+        let mut map = HashMap::new();
+        for index in 0..MAX_ACTIVE_TRANSFERS {
+            map.insert(
+                index.to_string(),
+                InboundBlob {
+                    data: vec![1; 3],
+                    total: 10,
+                    hash: String::new(),
+                    chunks_since_ack: 0,
+                    window_size: 1,
+                    last_progress: now,
+                },
+            );
+        }
+        assert!(check_slot(&map, "another").is_err());
+        assert!(check_slot(&map, "0").is_ok());
+        assert!(check_buffer(&map, "0", 3, MAX_BUFFERED_BYTES).is_err());
+        assert!(check_buffer(&map, "0", 0, MAX_BUFFERED_BYTES).is_ok());
+        map.get_mut("0").unwrap().last_progress = now - TRANSFER_TTL;
+        prune_inbound(&mut map, now);
+        assert_eq!(map.len(), MAX_ACTIVE_TRANSFERS - 1);
+        assert!(check_slot(&map, "another").is_ok());
+    }
+
+    #[test]
+    fn rejects_chunks_outside_declared_size_before_buffering() {
+        for (offset, total, length) in [
+            (0, 0, 1),
+            (2, 1, 1),
+            (0, 1, 2),
+            (0, 1, 0),
+            (0, MAX_TRANSFER_JSON_BYTES + 1, 1),
+        ] {
+            assert!(validate_chunk_size(offset, total, length).is_err());
+        }
+        assert!(validate_chunk_size(2, 4, 2).is_ok());
+    }
+
+    #[test]
+    fn rejects_json_and_binary_oversized_chunks_without_creating_transfer() {
+        let blob_id = "invalid-size-audit-test";
+        let json_chunk = BlobChunk {
+            app: "fastpaste".into(),
+            kind: "blob_chunk".into(),
+            version: 2,
+            transfer_id: "audit".into(),
+            blob_id: blob_id.into(),
+            offset: 0,
+            total: 1,
+            hash: String::new(),
+            data: URL_SAFE_NO_PAD.encode([1, 2]),
+            eof: true,
+        };
+        assert!(receive_chunk(json_chunk).is_err());
+        let frame = encode_binary_chunk(
+            BinaryChunkMetadata {
+                transfer_id: "audit",
+                blob_id,
+                offset: 0,
+                total: 1,
+                hash: &[0; 32],
+                eof: true,
+                window_size: 1,
+            },
+            &[1, 2],
+        )
+        .unwrap();
+        assert!(receive_binary_chunk(&frame).is_err());
+        assert!(current_offset(blob_id).is_none());
+    }
 
     #[test]
     fn chunk_ack_resume_and_hash_verification() {

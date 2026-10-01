@@ -172,30 +172,59 @@ fn take_dirty() -> bool {
     DIRTY.swap(false, Ordering::AcqRel)
 }
 
-pub(crate) fn spawn_state_writer(data: Arc<Mutex<AppStateData>>) {
+pub(crate) fn spawn_state_writer(data: Arc<Mutex<AppStateData>>, app: AppHandle) {
     STATE_READY.store(true, Ordering::Release);
     *STATE_READY_SIGNAL.0.lock().unwrap() = true;
     STATE_READY_SIGNAL.1.notify_all();
     std::thread::Builder::new()
         .name("fastpaste-state-writer".into())
-        .spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_millis(STATE_FLUSH_INTERVAL_MS));
-            if !DIRTY.load(Ordering::Acquire) {
-                continue;
+        .spawn(move || {
+            let mut failed = false;
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(STATE_FLUSH_INTERVAL_MS));
+                if !DIRTY.load(Ordering::Acquire) {
+                    continue;
+                }
+                let _flush = FLUSH_LOCK.lock().unwrap();
+                if !take_dirty() {
+                    continue;
+                }
+                let snapshot = {
+                    let mut live = data.lock().unwrap();
+                    crate::history::trim_history(&mut live.history);
+                    crate::history::trim_inline_payloads(&mut live.history);
+                    live.clone()
+                };
+                let result = flush_state_now(&snapshot);
+                retain_failed_write(&DIRTY, &result);
+                if result.is_err() {
+                    if !failed {
+                        let _ = app.emit(
+                            "clipboard_status",
+                            crate::status::error(
+                                "historySaveFailed",
+                                "Chưa lưu được lịch sử; FastPaste đang tự thử lại.",
+                            ),
+                        );
+                    }
+                    failed = true;
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                } else if failed {
+                    failed = false;
+                    let _ = app.emit(
+                        "clipboard_status",
+                        crate::status::ok("historySaveRecovered", "Đã lưu lại lịch sử."),
+                    );
+                }
             }
-            let _flush = FLUSH_LOCK.lock().unwrap();
-            if !take_dirty() {
-                continue;
-            }
-            let snapshot = {
-                let mut live = data.lock().unwrap();
-                crate::history::trim_history(&mut live.history);
-                crate::history::trim_inline_payloads(&mut live.history);
-                live.clone()
-            };
-            flush_state_now(&snapshot);
         })
         .expect("không tạo được state writer thread");
+}
+
+fn retain_failed_write(dirty: &AtomicBool, result: &Result<(), String>) {
+    if result.is_err() {
+        dirty.store(true, Ordering::Release);
+    }
 }
 
 pub(crate) fn flush_on_exit(data: &Mutex<AppStateData>) {
@@ -213,7 +242,15 @@ pub(crate) fn flush_on_exit(data: &Mutex<AppStateData>) {
         live.clone()
     };
     DIRTY.store(false, Ordering::Release);
-    flush_state_now(&snapshot);
+    for attempt in 0..3 {
+        if flush_state_now(&snapshot).is_ok() {
+            return;
+        }
+        if attempt < 2 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+    save_state();
 }
 
 fn ui_snapshot(data: &AppStateData) -> AppStateData {
@@ -243,10 +280,9 @@ fn ui_snapshot(data: &AppStateData) -> AppStateData {
     }
 }
 
-pub(crate) fn flush_state_now(data: &AppStateData) {
+pub(crate) fn flush_state_now(data: &AppStateData) -> Result<(), String> {
     if !VAULT_WRITABLE.load(Ordering::Acquire) {
-        eprintln!("FastPaste: history vault đang bị khoá vì lần giải mã trước thất bại; không ghi đè dữ liệu.");
-        return;
+        return Err("History vault đang bị khoá; không ghi đè dữ liệu.".into());
     }
 
     let mut persisted = data.clone();
@@ -271,64 +307,64 @@ pub(crate) fn flush_state_now(data: &AppStateData) {
         let public_json = serde_json::to_vec(&persisted).map_err(|error| error.to_string())?;
         vault::write_atomic(&get_settings_path(), &public_json)
     })();
-    if let Err(error) = result {
+    if let Err(ref error) = result {
         eprintln!("FastPaste: không lưu được state an toàn: {error}");
     }
+    result
 }
 
 pub(crate) fn load_state() -> AppStateData {
-    if let Ok(json) = vault::read_with_backup(&get_settings_path()) {
-        if let Ok(mut data) = serde_json::from_slice::<AppStateData>(&json) {
-            let vault_path = get_history_vault_path();
-            let vault_present = vault_path.exists() || vault_path.with_extension("bak").exists();
-            let migrated_from_plaintext = !vault_present;
-            if vault_present {
-                let loaded = vault::read_protected(&vault_path)
-                    .and_then(|plain| {
-                        serde_json::from_slice::<SensitiveState>(&plain)
-                            .map_err(|error| error.to_string())
-                    })
-                    .and_then(|sensitive| sensitive.hydrate(&mut data));
-                if let Err(error) = loaded {
-                    // Never overwrite a vault that DPAPI cannot open (different
-                    // Windows account, damaged file, or restored disk image).
-                    VAULT_WRITABLE.store(false, Ordering::Release);
-                    data.cloud.status_code = "syncError".into();
-                    data.cloud.status = format!("History vault cần khôi phục: {error}");
-                    eprintln!("FastPaste: {error}");
-                }
+    if let Ok(mut data) = vault::read_json_with_backup::<AppStateData>(&get_settings_path()) {
+        let vault_path = get_history_vault_path();
+        let vault_present = vault_path.exists() || vault_path.with_extension("bak").exists();
+        let migrated_from_plaintext = !vault_present;
+        if vault_present {
+            let loaded = vault::read_protected(&vault_path)
+                .and_then(|plain| {
+                    serde_json::from_slice::<SensitiveState>(&plain)
+                        .map_err(|error| error.to_string())
+                })
+                .and_then(|sensitive| sensitive.hydrate(&mut data));
+            if let Err(error) = loaded {
+                // Never overwrite a vault that DPAPI cannot open (different
+                // Windows account, damaged file, or restored disk image).
+                VAULT_WRITABLE.store(false, Ordering::Release);
+                data.cloud.status_code = "syncError".into();
+                data.cloud.status = format!("History vault cần khôi phục: {error}");
+                eprintln!("FastPaste: {error}");
             }
-            data.clients.clear();
-            data.ips.clear();
-            data.cloud.syncing = false;
-            data.transfers.clear();
-            let mut settings_changed = normalize_settings(&mut data.settings);
-            if data.settings.e2ee_enabled {
-                match crypto::load_key() {
-                    Ok(key) => {
-                        let key_id = crypto::key_id(&key);
-                        if data.settings.e2ee_key_id != key_id {
-                            data.settings.e2ee_key_id = key_id;
-                            settings_changed = true;
-                        }
-                    }
-                    Err(_) => {
-                        data.settings.e2ee_enabled = false;
-                        data.settings.e2ee_key_id.clear();
+        }
+        data.clients.clear();
+        data.ips.clear();
+        data.cloud.syncing = false;
+        data.transfers.clear();
+        let mut settings_changed = normalize_settings(&mut data.settings);
+        if data.settings.e2ee_enabled {
+            match crypto::load_key() {
+                Ok(key) => {
+                    let key_id = crypto::key_id(&key);
+                    if data.settings.e2ee_key_id != key_id {
+                        data.settings.e2ee_key_id = key_id;
                         settings_changed = true;
                     }
                 }
+                Err(_) => {
+                    data.settings.e2ee_enabled = false;
+                    data.settings.e2ee_key_id.clear();
+                    settings_changed = true;
+                }
             }
-            normalize_deleted_markers(&mut data);
-            let files_migrated = crate::history::drop_file_payloads(&mut data);
-            refresh_cloud_state(&mut data.cloud);
-            if VAULT_WRITABLE.load(Ordering::Acquire)
-                && (migrated_from_plaintext || settings_changed || files_migrated)
-            {
-                flush_state_now(&data);
-            }
-            return data;
         }
+        normalize_deleted_markers(&mut data);
+        let files_migrated = crate::history::drop_file_payloads(&mut data);
+        refresh_cloud_state(&mut data.cloud);
+        if VAULT_WRITABLE.load(Ordering::Acquire)
+            && (migrated_from_plaintext || settings_changed || files_migrated)
+            && flush_state_now(&data).is_err()
+        {
+            save_state();
+        }
+        return data;
     }
     let mut data = empty_state();
     let vault_path = get_history_vault_path();
@@ -345,8 +381,8 @@ pub(crate) fn load_state() -> AppStateData {
         }
     }
     crate::history::drop_file_payloads(&mut data);
-    if VAULT_WRITABLE.load(Ordering::Acquire) {
-        flush_state_now(&data);
+    if VAULT_WRITABLE.load(Ordering::Acquire) && flush_state_now(&data).is_err() {
+        save_state();
     }
     data
 }
@@ -427,6 +463,18 @@ pub(crate) fn broadcast_transfers(app: &AppHandle) {
 #[cfg(test)]
 mod persistence_tests {
     use super::*;
+
+    #[test]
+    fn failed_write_retries_and_success_preserves_new_edits() {
+        let dirty = AtomicBool::new(false);
+        retain_failed_write(&dirty, &Err("disk busy".into()));
+        assert!(dirty.load(Ordering::Acquire));
+        retain_failed_write(&dirty, &Ok(()));
+        assert!(dirty.load(Ordering::Acquire));
+        dirty.store(false, Ordering::Release);
+        retain_failed_write(&dirty, &Ok(()));
+        assert!(!dirty.load(Ordering::Acquire));
+    }
 
     #[test]
     fn dirty_marker_is_consumed_once() {

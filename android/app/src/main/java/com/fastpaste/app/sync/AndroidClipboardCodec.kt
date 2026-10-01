@@ -70,25 +70,57 @@ object AndroidClipboardCodec {
         val uri = uris.firstOrNull() ?: return null
         val mime = resolver.getType(uri).orEmpty()
         if (!mime.startsWith("image/")) return null
-        val bytes = resolver.openInputStream(uri)?.use { input ->
+        var bytes = resolver.openInputStream(uri)?.use { input ->
             readLimited(input, ClipboardPayload.MAX_PAYLOAD_BYTES)
         } ?: return null
+        // Preserve the original caption/MIME after our own clipboard write.
+        // Otherwise reading the URI changes its fingerprint and sends it back.
+        if (uri.authority == "${context.packageName}.fileprovider") {
+            val identity = uri.pathSegments.getOrNull(1).orEmpty()
+            if (identity.matches(Regex("[a-f0-9]{64}"))) {
+                val metadata = File(context.cacheDir, "clipboard/$identity/metadata.json")
+                val original = runCatching {
+                    restoreClipboardImage(metadata.readText(), ClipboardPayload.encode(bytes), identity)
+                }.getOrNull()
+                if (original != null) return original
+            }
+        }
+        val wireMime = if (mime.lowercase() in setOf("image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "image/bmp")) {
+            mime
+        } else {
+            // Convert phone-only formats (such as HEIC) without user settings.
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            require(bounds.outWidth > 0 && bounds.outHeight > 0 &&
+                bounds.outWidth.toLong() * bounds.outHeight <= 32L * 1024 * 1024) {
+                "Không đọc được ảnh hoặc ảnh vượt 32 megapixel."
+            }
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+            val output = ByteArrayOutputStream()
+            try { bitmap.compress(Bitmap.CompressFormat.PNG, 100, output) }
+            finally { bitmap.recycle() }
+            bytes = output.toByteArray()
+            require(bytes.size <= ClipboardPayload.MAX_PAYLOAD_BYTES) { "Ảnh vượt giới hạn 64 MB." }
+            "image/png"
+        }
         val hash = sha256(bytes).take(8)
         return ClipboardPayload(
             kind = ClipboardPayload.KIND_IMAGE,
             text = "[Hình ảnh · $hash]",
-            mimeType = mime,
+            mimeType = wireMime,
             data = ClipboardPayload.encode(bytes),
             thumbnail = createImageThumbnail(bytes)
         )
     }
 
     private fun writeImage(context: Context, payload: ClipboardPayload): ClipData {
+        require(payload.data.isNotBlank() && payload.isWithinLimit()) { "Ảnh chưa tải xong." }
         val root = File(context.cacheDir, "clipboard").also { it.mkdirs() }
         cleanupOldClipboardFiles(root)
         val folder = File(root, payload.fingerprint()).also { it.mkdirs() }
         val target = File(folder, "clipboard-image.${extensionForMime(payload.mimeType)}")
         target.writeBytes(ClipboardPayload.decode(payload.data))
+        File(folder, "metadata.json").writeText(payload.metadataJson().toString())
         val uri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
@@ -98,7 +130,9 @@ object AndroidClipboardCodec {
     }
 
     private fun readLimited(input: InputStream, remaining: Int): ByteArray? {
-        if (remaining <= 0) return null
+        if (remaining <= 0) {
+            return null
+        }
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
         while (true) {
@@ -111,9 +145,10 @@ object AndroidClipboardCodec {
     }
 
     private fun extensionForMime(mime: String): String = when (mime.lowercase()) {
-        "image/jpeg" -> "jpg"
+        "image/jpeg", "image/jpg" -> "jpg"
         "image/gif" -> "gif"
         "image/webp" -> "webp"
+        "image/bmp" -> "bmp"
         else -> "png"
     }
 
@@ -130,7 +165,13 @@ object AndroidClipboardCodec {
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     private fun createImageThumbnail(bytes: ByteArray): String {
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return ""
+        // Decode a sampled preview, not a full-resolution phone photograph.
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        if (options.outWidth <= 0 || options.outHeight <= 0) return ""
+        options.inSampleSize = thumbnailSampleSize(options.outWidth, options.outHeight)
+        options.inJustDecodeBounds = false
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return ""
         val longest = maxOf(bitmap.width, bitmap.height).coerceAtLeast(1)
         val scale = minOf(1f, THUMBNAIL_EDGE.toFloat() / longest)
         val preview = if (scale < 1f) {

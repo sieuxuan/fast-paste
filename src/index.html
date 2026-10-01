@@ -1638,7 +1638,7 @@
     }
     const invoke = tauriApi.core.invoke;
     const listen = tauriApi.event.listen;
-    const APP_VERSION = '2.2.7';
+    const APP_VERSION = '2.2.9';
     const UPDATE_MANIFEST_URL = 'https://raw.githubusercontent.com/sieuxuan/fast-paste/master/update.json';
     const HISTORY_PAGE_SIZE = 160;
     const HISTORY_LOAD_AHEAD_PX = 420;
@@ -3696,6 +3696,7 @@
       if (state.data) state.data.transfers = event.payload || [];
       renderTransfers();
     });
+    listen('clipboard_status', event => showStatus(event.payload));
     listen('state_loaded', () => {
       state.stateLoaded = true;
       render({ forceHistory: true });

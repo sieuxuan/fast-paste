@@ -93,6 +93,28 @@ impl ClipboardPayload {
         .to_string()
     }
 
+    pub(crate) fn matches_fingerprint(&self, expected: &str) -> bool {
+        if self.fingerprint() == expected {
+            return true;
+        }
+        self.legacy_fingerprint() == expected
+    }
+
+    pub(crate) fn legacy_fingerprint(&self) -> String {
+        // Android's historical JSONStringer escaped every slash. Accept that
+        // identity when reading existing blobs, while all new IDs are canonical.
+        let legacy = format!(
+            "{{\"kind\":{},\"text\":{},\"html\":{},\"mimeType\":{},\"data\":{}}}",
+            serde_json::to_string(&self.kind).unwrap(),
+            serde_json::to_string(&self.text).unwrap(),
+            serde_json::to_string(&self.html).unwrap(),
+            serde_json::to_string(&self.mime_type).unwrap(),
+            serde_json::to_string(&self.data).unwrap()
+        )
+        .replace('/', "\\/");
+        format!("{:x}", Sha256::digest(legacy.as_bytes()))
+    }
+
     pub(crate) fn is_within_limit(&self) -> bool {
         self.encoded_size() <= MAX_PAYLOAD_BYTES && self.thumbnail.len() <= MAX_THUMBNAIL_CHARS
     }
@@ -132,7 +154,10 @@ impl ClipboardPayload {
 
 #[cfg(windows)]
 pub(crate) fn read_clipboard() -> Option<ClipboardPayload> {
-    read_image().or_else(read_html).or_else(read_text)
+    read_image()
+        .or_else(read_image_file)
+        .or_else(read_html)
+        .or_else(read_text)
 }
 
 #[cfg(not(windows))]
@@ -154,6 +179,7 @@ pub(crate) fn write_clipboard(payload: &ClipboardPayload) -> Result<(), String> 
     };
     if result.is_ok() {
         mark_self_write();
+        crate::watcher::store_latest_payload(payload.clone());
     }
     result
 }
@@ -209,6 +235,76 @@ fn image_thumbnail(image: &image::DynamicImage) -> Option<String> {
 }
 
 #[cfg(windows)]
+fn read_image_file() -> Option<ClipboardPayload> {
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, OpenClipboard,
+    };
+    use windows_sys::Win32::System::Ole::CF_HDROP;
+    use windows_sys::Win32::UI::Shell::DragQueryFileW;
+    // Explorer's Ctrl+C is a file list, not bitmap clipboard data.
+    let path = unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return None;
+        }
+        let handle = GetClipboardData(CF_HDROP as u32);
+        let result = if !handle.is_null()
+            && DragQueryFileW(handle, u32::MAX, std::ptr::null_mut(), 0) == 1
+        {
+            let length = DragQueryFileW(handle, 0, std::ptr::null_mut(), 0);
+            let mut path = vec![0u16; length as usize + 1];
+            let copied = DragQueryFileW(handle, 0, path.as_mut_ptr(), path.len() as u32);
+            (copied > 0).then(|| {
+                std::path::PathBuf::from(String::from_utf16_lossy(&path[..copied as usize]))
+            })
+        } else {
+            None
+        };
+        CloseClipboard();
+        result?
+    };
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    if !matches!(
+        extension.as_str(),
+        "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp"
+    ) {
+        return None;
+    }
+    let file = std::fs::File::open(path).ok()?;
+    if file.metadata().ok()?.len() > MAX_PAYLOAD_BYTES as u64 {
+        return None;
+    }
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    file.take(MAX_PAYLOAD_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    image_file_payload(&bytes)
+}
+
+#[cfg(windows)]
+fn image_file_payload(bytes: &[u8]) -> Option<ClipboardPayload> {
+    if bytes.len() > MAX_PAYLOAD_BYTES {
+        return None;
+    }
+    let format = image::guess_format(bytes).ok()?;
+    let image = decode_image(bytes).ok()?;
+    let hash = format!("{:x}", Sha256::digest(bytes));
+    Some(ClipboardPayload {
+        kind: "image".into(),
+        text: format!(
+            "[Hình ảnh {}×{} · {}]",
+            image.width(),
+            image.height(),
+            &hash[..8]
+        ),
+        mime_type: format.to_mime_type().into(),
+        data: STANDARD.encode(bytes),
+        thumbnail: image_thumbnail(&image).unwrap_or_default(),
+        ..Default::default()
+    })
+}
+
+#[cfg(windows)]
 fn write_image(payload: &ClipboardPayload) -> Result<(), String> {
     use arboard::ImageData;
     use std::borrow::Cow;
@@ -216,9 +312,7 @@ fn write_image(payload: &ClipboardPayload) -> Result<(), String> {
     let bytes = STANDARD
         .decode(&payload.data)
         .map_err(|error| format!("Dữ liệu ảnh lỗi: {error}"))?;
-    let rgba = image::load_from_memory(&bytes)
-        .map_err(|error| format!("Không đọc được ảnh: {error}"))?
-        .to_rgba8();
+    let rgba = decode_image(&bytes)?.to_rgba8();
     let (width, height) = rgba.dimensions();
     arboard::Clipboard::new()
         .and_then(|mut clipboard| {
@@ -229,6 +323,28 @@ fn write_image(payload: &ClipboardPayload) -> Result<(), String> {
             })
         })
         .map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+fn decode_image(bytes: &[u8]) -> Result<image::DynamicImage, String> {
+    use image::{ImageDecoder, ImageReader};
+    let mut reader = ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| format!("Không đọc được định dạng ảnh: {error}"))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(32_768);
+    limits.max_image_height = Some(32_768);
+    limits.max_alloc = Some(128 * 1024 * 1024);
+    reader.limits(limits);
+    let decoder = reader
+        .into_decoder()
+        .map_err(|error| format!("Không đọc được ảnh: {error}"))?;
+    let (width, height) = decoder.dimensions();
+    if u64::from(width) * u64::from(height) > 32 * 1024 * 1024 {
+        return Err("Ảnh vượt giới hạn 32 megapixel.".into());
+    }
+    image::DynamicImage::from_decoder(decoder)
+        .map_err(|error| format!("Không giải mã được ảnh: {error}"))
 }
 
 #[cfg(windows)]
@@ -383,6 +499,52 @@ fn build_cf_html(fragment: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn phone_image_formats_decode_and_explorer_files_keep_binary_content() {
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            3,
+            2,
+            image::Rgb([20, 90, 180]),
+        ));
+        for format in [
+            image::ImageFormat::Png,
+            image::ImageFormat::Jpeg,
+            image::ImageFormat::WebP,
+            image::ImageFormat::Gif,
+            image::ImageFormat::Bmp,
+        ] {
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image.write_to(&mut bytes, format).unwrap();
+            let decoded = decode_image(bytes.get_ref()).unwrap();
+            assert_eq!((decoded.width(), decoded.height()), (3, 2));
+            let payload = image_file_payload(bytes.get_ref()).unwrap();
+            assert_eq!(payload.mime_type, format.to_mime_type());
+            assert_eq!(STANDARD.decode(&payload.data).unwrap(), *bytes.get_ref());
+            assert!(!payload.thumbnail.is_empty());
+        }
+        assert!(decode_image(b"invalid-image").is_err());
+    }
+
+    #[test]
+    fn fingerprint_matches_android_vector_with_slashes_unicode_and_controls() {
+        let payload = ClipboardPayload {
+            kind: "image".into(),
+            text: "ảnh / 🙂\n\u{1}".into(),
+            mime_type: "image/png".into(),
+            data: "AA/A".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            payload.fingerprint(),
+            "3787d0ba5fa60929472e14a743397613c4ebc60d2c359859270a2858b463f961"
+        );
+        assert!(payload.matches_fingerprint(
+            "91cf4f3c682861451c4924f3a28415af1a41ccfadbfd2b2081d25a8530960a97"
+        ));
+        assert!(!payload.matches_fingerprint("invalid"));
+    }
 
     #[test]
     fn poller_skips_when_sequence_unchanged() {

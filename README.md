@@ -7,7 +7,9 @@
 - 🔗 **Real-time clipboard sync** between PC ↔ Android via WebSocket
 - ☁️ **Google Drive cloud sync** — sign in with Google and merge clipboard history through Drive app data
 - 🔍 **Auto-discovery** — Android automatically finds PC on the same network via UDP broadcast
-- 📋 **Clipboard history** — stores up to 500 recent items with timestamps
+- 📋 **Clipboard history** — syncs up to 1,000 recent items with timestamps and preserves pinned items
+- 🔐 **QR pairing** — authenticated, encrypted LAN sessions; optional passphrase encryption for Drive
+- 🖼️ **Images and rich text** — image previews and resumable transfers; PNG/JPEG/WebP/GIF/BMP and a single image copied in Explorer
 - ⌨️ **Global hotkey** — toggle visibility with a customizable shortcut (default: `Ctrl+Alt+Z`)
 - 🖥️ **System tray** — runs silently in the background, close-to-tray
 - ⚡ **Ultra-lightweight** — ~6 MB RAM idle, ~10 MB binary (vs. ~150 MB Electron)
@@ -25,6 +27,18 @@ Download page: https://github.com/sieuxuan/fast-paste/releases/latest
 The desktop and Android apps check `update.json` on the `master` branch to detect new versions.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
+### Copying images
+
+Update both Windows and Android to the same build. On Windows, copy an image
+from an app or select one image file in Explorer and press `Ctrl+C`. On Android,
+use **Share → FastPaste** from Gallery, or copy an image and reopen FastPaste.
+The newest image downloads automatically when the devices reconnect; tapping an
+image in history copies it again. General file transfer and multiple images per
+copy are not supported.
+
+Android 10+ only lets a focused app or the default keyboard read another app's
+clipboard. The Gallery share action avoids relying on a background read.
 
 ## Google Drive Sync
 
@@ -52,7 +66,7 @@ FASTPASTE_GOOGLE_DESKTOP_CLIENT_SECRET=...
 
 Or copy `google_oauth.example.json` to `google_oauth.json` next to `FastPaste.exe`.
 
-Android uses Google Play services authorization. After signing in, both desktop and Android merge the newest 500 unique clipboard items through auto-sync.
+Android uses Google Play services authorization. After signing in, both desktop and Android merge recent unique clipboard items through auto-sync. The sync budget is 1,000 items; pinned items are retained. Android's local database is not currently pruned to that budget.
 
 ## Architecture
 
@@ -94,12 +108,25 @@ npm run dev
 npm run build
 ```
 
-The portable executable will be at `src-tauri/target/release/FastPaste.exe`.
+The portable executable will be at `src-tauri/target/release/fast-paste.exe` (renamed to `FastPaste-Portable.exe` for releases).
+
+### Verification
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+gradle -p android testDebugUnitTest lintDebug assembleDebug
+```
+
+### Android background connection
+
+When discovery, pairing or reconnecting does not establish a secure connection within two minutes, the service stops and removes its notification. Retry from the app when needed. A secure background connection keeps the required foreground-service notification; use **Dừng đồng bộ** on the notification or **Ngắt/Dừng** in the app to stop it immediately.
+
+Android 10+ restricts clipboard reading to the focused app or default keyboard. Use Android's Share action or reopen FastPaste for outgoing clipboard sync; a foreground service alone does not bypass this restriction.
 
 ## Release A New Version
 
-1. Update versions in `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `android/app/build.gradle.kts`, and `update.json`.
-2. Commit and push to `master`.
+1. Update versions in `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, `src/index.html`, and `android/app/build.gradle.kts`.
+2. Run the verification commands, commit and push to `master`; confirm CI passes.
 3. Create and push a tag:
 
 ```bash
@@ -108,6 +135,7 @@ git push origin v2.2.0
 ```
 
 GitHub Actions will build and publish Windows + Android artifacts to the tagged release.
+After the release succeeds and its assets exist, update `update.json` with the published versions and download URLs, then commit and push the manifest. This avoids advertising downloads before they are available.
 
 ## Network Protocol
 

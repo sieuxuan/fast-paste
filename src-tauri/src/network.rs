@@ -382,9 +382,9 @@ async fn handle_client(
                     }
                     let mut history_changed = false;
                     if let Some(payload) = outcome.payload {
-                        let _ = apply_clipboard(payload.clone()).await;
+                        apply_received_clipboard(&app, payload.clone()).await;
                         let mut d = data.lock().unwrap();
-                        if history::promote_or_insert_payload(&mut d, &payload, "ANDROID") {
+                        if history::complete_downloaded_payload(&mut d, &payload) {
                             save_state();
                             history_changed = true;
                         }
@@ -453,6 +453,20 @@ async fn handle_client(
                             };
                             if let Some(payload) = history_payload {
                                 let _ = direct_tx.send(DirectMessage::App(payload));
+                            }
+                            let pending = data
+                                .lock()
+                                .unwrap()
+                                .history
+                                .first()
+                                .filter(|item| {
+                                    item.source == "ANDROID"
+                                        && !item.blob_ready
+                                        && !item.blob_id.is_empty()
+                                })
+                                .map(|item| item.blob_id.clone());
+                            if let Some(blob_id) = pending {
+                                request_blob_with_retry(&app, &direct_tx, &blob_id);
                             }
                         }
                     }
@@ -593,12 +607,11 @@ async fn handle_client(
                                 let _ = direct_tx.send(DirectMessage::App(control));
                             }
                             if let Some(payload) = outcome.payload {
-                                let _ = apply_clipboard(payload.clone()).await;
+                                apply_received_clipboard(&app, payload.clone()).await;
                                 let changed = {
                                     let mut d = data.lock().unwrap();
-                                    let changed = history::promote_or_insert_payload(
-                                        &mut d, &payload, "ANDROID",
-                                    );
+                                    let changed =
+                                        history::complete_downloaded_payload(&mut d, &payload);
                                     if changed {
                                         save_state();
                                     }
@@ -650,42 +663,7 @@ async fn handle_client(
                             blob_ready: false,
                         };
                         handle_history_sync(&app, &data, vec![entry]).await;
-                        let request = transfer::make_request(&blob_id);
-                        let transfer_id = serde_json::from_str::<serde_json::Value>(&request)
-                            .ok()
-                            .and_then(|item| {
-                                item.get("transferId")
-                                    .and_then(|value| value.as_str())
-                                    .map(str::to_string)
-                            })
-                            .unwrap_or_default();
-                        let _ = direct_tx.send(DirectMessage::App(request));
-                        let retry_tx = direct_tx.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let mut previous_offset =
-                                transfer::current_offset(&blob_id).unwrap_or(0);
-                            let mut retries = 0;
-                            loop {
-                                tokio::time::sleep(Duration::from_millis(2_500)).await;
-                                let Some(offset) = transfer::current_offset(&blob_id) else {
-                                    break;
-                                };
-                                if offset == previous_offset {
-                                    retries += 1;
-                                    if retries > 5 {
-                                        break;
-                                    }
-                                } else {
-                                    previous_offset = offset;
-                                    retries = 0;
-                                }
-                                let resume =
-                                    transfer::make_resume_request(&blob_id, &transfer_id, offset);
-                                if retry_tx.send(DirectMessage::App(resume)).is_err() {
-                                    break;
-                                }
-                            }
-                        });
+                        request_blob_with_retry(&app, &direct_tx, &blob_id);
                     }
                     continue;
                 }
@@ -708,13 +686,17 @@ async fn handle_client(
                         pairing::update_sync_cursor(&device_id, cursor);
                     }
                 }
-                handle_history_sync(&app, &data, protocol.entries.unwrap_or_default()).await;
+                if let Some(entry) =
+                    handle_history_sync(&app, &data, protocol.entries.unwrap_or_default()).await
+                {
+                    request_blob_with_retry(&app, &direct_tx, &entry.blob_id);
+                }
                 continue;
             }
             if protocol.app.as_deref() == Some("fastpaste") && protocol.kind == "clipboard_payload"
             {
                 if let Some(payload) = protocol.payload {
-                    let _ = apply_clipboard(payload.clone()).await;
+                    apply_received_clipboard(&app, payload.clone()).await;
                     let history_changed = {
                         let mut d = data.lock().unwrap();
                         let changed =
@@ -803,14 +785,25 @@ async fn apply_clipboard(payload: ClipboardPayload) -> Result<(), String> {
         .map_err(|error| format!("Clipboard worker lỗi: {error}"))?
 }
 
+async fn apply_received_clipboard(app: &AppHandle, payload: ClipboardPayload) {
+    if let Err(error) = apply_clipboard(payload).await {
+        eprintln!("Không ghi được clipboard nhận: {error}");
+        let _ = app.emit(
+            "clipboard_status",
+            crate::status::error("clipboardWriteFailed", error),
+        );
+    }
+}
+
 async fn apply_clipboard_text(app: AppHandle, text: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let result = app
             .clipboard()
-            .write_text(text)
+            .write_text(text.clone())
             .map_err(|error| error.to_string());
         if result.is_ok() {
             clipboard::mark_self_write();
+            crate::watcher::store_latest_payload(ClipboardPayload::text(text));
         }
         result
     })
@@ -842,7 +835,11 @@ fn protect_binary_for_client(
         .and_then(|cipher| cipher.encrypt_binary(&frame).ok())
 }
 
-async fn handle_history_sync(app: &AppHandle, data: &Mutex<AppStateData>, entries: Vec<SyncEntry>) {
+async fn handle_history_sync(
+    app: &AppHandle,
+    data: &Mutex<AppStateData>,
+    entries: Vec<SyncEntry>,
+) -> Option<SyncEntry> {
     let (newest_incoming, history_changed, latest_local_timestamp) = {
         let mut d = data.lock().unwrap();
         let result = history::merge_sync_entries(&mut d, entries);
@@ -852,10 +849,25 @@ async fn handle_history_sync(app: &AppHandle, data: &Mutex<AppStateData>, entrie
         result
     };
 
+    let mut pending = None;
     if let Some(entry) = newest_incoming {
         if entry.timestamp > latest_local_timestamp {
-            if let Some(payload) = entry.payload {
-                let _ = apply_clipboard(payload).await;
+            let cached_payload = if !entry.blob_ready && !entry.blob_id.is_empty() {
+                data.lock()
+                    .unwrap()
+                    .history
+                    .iter()
+                    .find(|item| item.blob_id == entry.blob_id && item.blob_ready)
+                    .and_then(|item| item.payload.clone())
+            } else {
+                None
+            };
+            if !entry.blob_ready && cached_payload.is_none() {
+                if !entry.blob_id.is_empty() {
+                    pending = Some(entry);
+                }
+            } else if let Some(payload) = cached_payload.or(entry.payload) {
+                apply_received_clipboard(app, payload).await;
             } else {
                 let _ = apply_clipboard_text(app.clone(), entry.text).await;
             }
@@ -865,6 +877,70 @@ async fn handle_history_sync(app: &AppHandle, data: &Mutex<AppStateData>, entrie
         broadcast_state(app);
         queue_cloud_sync(app);
     }
+    pending
+}
+
+fn request_blob_with_retry(
+    app: &AppHandle,
+    tx: &tokio::sync::mpsc::UnboundedSender<DirectMessage>,
+    blob_id: &str,
+) {
+    let request = match transfer::make_request(blob_id) {
+        Ok(request) => request,
+        Err(error) => {
+            let _ = app.emit(
+                "clipboard_status",
+                crate::status::error("blobDownloadBusy", error),
+            );
+            return;
+        }
+    };
+    let transfer_id = serde_json::from_str::<serde_json::Value>(&request)
+        .ok()
+        .and_then(|item| item["transferId"].as_str().map(str::to_owned))
+        .unwrap_or_default();
+    let _ = tx.send(DirectMessage::App(request));
+    let retry_tx = tx.clone();
+    let app = app.clone();
+    let blob_id = blob_id.to_owned();
+    tauri::async_runtime::spawn(async move {
+        let mut previous_offset = transfer::current_offset(&blob_id).unwrap_or(0);
+        let mut retries = 0;
+        loop {
+            tokio::time::sleep(Duration::from_millis(2_500)).await;
+            let Some(offset) = transfer::current_offset(&blob_id) else {
+                break;
+            };
+            if offset == previous_offset {
+                retries += 1;
+                if retries > 5 {
+                    transfer::cancel_transfer(&blob_id);
+                    let _ = app.emit(
+                        "clipboard_status",
+                        crate::status::error(
+                            "blobDownloadFailed",
+                            "Tải ảnh bị gián đoạn; chọn lại ảnh để thử tiếp.",
+                        ),
+                    );
+                    break;
+                }
+                if retry_tx
+                    .send(DirectMessage::App(transfer::make_resume_request(
+                        &blob_id,
+                        &transfer_id,
+                        offset,
+                    )))
+                    .is_err()
+                {
+                    transfer::cancel_transfer(&blob_id);
+                    break;
+                }
+            } else {
+                previous_offset = offset;
+                retries = 0;
+            }
+        }
+    });
 }
 
 #[cfg(test)]

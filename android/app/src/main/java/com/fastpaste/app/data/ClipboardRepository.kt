@@ -1,11 +1,16 @@
 package com.fastpaste.app.data
 
+import androidx.room.withTransaction
+
 data class HistoryMergeResult(
     val inserted: Boolean,
     val changed: Boolean
 )
 
-class ClipboardRepository(private val dao: ClipboardDao) {
+class ClipboardRepository(private val dao: ClipboardDao, private val database: AppDatabase? = null) {
+
+    private suspend fun <T> inTransaction(block: suspend () -> T): T =
+        if (database == null) block() else database.withTransaction { block() }
 
     suspend fun mergeEntry(
         content: String,
@@ -21,13 +26,16 @@ class ClipboardRepository(private val dao: ClipboardDao) {
         blobId: String = "",
         blobSize: Long = 0L,
         blobReady: Boolean = true
-    ): HistoryMergeResult {
+    ): HistoryMergeResult = inTransaction {
         if (content.isEmpty()) {
-            return HistoryMergeResult(inserted = false, changed = false)
+            return@inTransaction HistoryMergeResult(inserted = false, changed = false)
         }
 
         val cleanFolder = cleanFolderName(folder)
-        val existing = dao.getByContent(content)
+        val identity = blobId.ifBlank {
+            payload?.takeIf { it.kind != ClipboardPayload.KIND_TEXT }?.fingerprint().orEmpty()
+        }
+        val existing = if (identity.isBlank()) dao.getByContent(content) else dao.getByBlobId(identity)
         if (existing == null) {
             dao.insert(
                 ClipboardEntry(
@@ -52,7 +60,7 @@ class ClipboardRepository(private val dao: ClipboardDao) {
                     blobReady = blobReady
                 )
             )
-            return HistoryMergeResult(inserted = true, changed = true)
+            return@inTransaction HistoryMergeResult(inserted = true, changed = true)
         }
 
         val shouldUseIncomingTime = promoteExisting || timestamp > existing.timestamp
@@ -75,14 +83,15 @@ class ClipboardRepository(private val dao: ClipboardDao) {
         }
         val nextPinned = existing.pinned || pinned
         val nextFolder = existing.folder.ifBlank { cleanFolder }
-        val nextPayload = if (shouldUseIncomingTime && payload != null &&
+        val completingBlob = !existing.blobReady && blobReady
+        val nextPayload = if ((shouldUseIncomingTime || completingBlob) && payload != null &&
             (blobReady || !existing.blobReady)
         ) {
             payload
         } else {
             ClipboardPayload.fromEntry(existing)
         }
-        val nextBlobId = blobId.ifBlank { existing.blobId }
+        val nextBlobId = identity.ifBlank { existing.blobId }
         val nextBlobSize = blobSize.takeIf { it > 0 } ?: existing.blobSize
         val nextBlobReady = existing.blobReady || blobReady
         val changed = existing.timestamp != nextTimestamp ||
@@ -123,9 +132,13 @@ class ClipboardRepository(private val dao: ClipboardDao) {
                 blobReady = nextBlobReady
             )
         }
-        val removedDuplicates = dao.deleteDuplicatesByContent(content, existing.id)
+        val removedDuplicates = if (identity.isBlank()) {
+            dao.deleteDuplicatesByContent(content, existing.id)
+        } else {
+            dao.deleteDuplicatesByBlobId(identity, existing.id)
+        }
 
-        return HistoryMergeResult(inserted = false, changed = changed || removedDuplicates > 0)
+        HistoryMergeResult(inserted = false, changed = changed || removedDuplicates > 0)
     }
 
     companion object {

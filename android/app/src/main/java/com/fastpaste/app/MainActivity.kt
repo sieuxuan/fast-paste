@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.fastpaste.app.data.ClipboardPayload
+import com.fastpaste.app.data.ClipboardRepository
 import com.fastpaste.app.service.ClipboardService
 import com.fastpaste.app.sync.AndroidClipboardCodec
 import com.fastpaste.app.ui.screens.HomeScreen
@@ -122,37 +123,54 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             val sharedText = share.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
             val sharedHtml = share.getStringExtra(Intent.EXTRA_HTML_TEXT).orEmpty()
-            val payload = if (sharedText.isNotBlank() && share.clipData?.hasUris() != true) {
-                if (share.type == "text/html" || sharedHtml.isNotBlank()) {
-                    ClipboardPayload(
-                        kind = ClipboardPayload.KIND_HTML,
-                        text = sharedText,
-                        html = sharedHtml.ifBlank { sharedText },
-                        mimeType = "text/html"
-                    )
+            val payload = runCatching {
+                // Gallery may attach EXTRA_STREAM with a caption but no ClipData.
+                // Prefer the image attachment over its accompanying text.
+                val attachment = share.clipData?.takeIf { it.hasUris() } ?: buildStreamClip(share)
+                if (sharedText.isNotBlank() && attachment == null) {
+                    if (share.type == "text/html" || sharedHtml.isNotBlank()) {
+                        ClipboardPayload(
+                            kind = ClipboardPayload.KIND_HTML,
+                            text = sharedText,
+                            html = sharedHtml.ifBlank { sharedText },
+                            mimeType = "text/html"
+                        )
+                    } else {
+                        ClipboardPayload.text(sharedText)
+                    }
                 } else {
-                    ClipboardPayload.text(sharedText)
+                    AndroidClipboardCodec.read(
+                        this@MainActivity,
+                        attachment ?: share.clipData
+                    )
                 }
-            } else {
-                AndroidClipboardCodec.read(
-                    this@MainActivity,
-                    share.clipData ?: buildStreamClip(share)
-                )
-            }
+            }.getOrNull()
 
             val clip = payload?.let {
                 runCatching { AndroidClipboardCodec.write(this@MainActivity, it) }.getOrNull()
             }
+            // Persist while the share activity still has URI access. Reading
+            // the clipboard after finish() can be denied by Android, and the
+            // socket may not have completed its secure handshake yet.
+            val savedEntryId = if (payload != null && clip != null) runCatching {
+                val dao = (application as FastPasteApp).database.clipboardDao()
+                ClipboardRepository(dao, (application as FastPasteApp).database)
+                    .mergeEntry(content = payload.text, source = "LOCAL",
+                        promoteExisting = true, payload = payload)
+                if (payload.kind == ClipboardPayload.KIND_TEXT) dao.getByContent(payload.text)?.id
+                else dao.getByBlobId(payload.fingerprint())?.id
+            }.getOrNull() else null
             withContext(Dispatchers.Main) {
-                if (clip == null) {
+                if (clip == null || savedEntryId == null) {
                     Toast.makeText(this@MainActivity, "Không đọc được nội dung chia sẻ", Toast.LENGTH_SHORT).show()
                 } else {
                     val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(clip)
                     startService(Intent(this@MainActivity, ClipboardService::class.java).apply {
                         action = ClipboardService.ACTION_SYNC_CURRENT_CLIP
+                        putExtra(ClipboardService.EXTRA_ENTRY_ID, savedEntryId)
                     })
-                    Toast.makeText(this@MainActivity, "Đã gửi tới PC", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "Đã nhận nội dung; sẽ đồng bộ khi PC kết nối", Toast.LENGTH_SHORT).show()
                 }
                 finish()
             }

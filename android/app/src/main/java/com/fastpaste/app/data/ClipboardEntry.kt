@@ -2,8 +2,9 @@ package com.fastpaste.app.data
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.Index
 
-@Entity(tableName = "clipboard_history")
+@Entity(tableName = "clipboard_history", indices = [Index("blobId"), Index("content"), Index("timestamp"), Index(value = ["pinned", "timestamp"])])
 data class ClipboardEntry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val content: String,

@@ -143,9 +143,9 @@ internal fun ConnectionPanel(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
                     )
                 }
-                if (state.connectionState == ConnectionState.CONNECTED_SECURE) {
+                if (state.serviceRunning) {
                     FilledTonalButton(onClick = onDisconnect) {
-                        Text("Ngắt")
+                        Text(if (state.connectionState == ConnectionState.CONNECTED_SECURE) "Ngắt" else "Dừng")
                     }
                 } else {
                     IconButton(onClick = onRefreshDiscovery) {

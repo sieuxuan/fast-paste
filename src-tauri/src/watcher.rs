@@ -10,7 +10,7 @@ fn cache() -> &'static Mutex<Option<ClipboardPayload>> {
     CACHE.get_or_init(|| Mutex::new(None))
 }
 
-fn store_latest_payload(payload: ClipboardPayload) {
+pub(crate) fn store_latest_payload(payload: ClipboardPayload) {
     *cache().lock().unwrap() = Some(payload);
 }
 

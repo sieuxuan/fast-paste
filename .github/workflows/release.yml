@@ -22,8 +22,16 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Test desktop
+        working-directory: src-tauri
+        run: cargo test --locked
 
       - name: Build Tauri app
         env:
@@ -72,7 +80,7 @@ jobs:
           FASTPASTE_ANDROID_STORE_PASSWORD: ${{ secrets.FASTPASTE_ANDROID_STORE_PASSWORD }}
           FASTPASTE_ANDROID_KEY_ALIAS: ${{ secrets.FASTPASTE_ANDROID_KEY_ALIAS }}
           FASTPASTE_ANDROID_KEY_PASSWORD: ${{ secrets.FASTPASTE_ANDROID_KEY_PASSWORD }}
-        run: gradle -p android assembleRelease
+        run: gradle -p android testDebugUnitTest lintDebug assembleRelease
 
       - name: Collect Android artifact
         run: |

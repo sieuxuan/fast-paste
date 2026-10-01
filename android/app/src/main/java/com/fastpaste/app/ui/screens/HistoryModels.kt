@@ -1,5 +1,7 @@
 package com.fastpaste.app.ui.screens
 
+import com.fastpaste.app.sync.thumbnailSampleSize
+
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.animation.AnimatedVisibility
@@ -113,10 +115,15 @@ internal fun decodeDataUriImage(value: String): ImageBitmap? {
 }
 
 internal fun decodeBase64Image(value: String): ImageBitmap? {
-    if (value.isBlank() || value.length > 12 * 1024 * 1024) return null
+    if (value.isBlank() || value.length > 90 * 1024 * 1024) return null
     return runCatching {
         val bytes = Base64.decode(value, Base64.DEFAULT)
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        if (options.outWidth <= 0 || options.outHeight <= 0) return@runCatching null
+        options.inSampleSize = thumbnailSampleSize(options.outWidth, options.outHeight, 2048)
+        options.inJustDecodeBounds = false
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
     }.getOrNull()
 }
 

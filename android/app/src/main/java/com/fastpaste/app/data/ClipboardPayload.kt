@@ -12,6 +12,12 @@ data class ClipboardPayload(
     val data: String = "",
     val thumbnail: String = ""
 ) {
+    fun hasBody(): Boolean = when (kind) {
+        KIND_TEXT -> true
+        KIND_HTML -> html.isNotEmpty()
+        else -> data.isNotEmpty()
+    }
+
     fun toJson(): JSONObject = JSONObject()
         .put("kind", kind)
         .put("text", text)
@@ -29,14 +35,43 @@ data class ClipboardPayload(
         .put("thumbnail", thumbnail)
 
     fun fingerprint(): String {
-        val identity = JSONObject()
-            .put("kind", kind)
-            .put("text", text)
-            .put("html", html)
-            .put("mimeType", mimeType)
-            .put("data", data)
+        return hashIdentity(identityJson())
+    }
+
+    fun matchesFingerprint(expected: String): Boolean =
+        fingerprint() == expected || hashIdentity(identityJson().replace("/", "\\/")) == expected
+
+    // Match serde_json's field order and escaping. Android JSONObject escapes
+    // '/', and the JVM test implementation can reorder fields; neither is a
+    // portable representation for a cryptographic identity.
+    private fun identityJson(): String = buildString {
+        append('{')
+        listOf("kind" to kind, "text" to text, "html" to html, "mimeType" to mimeType, "data" to data)
+            .forEachIndexed { index, (key, value) ->
+                if (index > 0) append(',')
+                append('"').append(key).append("\":\"")
+                value.forEach { character ->
+                    when (character) {
+                        '"' -> append("\\\"")
+                        '\\' -> append("\\\\")
+                        '\b' -> append("\\b")
+                        '\u000C' -> append("\\f")
+                        '\n' -> append("\\n")
+                        '\r' -> append("\\r")
+                        '\t' -> append("\\t")
+                        else -> if (character < ' ') {
+                            append("\\u").append(character.code.toString(16).padStart(4, '0'))
+                        } else append(character)
+                    }
+                }
+                append('"')
+            }
+        append('}')
+    }
+
+    private fun hashIdentity(identity: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
-            .digest(identity.toString().toByteArray(Charsets.UTF_8))
+            .digest(identity.toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 

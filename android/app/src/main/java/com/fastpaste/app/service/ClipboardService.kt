@@ -58,9 +58,10 @@ class ClipboardService : Service() {
     // Service-owned discovery keeps running in the background (the ViewModel's
     // discovery dies with the UI), so a PC coming back on a new IP is found.
     private var backgroundDiscovery: ServiceDiscovery? = null
+    private var idleStopJob: Job? = null
     internal val fingerprintGate = ClipboardFingerprintGate()
     internal val dao by lazy { (application as FastPasteApp).database.clipboardDao() }
-    internal val historyRepository by lazy { ClipboardRepository(dao) }
+    internal val historyRepository by lazy { ClipboardRepository(dao, (application as FastPasteApp).database) }
     internal val deletedHistoryStore by lazy { DeletedHistoryStore(applicationContext) }
     internal val encryptionStore by lazy { EncryptionStore(applicationContext) }
     internal val pairingStore by lazy { PairingStore(applicationContext) }
@@ -86,8 +87,12 @@ class ClipboardService : Service() {
     private fun syncCurrentClipboard() {
         val clip = runCatching { clipboardManager.primaryClip }.getOrNull()
         scope.launch {
-            val payload = AndroidClipboardCodec.read(this@ClipboardService, clip)
-                ?: return@launch
+            val payload = try {
+                AndroidClipboardCodec.read(this@ClipboardService, clip)
+            } catch (error: Exception) {
+                connectionEvents.tryEmit("Không đọc được ảnh: ${error.message}")
+                return@launch
+            } ?: return@launch
             val fingerprint = payload.fingerprint()
             if (!fingerprintGate.shouldSend(fingerprint)) return@launch
             sendClipboardPayload(payload)
@@ -98,8 +103,9 @@ class ClipboardService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isRunning.value = true
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        ensureBackgroundDiscovery()
+        scope.launch { transferStore.cleanupOldTransfers() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -107,17 +113,15 @@ class ClipboardService : Service() {
             null -> {
                 startForeground(NOTIFICATION_ID, buildNotification("Đang khôi phục kết nối…"))
                 ensureBackgroundDiscovery()
-                if (currentHost == null) {
-                    servicePrefs.getString(KEY_ACTIVE_DESKTOP_ID, null)
-                        ?.let(pairingStore::peerForDesktopId)
-                        ?.let { peer -> startSync(peer.host, peer.port) }
-                }
+                restoreSavedPeerIfIdle()
             }
             ACTION_START_DISCOVERY -> {
+                resetIdleShutdown()
                 startForeground(NOTIFICATION_ID, buildNotification("Đang tìm PC cùng mạng…"))
                 ensureBackgroundDiscovery()
             }
             ACTION_START -> {
+                resetIdleShutdown()
                 val host = intent.getStringExtra(EXTRA_HOST) ?: return START_NOT_STICKY
                 val port = intent.getIntExtra(EXTRA_PORT, 4567)
                 if (host == currentHost && port == currentPort && wsClient != null) {
@@ -139,17 +143,77 @@ class ClipboardService : Service() {
                 stopSelf()
             }
             ACTION_COPY_HISTORY_ITEM -> {
+                startForeground(NOTIFICATION_ID, buildNotification("Đang sao chép lịch sử…"))
                 val id = intent.getLongExtra(EXTRA_ENTRY_ID, -1L)
-                if (id >= 0L) {
+                if (id < 0L) {
+                    stopOneOffActionIfIdle(startId)
+                } else {
                     scope.launch {
-                        copyHistoryItem(id)
-                        if (activeTarget.value == null) stopSelf(startId)
+                        try {
+                            copyHistoryItem(id)
+                        } finally {
+                            withContext(Dispatchers.Main) { stopOneOffActionIfIdle(startId) }
+                        }
                     }
                 }
             }
-            ACTION_SYNC_CURRENT_CLIP -> syncCurrentClipboard()
+            ACTION_SYNC_CURRENT_CLIP -> {
+                resetIdleShutdown()
+                // Share intents can launch this service while the main activity
+                // is not already running. Restore the last paired PC first;
+                // otherwise the clipboard is only written locally and the
+                // share action appears to succeed without reaching the PC.
+                startForeground(NOTIFICATION_ID, buildNotification("Đang đồng bộ clipboard…"))
+                ensureBackgroundDiscovery()
+                restoreSavedPeerIfIdle()
+                val sharedEntryId = intent.getLongExtra(EXTRA_ENTRY_ID, -1L)
+                if (sharedEntryId >= 0L) {
+                    scope.launch {
+                        dao.getById(sharedEntryId)?.takeIf { it.blobReady }?.let { entry ->
+                            val payload = ClipboardPayload.fromEntry(entry)
+                            fingerprintGate.markAppliedAndSent(payload.fingerprint())
+                            sendClipboardPayload(payload)
+                        }
+                    }
+                } else syncCurrentClipboard()
+            }
         }
-        return START_STICKY
+        // An explicitly idle service must not be resurrected with an ongoing
+        // notification after Android kills the process.
+        return if (activeTarget.value == null) START_NOT_STICKY else START_STICKY
+    }
+
+    private fun stopOneOffActionIfIdle(startId: Int) {
+        if (activeTarget.value == null && incomingTransfers.isEmpty()) {
+            if (stopSelfResult(startId)) stopForeground(STOP_FOREGROUND_REMOVE)
+        } else if (wsClient?.isSecure == true) {
+            updateNotification("Đã kết nối tới ${currentHost ?: "PC"}")
+        }
+    }
+
+    private fun scheduleIdleShutdown() {
+        if (idleStopJob?.isActive == true) return
+        idleStopJob = scope.launch(Dispatchers.Main) {
+            delay(IDLE_STOP_TIMEOUT_MS)
+            if (connectionState.value != ConnectionState.CONNECTED_SECURE) {
+                connectionEvents.tryEmit("Đã dừng tìm/kết nối sau 2 phút; bấm Kết nối để thử lại.")
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+        }
+    }
+
+    private fun resetIdleShutdown() {
+        idleStopJob?.cancel()
+        idleStopJob = null
+        if (connectionState.value != ConnectionState.CONNECTED_SECURE) scheduleIdleShutdown()
+    }
+
+    private fun restoreSavedPeerIfIdle() {
+        if (currentHost != null) return
+        servicePrefs.getString(KEY_ACTIVE_DESKTOP_ID, null)
+            ?.let(pairingStore::peerForDesktopId)
+            ?.let { peer -> startSync(peer.host, peer.port) }
     }
 
     private fun startSync(host: String, port: Int) {
@@ -171,8 +235,6 @@ class ClipboardService : Service() {
         val cs = CoroutineScope(Dispatchers.IO + SupervisorJob())
         clientScope = cs
         wsClient = WebSocketClient(applicationContext, cs).also { client ->
-            client.connect(host, port)
-
             // Receive clipboard from desktop
             cs.launch {
                 client.messages.collect { message ->
@@ -182,7 +244,14 @@ class ClipboardService : Service() {
 
             cs.launch {
                 client.binaryMessages.collect { frame ->
-                    handleIncomingBinaryChunk(frame)
+                    try {
+                        handleIncomingBinaryChunk(frame)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        Log.e(TAG, "Binary chunk rejected: ${error.message}")
+                        connectionEvents.tryEmit("Gói ảnh bị từ chối: ${error.message ?: "không hợp lệ"}")
+                    }
                 }
             }
 
@@ -198,6 +267,8 @@ class ClipboardService : Service() {
                     connectionState.value = state
                     val status = when (state) {
                         ConnectionState.CONNECTED_SECURE -> {
+                            idleStopJob?.cancel()
+                            idleStopJob = null
                             pairingStore.peerForHost(host)?.let { peer ->
                                 servicePrefs.edit().putString(KEY_ACTIVE_DESKTOP_ID, peer.desktopId).apply()
                             }
@@ -208,6 +279,7 @@ class ClipboardService : Service() {
                             "Đã kết nối tới $host"
                         }
                         ConnectionState.CONNECTED_UNPAIRED -> {
+                            scheduleIdleShutdown()
                             stopBackgroundDiscovery()
                             "Chưa ghép đôi với $host — quét QR trên PC"
                         }
@@ -220,6 +292,7 @@ class ClipboardService : Service() {
                     updateNotification(status)
                 }
             }
+            client.connect(host, port)
         }
 
         // Re-register instead of stacking a duplicate listener on reconnect
@@ -234,6 +307,7 @@ class ClipboardService : Service() {
      * address is left to the client's own backoff, avoiding connect storms.
      */
     private fun ensureBackgroundDiscovery() {
+        scheduleIdleShutdown()
         val discovery = backgroundDiscovery ?: ServiceDiscovery(applicationContext).also { d ->
             backgroundDiscovery = d
             scope.launch {
@@ -288,6 +362,7 @@ class ClipboardService : Service() {
 
     private fun sendClipboardPayload(payload: ClipboardPayload): Boolean {
         if (payload.kind == ClipboardPayload.KIND_TEXT) return sendWire(payload.text)
+        if (payload.kind == ClipboardPayload.KIND_HTML) return sendWire(payload.protocolJson())
         if (wsClient?.isSecure != true) return sendWire(payload.protocolJson())
         val blobId = payload.fingerprint()
         outgoingPayloads[blobId] = payload
@@ -360,8 +435,9 @@ class ClipboardService : Service() {
         if (payload.text.isEmpty() || !payload.isWithinLimit()) return
         val fingerprint = payload.fingerprint()
         if (!fingerprintGate.shouldApply(fingerprint)) return
+        val clip = AndroidClipboardCodec.write(this@ClipboardService, payload)
         withContext(Dispatchers.Main) {
-            clipboardManager.setPrimaryClip(AndroidClipboardCodec.write(this@ClipboardService, payload))
+            clipboardManager.setPrimaryClip(clip)
         }
         saveToHistory(payload, "REMOTE")
         Log.d(TAG, "Received ${payload.kind}: ${payload.text.take(60)}")
@@ -379,6 +455,10 @@ class ClipboardService : Service() {
             return
         }
         if (!entry.blobReady && entry.blobId.isNotBlank()) {
+            if (wsClient?.isSecure != true) {
+                publishClipboardAction("Ảnh chưa tải; hãy kết nối PC hoặc đồng bộ Drive trước.")
+                return
+            }
             requestBlob(entry, applyToClipboard = true)
             publishClipboardAction("Đang tải ${entry.blobSize.coerceAtLeast(0L) / 1024} KB; sẽ tự sao chép khi hoàn tất")
             return
@@ -452,12 +532,17 @@ class ClipboardService : Service() {
             this, 0, openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val stopIntent = PendingIntent.getService(
+            this, 1, Intent(this, ClipboardService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
         return NotificationCompat.Builder(this, FastPasteApp.CHANNEL_ID)
             .setContentTitle("Fast Paste")
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
+            .addAction(R.drawable.ic_notification, "Dừng đồng bộ", stopIntent)
             .setOngoing(true)
             .setSilent(true)
             .build()
@@ -470,13 +555,19 @@ class ClipboardService : Service() {
     }
 
     override fun onDestroy() {
+        idleStopJob?.cancel()
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         stopBackgroundDiscovery()
         activeTarget.value = null
         connectionState.value = ConnectionState.DISCONNECTED
+        discoveredServers.value = emptyList()
+        isScanning.value = false
+        transferProgress.value = emptyList()
         clientScope?.cancel()
         wsClient?.disconnect()
         scope.cancel()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        isRunning.value = false
         super.onDestroy()
     }
 
@@ -485,6 +576,7 @@ class ClipboardService : Service() {
     companion object {
         internal const val TAG = "ClipboardService"
         private const val NOTIFICATION_ID = 1
+        internal const val IDLE_STOP_TIMEOUT_MS = 2 * 60 * 1000L
         internal const val MAX_HISTORY_ITEMS = 1_000
         internal const val TRANSFER_CHUNK_BYTES = 48 * 1024L
         internal const val DEFAULT_WINDOW_SIZE = 4
@@ -507,6 +599,7 @@ class ClipboardService : Service() {
         val transferProgress = MutableStateFlow<List<TransferProgress>>(emptyList())
         val discoveredServers = MutableStateFlow<List<DiscoveredServer>>(emptyList())
         val isScanning = MutableStateFlow(false)
+        val isRunning = MutableStateFlow(false)
 
         /** "host:port" the service is currently managing, null when idle. */
         val activeTarget = MutableStateFlow<String?>(null)

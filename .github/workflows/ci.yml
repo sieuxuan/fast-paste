@@ -36,5 +36,5 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
-      - name: Unit tests
-        run: gradle testDebugUnitTest
+      - name: Unit tests, lint and debug build
+        run: gradle testDebugUnitTest lintDebug assembleDebug

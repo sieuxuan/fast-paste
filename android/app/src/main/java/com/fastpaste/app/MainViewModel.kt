@@ -41,6 +41,7 @@ data class UiState(
     val connectedServer: String? = null,
     val discoveredServers: List<DiscoveredServer> = emptyList(),
     val isScanning: Boolean = false,
+    val serviceRunning: Boolean = false,
     val clipboardHistory: List<ClipboardEntry> = emptyList(),
     val manualIp: String = "",
     val manualPort: String = "4567",
@@ -70,7 +71,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as FastPasteApp
     private val dao = app.database.clipboardDao()
-    private val historyRepository = ClipboardRepository(dao)
+    private val historyRepository = ClipboardRepository(dao, app.database)
     private val updateClient = OkHttpClient()
     private val googleDriveCloudSync = GoogleDriveCloudSync()
     private val deletedHistoryStore = DeletedHistoryStore(application)
@@ -181,6 +182,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        // Transfer progress belongs to the ViewModel lifecycle, not to an
+        // individual connect request. Keeping this collector here prevents a
+        // new collector from being leaked every time the user reconnects.
+        viewModelScope.launch {
+            ClipboardService.transferProgress.collect { transfers ->
+                _uiState.update { it.copy(transfers = transfers) }
+            }
+        }
+
         viewModelScope.launch {
             dao.getRecent(MAX_HISTORY_ITEMS)
                 .distinctUntilChanged()
@@ -190,15 +200,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            ClipboardService.connectionState.collect { state ->
+            ClipboardService.connectionState.combine(ClipboardService.isRunning) { state, running ->
+                state to running
+            }.collect { (state, running) ->
                 _uiState.update {
                     it.copy(
                         connectionState = state,
+                        serviceRunning = running,
+                        connectedServer = if (running) it.connectedServer else null,
                         connectionMessage = when (state) {
                             ConnectionState.CONNECTED_SECURE -> "Đồng bộ clipboard đang hoạt động"
                             ConnectionState.CONNECTED_UNPAIRED -> "Đã tìm thấy PC nhưng chưa ghép đôi. Quét QR trên PC để bật đồng bộ."
                             ConnectionState.CONNECTING -> "Đang kết nối tới ${it.connectedServer ?: "PC"}"
-                            ConnectionState.DISCONNECTED -> if (autoConnectEnabled) {
+                            ConnectionState.DISCONNECTED -> if (!running) {
+                                "Đồng bộ đã dừng. Bấm quét lại hoặc Kết nối khi cần."
+                            } else if (autoConnectEnabled) {
                                 "Chưa kết nối. Ứng dụng đang quét PC cùng mạng."
                             } else {
                                 "Đã ngắt kết nối. Bấm quét lại hoặc nhập IP để kết nối."
@@ -242,11 +258,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             putExtra(ClipboardService.EXTRA_PORT, port)
         }
 
-        viewModelScope.launch {
-            ClipboardService.transferProgress.collect { transfers ->
-                _uiState.update { it.copy(transfers = transfers) }
-            }
-        }
         try {
             getApplication<FastPasteApp>().startForegroundService(intent)
         } catch (e: Exception) {
@@ -412,6 +423,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val entry = dao.getById(id) ?: return@launch
             val cleanContent = content
+            if (entry.content != cleanContent && !entry.blobReady && entry.blobId.isNotBlank()) {
+                addConnectionLog("Hãy tải ảnh trước khi sửa nhãn để giữ đúng mã dữ liệu.")
+                return@launch
+            }
+            val editedBlobId = if (entry.content == cleanContent) entry.blobId
+            else if (entry.payloadType == ClipboardPayload.KIND_TEXT) "" else {
+                ClipboardPayload.fromEntry(entry).copy(text = cleanContent).fingerprint()
+            }
             if (entry.content != cleanContent) {
                 deletedHistoryStore.markDeleted(entry.content, includePinned = true)
                 deletedHistoryStore.unmarkDeleted(cleanContent)
@@ -419,10 +438,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             dao.updateEditedEntry(
                 id = id,
                 content = cleanContent,
+                blobId = editedBlobId,
                 folder = ClipboardRepository.cleanFolderName(folder),
                 timestamp = System.currentTimeMillis()
             )
-            dao.deleteDuplicatesByContent(cleanContent, id)
+            if (editedBlobId.isBlank()) dao.deleteDuplicatesByContent(cleanContent, id)
+            else dao.deleteDuplicatesByBlobId(editedBlobId, id)
             val intent = Intent(getApplication(), ClipboardService::class.java).apply {
                 action = ClipboardService.ACTION_COPY_HISTORY_ITEM
                 putExtra(ClipboardService.EXTRA_ENTRY_ID, id)

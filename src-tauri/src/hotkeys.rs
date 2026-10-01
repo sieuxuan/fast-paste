@@ -1,6 +1,5 @@
 use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use crate::state::{broadcast_state, queue_cloud_sync, save_state, AppSettings, AppState};
@@ -249,7 +248,10 @@ fn copy_pinned_slot(app: &AppHandle, slot: usize) {
             .history
             .iter()
             .position(|item| item.pinned && item.quick_slot == Some(slot as u8))?;
-        let text = data.history[index].text.clone();
+        let payload = quick_paste_payload(&data.history[index]).ok()?;
+        if crate::clipboard::write_clipboard(&payload).is_err() {
+            return None;
+        }
         let changed = if index == 0 {
             false
         } else {
@@ -261,20 +263,34 @@ fn copy_pinned_slot(app: &AppHandle, slot: usize) {
         if changed {
             save_state();
         }
-        Some((text, changed))
+        Some((payload, changed))
     });
 
-    if let Some((text, history_changed)) = result {
-        let _ = app.clipboard().write_text(text.clone());
+    if let Some((payload, history_changed)) = result {
         paste_clipboard_after_hotkey();
-        if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<String>>() {
-            let _ = tx.send(text);
+        if let Some(tx) = app.try_state::<tokio::sync::broadcast::Sender<std::sync::Arc<String>>>()
+        {
+            let _ = tx.send(std::sync::Arc::new(
+                crate::network::outgoing_clipboard_message(&payload),
+            ));
         }
         if history_changed {
             broadcast_state(app);
             queue_cloud_sync(app);
         }
     }
+}
+
+fn quick_paste_payload(
+    item: &crate::history::HistoryItem,
+) -> Result<crate::clipboard::ClipboardPayload, String> {
+    if !item.blob_ready && !item.blob_id.is_empty() {
+        return Err("Ảnh chưa tải xong.".into());
+    }
+    Ok(item
+        .payload
+        .clone()
+        .unwrap_or_else(|| crate::clipboard::ClipboardPayload::text(item.text.clone())))
 }
 
 pub(crate) fn unregister_quick_paste_slots(app: &AppHandle, prefix: &str) {
@@ -341,3 +357,25 @@ fn paste_clipboard_after_hotkey() {
 
 #[cfg(not(windows))]
 fn paste_clipboard_after_hotkey() {}
+
+#[cfg(test)]
+mod quick_paste_tests {
+    use super::*;
+
+    #[test]
+    fn image_slots_preserve_payload_and_reject_unavailable_blobs() {
+        let mut item = crate::history::make_history_item("image label", "PC");
+        item.payload = Some(crate::clipboard::ClipboardPayload {
+            kind: "image".into(),
+            text: "image label".into(),
+            data: "QUJDRA==".into(),
+            ..Default::default()
+        });
+        item.blob_id = "image-slot".into();
+        let payload = quick_paste_payload(&item).unwrap();
+        assert_eq!(payload.kind, "image");
+        assert_eq!(payload.data, "QUJDRA==");
+        item.blob_ready = false;
+        assert!(quick_paste_payload(&item).is_err());
+    }
+}

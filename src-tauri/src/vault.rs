@@ -119,41 +119,120 @@ pub(crate) fn read_protected(path: &Path) -> Result<Vec<u8>, String> {
     unprotect(&encrypted)
 }
 
-pub(crate) fn read_with_backup(path: &Path) -> Result<Vec<u8>, String> {
-    std::fs::read(path)
-        .or_else(|_| std::fs::read(path.with_extension("bak")))
-        .map_err(|error| format!("Không đọc được {} hoặc backup: {error}", path.display()))
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let tmp = temporary_path(path);
+    let result = (|| -> Result<(), String> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .map_err(|error| format!("Không tạo được {}: {error}", tmp.display()))?;
+        file.write_all(bytes)
+            .and_then(|_| file.sync_all())
+            .map_err(|error| format!("Không ghi được {}: {error}", tmp.display()))?;
+        drop(file);
+        if path.exists() {
+            std::fs::copy(path, path.with_extension("bak"))
+                .map_err(|error| format!("Không tạo được backup {}: {error}", path.display()))?;
+        }
+        replace_file(&tmp, path)
+            .map_err(|error| format!("Không hoàn tất {}: {error}", path.display()))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
-pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let tmp = temporary_path(path);
-    std::fs::write(&tmp, bytes)
-        .map_err(|error| format!("Không ghi được {}: {error}", tmp.display()))?;
-    if path.exists() {
-        let backup = path.with_extension("bak");
-        let _ = std::fs::copy(path, backup);
-        std::fs::remove_file(path)
-            .map_err(|error| format!("Không thay được {}: {error}", path.display()))?;
+#[cfg(windows)]
+fn replace_file(source: &Path, target: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let target: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+    if unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            target.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
     }
-    if let Err(error) = std::fs::rename(&tmp, path) {
-        let backup = path.with_extension("bak");
-        if !path.exists() && backup.exists() {
-            let _ = std::fs::copy(&backup, path);
+}
+
+#[cfg(not(windows))]
+fn replace_file(source: &Path, target: &Path) -> std::io::Result<()> {
+    std::fs::rename(source, target)
+}
+
+pub(crate) fn read_json_with_backup<T: serde::de::DeserializeOwned>(
+    path: &Path,
+) -> Result<T, String> {
+    for candidate in [path.to_path_buf(), path.with_extension("bak")] {
+        if let Ok(bytes) = std::fs::read(candidate) {
+            if let Ok(value) = serde_json::from_slice(&bytes) {
+                return Ok(value);
+            }
         }
-        return Err(format!("Không hoàn tất {}: {error}", path.display()));
     }
-    Ok(())
+    Err(format!(
+        "Không đọc được JSON {} hoặc backup.",
+        path.display()
+    ))
 }
 
 fn temporary_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
-    name.push(".tmp");
+    name.push(format!(".{}.tmp", rand::random::<u64>()));
     PathBuf::from(name)
 }
 
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn locked_file_keeps_original_then_retries_without_tmp_leaks() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory =
+            std::env::temp_dir().join(format!("fastpaste-save-test-{}", rand::random::<u64>()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("state.json");
+        write_atomic(&path, br#"{"value":1}"#).unwrap();
+        let locked = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        assert!(write_atomic(&path, br#"{"value":2}"#).is_err());
+        drop(locked);
+        assert_eq!(std::fs::read(&path).unwrap(), br#"{"value":1}"#);
+        write_atomic(&path, br#"{"value":2}"#).unwrap();
+        assert_eq!(
+            std::fs::read(path.with_extension("bak")).unwrap(),
+            br#"{"value":1}"#
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), br#"{"value":2}"#);
+        std::fs::write(&path, b"broken-json").unwrap();
+        let recovered: serde_json::Value = read_json_with_backup(&path).unwrap();
+        assert_eq!(recovered["value"], 1);
+        assert!(!std::fs::read_dir(&directory).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".tmp")));
+        for file in std::fs::read_dir(&directory).unwrap() {
+            std::fs::remove_file(file.unwrap().path()).unwrap();
+        }
+        std::fs::remove_dir(directory).unwrap();
+    }
 
     #[test]
     fn dpapi_round_trip_and_rejects_tampering() {

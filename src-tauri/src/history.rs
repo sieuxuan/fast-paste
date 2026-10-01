@@ -123,6 +123,24 @@ fn default_blob_ready() -> bool {
     true
 }
 
+pub(crate) fn edit_history_text(item: &mut HistoryItem, text: &str) -> Result<(), String> {
+    if item.text == text {
+        return Ok(());
+    }
+    if !item.blob_ready && !item.blob_id.is_empty() {
+        return Err("Hãy tải ảnh trước khi sửa nhãn để giữ đúng mã dữ liệu.".into());
+    }
+    item.text = text.to_string();
+    if let Some(payload) = item.payload.as_mut() {
+        payload.text = text.to_string();
+        if payload.kind != "text" {
+            item.blob_id = payload.fingerprint();
+            item.blob_size = payload.encoded_size();
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct DeletedMarker {
     #[serde(default)]
@@ -605,6 +623,31 @@ pub(crate) fn promote_or_insert_payload(
     true
 }
 
+/// A download fills an existing entry; it is not a new copy event.
+pub(crate) fn complete_downloaded_payload(
+    data: &mut AppStateData,
+    payload: &ClipboardPayload,
+) -> bool {
+    let identity = payload.fingerprint();
+    let index = data
+        .history
+        .iter()
+        .position(|item| item.blob_id == identity)
+        .or_else(|| {
+            let legacy = payload.legacy_fingerprint();
+            data.history.iter().position(|item| item.blob_id == legacy)
+        });
+    if let Some(index) = index {
+        let item = &mut data.history[index];
+        item.payload = Some(payload.clone());
+        item.blob_size = payload.encoded_size();
+        item.blob_ready = true;
+        true
+    } else {
+        promote_or_insert_payload(data, payload, "ANDROID")
+    }
+}
+
 pub(crate) fn history_item_key(item: &HistoryItem) -> String {
     if !item.blob_id.is_empty() {
         return item.blob_id.clone();
@@ -884,10 +927,19 @@ pub(crate) fn make_history_delta_payload(
                 item.blob_id = payload.fingerprint();
                 metadata_changed = true;
             }
-            let size = payload.encoded_size();
-            if item.blob_size != size || !item.blob_ready {
+            let ready = match payload.kind.as_str() {
+                "image" => !payload.data.is_empty(),
+                "html" => !payload.html.is_empty(),
+                _ => false,
+            };
+            let size = if ready {
+                payload.encoded_size()
+            } else {
+                item.blob_size
+            };
+            if item.blob_size != size || item.blob_ready != ready {
                 item.blob_size = size;
-                item.blob_ready = true;
+                item.blob_ready = ready;
                 metadata_changed = true;
             }
         }
@@ -999,6 +1051,12 @@ pub(crate) fn merge_sync_entries(
                 &entry.source_title,
                 &entry.source_icon,
             );
+            if !existing.blob_ready && entry.blob_ready && entry.payload.is_some() {
+                existing.payload = entry.payload.clone();
+                existing.blob_size = entry.blob_size;
+                existing.blob_ready = true;
+                history_changed = true;
+            }
             if entry.timestamp > timestamp_to_millis(&existing.timestamp) {
                 existing.timestamp =
                     chrono::DateTime::<chrono::Utc>::from_timestamp_millis(entry.timestamp)
@@ -1085,6 +1143,12 @@ pub(crate) fn merge_cloud_entries_into_history(
                 &entry.source_title,
                 &entry.source_icon,
             );
+            if !existing.blob_ready && entry.blob_ready && entry.payload.is_some() {
+                existing.payload = entry.payload.clone();
+                existing.blob_size = entry.blob_size;
+                existing.blob_ready = true;
+                changed = true;
+            }
             if entry.timestamp > timestamp_to_millis(&existing.timestamp) {
                 existing.timestamp =
                     chrono::DateTime::<chrono::Utc>::from_timestamp_millis(entry.timestamp)
@@ -1166,6 +1230,104 @@ pub(crate) fn history_revision(
 #[cfg(test)]
 mod revision_tests {
     use super::*;
+
+    #[test]
+    fn completed_image_download_keeps_copy_timestamp_and_legacy_identity() {
+        let payload = ClipboardPayload {
+            kind: "image".into(),
+            text: "ảnh / 🙂\n\u{1}".into(),
+            mime_type: "image/png".into(),
+            data: "AA/A".into(),
+            ..Default::default()
+        };
+        let mut item = make_history_item("ảnh", "ANDROID");
+        item.blob_id = "91cf4f3c682861451c4924f3a28415af1a41ccfadbfd2b2081d25a8530960a97".into();
+        item.blob_ready = false;
+        let timestamp = item.timestamp.clone();
+        let mut data = crate::state::empty_state();
+        data.history.push(item);
+        assert!(complete_downloaded_payload(&mut data, &payload));
+        assert_eq!(data.history.len(), 1);
+        assert_eq!(data.history[0].timestamp, timestamp);
+        assert!(data.history[0].blob_ready);
+        assert!(data.history[0].payload.as_ref() == Some(&payload));
+    }
+
+    #[test]
+    fn editing_image_caption_updates_identity_and_keeps_binary() {
+        let mut item = make_history_item("old", "PC");
+        item.payload = Some(ClipboardPayload {
+            kind: "image".into(),
+            text: "old".into(),
+            data: "QUJDRA==".into(),
+            ..Default::default()
+        });
+        item.blob_id = item.payload.as_ref().unwrap().fingerprint();
+        let old_id = item.blob_id.clone();
+        edit_history_text(&mut item, "new").unwrap();
+        assert_ne!(item.blob_id, old_id);
+        assert_eq!(item.blob_id, item.payload.as_ref().unwrap().fingerprint());
+        assert_eq!(item.payload.as_ref().unwrap().data, "QUJDRA==");
+        item.blob_ready = false;
+        assert!(edit_history_text(&mut item, "pending").is_err());
+        assert_eq!(item.text, "new");
+    }
+
+    #[test]
+    fn history_delta_keeps_evicted_image_unavailable_and_preserves_size() {
+        let mut data = crate::state::empty_state();
+        let mut item = make_history_item("metadata", "PC");
+        item.payload = Some(ClipboardPayload {
+            kind: "image".into(),
+            text: "metadata".into(),
+            ..Default::default()
+        });
+        item.blob_id = "evicted-image".into();
+        item.blob_size = 1234;
+        item.blob_ready = false;
+        data.history.push(item);
+        make_history_delta_payload(&mut data, None, 0).unwrap();
+        assert!(!data.history[0].blob_ready);
+        assert_eq!(data.history[0].blob_size, 1234);
+    }
+
+    #[test]
+    fn downloaded_body_merges_at_the_same_timestamp_over_lan_and_cloud() {
+        let mut data = crate::state::empty_state();
+        let payload = ClipboardPayload {
+            kind: "image".into(),
+            text: "downloaded".into(),
+            data: "QUJDRA==".into(),
+            ..Default::default()
+        };
+        promote_or_insert_payload(&mut data, &payload, "PC");
+        data.history[0].payload.as_mut().unwrap().data.clear();
+        data.history[0].blob_ready = false;
+        let cloud_entry = history_to_cloud_entries(&data.history).remove(0);
+        let incoming = SyncEntry {
+            text: cloud_entry.text.clone(),
+            timestamp: cloud_entry.timestamp,
+            source: "ANDROID".into(),
+            source_app: String::new(),
+            source_title: String::new(),
+            source_icon: String::new(),
+            pinned: false,
+            folder: String::new(),
+            payload: Some(payload.clone()),
+            blob_id: cloud_entry.blob_id.clone(),
+            blob_size: payload.encoded_size(),
+            blob_ready: true,
+        };
+        assert!(merge_sync_entries(&mut data, vec![incoming]).1);
+        assert_eq!(data.history[0].payload.as_ref().unwrap().data, payload.data);
+        data.history[0].payload.as_mut().unwrap().data.clear();
+        data.history[0].blob_ready = false;
+        let mut incoming = cloud_entry;
+        incoming.payload = Some(payload.clone());
+        incoming.blob_ready = true;
+        assert!(merge_cloud_entries_into_history(&mut data, vec![incoming]).1);
+        assert_eq!(data.history[0].payload.as_ref().unwrap().data, payload.data);
+    }
 
     #[test]
     fn revision_is_stable_and_changes_with_entries() {

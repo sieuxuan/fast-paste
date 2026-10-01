@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.2.9 - 2026-10-01
+
+- Includes the image sync and Android two-minute idle shutdown fixes from the local 2.2.8 build below.
+- Retry failed desktop saves and replace files atomically on Windows; recover invalid settings from backup and report save failures.
+- Limit concurrent desktop image downloads and their total memory, expire abandoned transfers, and resume pending images even when reconnect history deltas are empty.
+- Reduce Android history-list memory by loading image bodies only when needed; add database indexes and transactional merges without deleting saved history.
+- Clean abandoned Android transfer caches while retaining recent resume data.
+- Periodically check Drive for remote changes, paginate image listings, and migrate existing cloud blobs when encryption mode changes.
+- Keep inline rich text ready for copying, and prevent obsolete Google login/refresh/sync results from restoring a signed-out desktop session.
+- Run desktop tests and Android unit tests/lint before publishing signed release artifacts through GitHub Actions.
+
+## 2.2.8 - 2026-10-01 (local build)
+
+- Fixed image fingerprint compatibility between Android and Windows, including existing Android blobs.
+- Added Windows decoding for JPEG, WebP, GIF and BMP, and recognition of a single copied image file in Explorer.
+- Automatically fetch the newest pending image on reconnect; preserve copy timestamps when its download finishes.
+- Persist Android shares before closing the activity and send the saved entry without another background clipboard read.
+- Preserve image identity after Android clipboard writes, queue initial socket messages, and use chunked transfers for large history copies.
+- Decode sampled Android thumbnails and limit decoded Windows image dimensions.
+- Stop the Android connection service and remove its notification after two minutes without a secure connection; add a Stop notification action.
+- Fixed history hydration/deduplication, image caption identities, stale socket callbacks, quick-paste images, and in-flight cloud changes.
+
 ## 2.2.7 - 2026-08-09
 
 - Stabilized Windows clipboard detection and moved OS polling off the async runtime so local copies propagate faster without blocking network work.

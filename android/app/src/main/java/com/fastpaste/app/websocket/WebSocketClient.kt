@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
 import okhttp3.*
 import okio.ByteString
 import org.json.JSONObject
@@ -21,6 +23,12 @@ enum class ConnectionState {
 
 internal fun protocolMessageType(text: String): String =
     runCatching { JSONObject(text).optString("type") }.getOrDefault("")
+
+internal class ConnectionGeneration {
+    private var value = 0L
+    fun advance(): Long = ++value
+    fun isCurrent(generation: Long): Boolean = generation == value
+}
 
 class WebSocketClient(context: Context, private val scope: CoroutineScope) {
     private val appContext = context.applicationContext
@@ -36,40 +44,51 @@ class WebSocketClient(context: Context, private val scope: CoroutineScope) {
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
     val state: StateFlow<ConnectionState> = _state
 
-    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 64)
-    val messages: SharedFlow<String> = _messages
+    // A socket has one service consumer. Queue messages until it starts;
+    // SharedFlow without replay silently loses the initial history exchange.
+    private val _messages = Channel<String>(Channel.UNLIMITED)
+    val messages = _messages.receiveAsFlow()
 
-    private val _binaryMessages = MutableSharedFlow<ByteArray>(extraBufferCapacity = 32)
-    val binaryMessages: SharedFlow<ByteArray> = _binaryMessages
+    private val _binaryMessages = Channel<ByteArray>(Channel.UNLIMITED)
+    val binaryMessages = _binaryMessages.receiveAsFlow()
 
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 64)
     val events: SharedFlow<String> = _events
 
     private var serverUrl: String? = null
+    private var serverHost: String? = null
     private var reconnectJob: Job? = null
     private var reconnectAttempt = 0
     private var secureChannel: SecureChannel? = null
-    val isSecure: Boolean get() = secureChannel?.isSecure == true
-    val remoteSyncCursor: Long get() = secureChannel?.remoteSyncCursor ?: 0L
+    private val connections = ConnectionGeneration()
+    val isSecure: Boolean get() = synchronized(this) { secureChannel?.isSecure == true }
+    val remoteSyncCursor: Long get() = synchronized(this) { secureChannel?.remoteSyncCursor ?: 0L }
     @Volatile
     private var shouldReconnect = false
 
+    @Synchronized
     fun connect(host: String, port: Int) {
         disconnect()
         serverUrl = "ws://$host:$port"
-        secureChannel = SecureChannel(appContext, host)
+        serverHost = host
         shouldReconnect = true
-        _state.value = ConnectionState.CONNECTING
+        publishState(ConnectionState.CONNECTING)
         doConnect()
     }
 
     private fun doConnect() {
         val url = serverUrl ?: return
+        val generation = connections.advance()
+        // Reload the persisted peer/cursor on every retry. A completed pairing
+        // may have changed both since the previous socket was opened.
+        secureChannel?.close()
+        secureChannel = SecureChannel(appContext, serverHost ?: return)
         val request = Request.Builder().url(url).build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
 
-            override fun onOpen(webSocket: WebSocket, response: Response) {
+            override fun onOpen(webSocket: WebSocket, response: Response) = synchronized(this@WebSocketClient) {
+                if (!connections.isCurrent(generation) || !shouldReconnect) return@synchronized
                 Log.d(TAG, "Connected to $url")
                 _events.tryEmit("Đã mở WebSocket tới $url")
                 reconnectAttempt = 0
@@ -78,7 +97,7 @@ class WebSocketClient(context: Context, private val scope: CoroutineScope) {
                 }.getOrElse { error ->
                     _events.tryEmit("Ghép đôi lỗi: ${error.message ?: "không rõ"}")
                     webSocket.close(4003, "Secure handshake failed")
-                    return
+                    return@synchronized
                 }
                 if (awaitingSecurity) {
                     _events.tryEmit(
@@ -88,71 +107,82 @@ class WebSocketClient(context: Context, private val scope: CoroutineScope) {
                             "Đang xác thực thiết bị và tạo session key mới"
                         }
                     )
-                    _state.value = if (secureChannel?.requiresPairing == true) {
+                    publishState(if (secureChannel?.requiresPairing == true) {
                         ConnectionState.CONNECTED_UNPAIRED
                     } else {
                         ConnectionState.CONNECTING
-                    }
+                    })
                 } else {
                     _events.tryEmit("Kết nối chưa ghép đôi; chưa có dữ liệu nào được đồng bộ")
-                    _state.value = ConnectionState.CONNECTED_UNPAIRED
+                    publishState(ConnectionState.CONNECTED_UNPAIRED)
                 }
             }
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                Log.d(TAG, "Received: ${text.take(60)}")
+            override fun onMessage(webSocket: WebSocket, text: String) = synchronized(this@WebSocketClient) {
+                if (!connections.isCurrent(generation) || !shouldReconnect) return@synchronized
                 if (protocolMessageType(text) == "pair_required") {
                     _events.tryEmit("PC chưa ghép đôi thiết bị này. Quét QR trên PC để bật đồng bộ.")
-                    _state.value = ConnectionState.CONNECTED_UNPAIRED
-                    return
+                    publishState(ConnectionState.CONNECTED_UNPAIRED)
+                    return@synchronized
                 }
                 val event = runCatching {
                     secureChannel?.handleIncoming(text, webSocket::send)
                 }.getOrElse { error ->
                     _events.tryEmit("Xác thực session lỗi: ${error.message ?: "không rõ"}")
                     webSocket.close(4003, "Secure authentication failed")
-                    return
+                    return@synchronized
                 }
                 if (event == null) {
-                    _messages.tryEmit(text)
-                    return
+                    return@synchronized
                 }
                 event.status?.let(_events::tryEmit)
                 if (event.connected) {
-                    _state.value = ConnectionState.CONNECTED_SECURE
+                    publishState(ConnectionState.CONNECTED_SECURE)
                 }
-                event.message?.let(_messages::tryEmit)
+                event.message?.let { _messages.trySend(it) }
+                Unit
             }
 
-            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) = synchronized(this@WebSocketClient) {
+                if (!connections.isCurrent(generation) || !shouldReconnect) return@synchronized
                 val plain = runCatching { secureChannel?.unprotectBinary(bytes.toByteArray()) }
                     .getOrElse { error ->
                         _events.tryEmit("Xác thực binary lỗi: ${error.message ?: "không rõ"}")
                         webSocket.close(4003, "Secure binary authentication failed")
-                        return
+                        return@synchronized
                     }
-                if (plain != null) _binaryMessages.tryEmit(plain)
+                if (plain != null) _binaryMessages.trySend(plain)
+                Unit
             }
 
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) = synchronized(this@WebSocketClient) {
+                if (!connections.isCurrent(generation) || !shouldReconnect) return@synchronized
                 webSocket.close(1000, null)
+                Unit
             }
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = synchronized(this@WebSocketClient) {
+                if (!connections.isCurrent(generation) || !shouldReconnect) return@synchronized
                 Log.d(TAG, "Closed: $reason")
-                _state.value = ConnectionState.DISCONNECTED
+                secureChannel?.close()
+                publishState(ConnectionState.DISCONNECTED)
                 scheduleReconnect(url)
             }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = synchronized(this@WebSocketClient) {
+                if (!connections.isCurrent(generation) || !shouldReconnect) return@synchronized
                 Log.e(TAG, "Failed: ${t.message}")
+                secureChannel?.close()
                 _events.tryEmit("Kết nối lỗi: ${t.message ?: "không rõ"}")
-                _state.value = ConnectionState.DISCONNECTED
+                publishState(ConnectionState.DISCONNECTED)
                 scheduleReconnect(url)
             }
         })
     }
 
+    // Encryption and enqueue must be one operation: concurrent clipboard,
+    // history and ACK sends share the same AES-GCM nonce sequence.
+    @Synchronized
     fun send(text: String): Boolean {
         val channel = secureChannel ?: return false
         if (!channel.isSecure) return false
@@ -160,6 +190,7 @@ class WebSocketClient(context: Context, private val scope: CoroutineScope) {
         return webSocket?.send(protected) == true
     }
 
+    @Synchronized
     fun sendBinary(frame: ByteArray): Boolean {
         val channel = secureChannel ?: return false
         if (!channel.isSecure) return false
@@ -168,23 +199,27 @@ class WebSocketClient(context: Context, private val scope: CoroutineScope) {
     }
 
     /** Skip the current backoff delay and retry immediately (no-op unless idle). */
+    @Synchronized
     fun retryNow() {
         if (!shouldReconnect || _state.value != ConnectionState.DISCONNECTED) return
         reconnectJob?.cancel()
-        _state.value = ConnectionState.CONNECTING
+        publishState(ConnectionState.CONNECTING)
         doConnect()
     }
 
+    @Synchronized
     fun disconnect() {
+        connections.advance()
         shouldReconnect = false
         reconnectJob?.cancel()
         reconnectJob = null
         serverUrl = null
+        serverHost = null
         secureChannel?.close()
         secureChannel = null
         webSocket?.close(1000, "User disconnect")
         webSocket = null
-        _state.value = ConnectionState.DISCONNECTED
+        publishState(ConnectionState.DISCONNECTED)
         reconnectAttempt = 0
     }
 
@@ -205,11 +240,17 @@ class WebSocketClient(context: Context, private val scope: CoroutineScope) {
                 _events.tryEmit("Thử kết nối lại lần $nextAttempt sau ${delayMs / 1000.0}s")
             }
             delay(delayMs)
-            if (!shouldReconnect || serverUrl != failedUrl) return@launch
-            reconnectAttempt = nextAttempt
-            _state.value = ConnectionState.CONNECTING
-            doConnect()
+            synchronized(this@WebSocketClient) {
+                if (!shouldReconnect || serverUrl != failedUrl) return@synchronized
+                reconnectAttempt = nextAttempt
+                publishState(ConnectionState.CONNECTING)
+                doConnect()
+            }
         }
+    }
+
+    private fun publishState(state: ConnectionState) {
+        _state.value = state
     }
 
     companion object {

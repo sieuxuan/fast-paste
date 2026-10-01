@@ -49,7 +49,8 @@ class GoogleDriveCloudSync(
                 .filterNot { isDeleted(it.content, it.timestamp, it.pinned) }
             val localCloudEntries = activeLocalEntries.map { it.toCloudEntry() }
             val merged = mergeEntries(remoteEntries + localCloudEntries)
-            uploadMissingBlobs(accessToken, merged, encryptionStore)
+            val migrateBlobs = !downloaded.blobEncodingVerified || downloaded.encrypted != (encryptionStore?.isEnabled == true)
+            uploadMissingBlobs(accessToken, merged, encryptionStore, migrateBlobs)
             val mergedManifest = manifestEntries(merged)
             val toMerge = remoteEntries.map {
                 ClipboardEntry(
@@ -76,6 +77,7 @@ class GoogleDriveCloudSync(
             if (remoteFile == null ||
                 mergedManifest != normalizedRemote ||
                 downloaded.encrypted != (encryptionStore?.isEnabled == true)
+                || migrateBlobs
             ) {
                 uploadEntries(accessToken, remoteFile?.id, mergedManifest, encryptionStore)
             }
@@ -118,7 +120,9 @@ class GoogleDriveCloudSync(
             val payload = decrypted ?: wirePayload
             val json = JSONObject(payload)
             val entries = json.optJSONArray("entries") ?: JSONArray()
-            return DownloadResult(parseEntries(entries), decrypted != null)
+            val encrypted = decrypted != null
+            return DownloadResult(parseEntries(entries), encrypted,
+                json.optInt("schema") >= 3 && json.has("blobEncryption") && json.optBoolean("blobEncryption") == encrypted)
         }
     }
 
@@ -129,7 +133,8 @@ class GoogleDriveCloudSync(
         encryptionStore: EncryptionStore?
     ) {
         val plainPayload = JSONObject()
-             .put("schema", 2)
+            .put("schema", 3)
+            .put("blobEncryption", encryptionStore?.isEnabled == true)
             .put("updatedAt", System.currentTimeMillis())
             .put("entries", JSONArray().also { array ->
                 entries.forEach { entry ->
@@ -209,10 +214,10 @@ class GoogleDriveCloudSync(
             .build()
     }
 
-    private fun updateRequest(accessToken: String, fileId: String, payload: String): Request {
+    private fun updateRequest(accessToken: String, fileId: String, payload: String, fileName: String = FILE_NAME): Request {
         val boundary = "fastpaste_${System.currentTimeMillis()}"
         val metadata = JSONObject()
-            .put("name", FILE_NAME)
+            .put("name", fileName)
             .toString()
         val body = multipartBody(boundary, metadata, payload)
         val encodedFileId = encodePathSegment(fileId)
@@ -284,7 +289,7 @@ class GoogleDriveCloudSync(
                 },
                 blobSize = item.optLong("blobSize", payload?.encodedSize() ?: 0L),
                 blobReady = if (payload != null && payload.kind != ClipboardPayload.KIND_TEXT) {
-                    payload.data.isNotBlank()
+                    payload.hasBody()
                 } else {
                     item.optBoolean("blobReady", true)
                 }
@@ -340,7 +345,7 @@ class GoogleDriveCloudSync(
 
     private fun CloudEntry.hasPayloadBody(): Boolean = payload
         ?.takeIf { it.kind != ClipboardPayload.KIND_TEXT }
-        ?.let { it.data.isNotBlank() }
+        ?.let { it.hasBody() }
         ?: false
 
     private fun manifestEntries(entries: List<CloudEntry>): List<CloudEntry> = entries.map { entry ->
@@ -352,7 +357,7 @@ class GoogleDriveCloudSync(
                 payload = ClipboardPayload.fromJson(payload.metadataJson()),
                 blobId = entry.blobId.ifBlank { payload.fingerprint() },
                 blobSize = entry.blobSize.takeIf { it > 0 } ?: payload.encodedSize(),
-                blobReady = false
+                blobReady = payload.kind == ClipboardPayload.KIND_HTML && payload.hasBody()
             )
         }
     }
@@ -360,9 +365,35 @@ class GoogleDriveCloudSync(
     private suspend fun uploadMissingBlobs(
         accessToken: String,
         entries: List<CloudEntry>,
-        encryptionStore: EncryptionStore?
+        encryptionStore: EncryptionStore?,
+        migrateExisting: Boolean
     ) {
-        val remoteNames = listBlobNames(accessToken)
+        val remoteFiles = listBlobFiles(accessToken)
+        val remoteNames = remoteFiles.mapTo(mutableSetOf()) { it.name }
+        if (migrateExisting) {
+            val encrypted = encryptionStore?.isEnabled == true
+            for (file in remoteFiles) {
+                val blobId = file.name.removePrefix(BLOB_PREFIX).removeSuffix(".json")
+                if (!file.name.startsWith(BLOB_PREFIX) || !file.name.endsWith(".json") ||
+                    !blobId.matches(Regex("[a-fA-F0-9]{64}"))) continue
+                val request = Request.Builder()
+                    .url("$DRIVE_FILES_URL/${encodePathSegment(file.id)}?alt=media")
+                    .addHeader("Authorization", "Bearer $accessToken").build()
+                val wire = client.newCall(request).execute().use { response ->
+                    check(response.isSuccessful) { "Drive migrate image failed: HTTP ${response.code}" }
+                    response.body?.string().orEmpty()
+                }
+                val decrypted = encryptionStore?.decryptIfEncrypted(wire)
+                if ((decrypted != null) == encrypted) continue
+                val plain = decrypted ?: wire
+                val payload = ClipboardPayload.fromJson(JSONObject(plain))
+                check(payload.isWithinLimit() && payload.matchesFingerprint(blobId)) {
+                    "Ảnh Drive không qua kiểm tra toàn vẹn; chưa chuyển chế độ mã hoá."
+                }
+                val migrated = if (encrypted) encryptionStore!!.protect(plain, EncryptionStore.TYPE_ENCRYPTED_DRIVE_BLOB) else plain
+                executeUploadWithRetry({ updateRequest(accessToken, file.id, migrated, file.name) }, "Drive migrate image")
+            }
+        }
         val uploaded = mutableSetOf<String>()
         entries.forEach { entry ->
             val payload = entry.payload?.takeIf { entry.hasPayloadBody() } ?: return@forEach
@@ -382,21 +413,30 @@ class GoogleDriveCloudSync(
         }
     }
 
-    private fun listBlobNames(accessToken: String): Set<String> {
+    private fun listBlobFiles(accessToken: String): List<CloudFile> {
         val query = URLEncoder.encode("name contains '$BLOB_PREFIX' and trashed=false", "UTF-8")
-        val request = Request.Builder()
-            .url("$DRIVE_FILES_URL?spaces=appDataFolder&q=$query&pageSize=1000&fields=files(id%2Cname)")
+        val result = mutableListOf<CloudFile>()
+        val seen = mutableSetOf<String>()
+        var pageToken = ""
+        do {
+          val page = if (pageToken.isBlank()) "" else "&pageToken=${encodePathSegment(pageToken)}"
+          val request = Request.Builder()
+            .url("$DRIVE_FILES_URL?spaces=appDataFolder&q=$query&pageSize=1000&fields=nextPageToken%2Cfiles(id%2Cname)$page")
             .addHeader("Authorization", "Bearer $accessToken")
             .build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) error("Drive list blob failed: HTTP ${response.code}")
-            val files = JSONObject(response.body?.string().orEmpty()).optJSONArray("files") ?: JSONArray()
-            return buildSet {
+            val json = JSONObject(response.body?.string().orEmpty())
+            val files = json.optJSONArray("files") ?: JSONArray()
                 for (index in 0 until files.length()) {
-                    files.optJSONObject(index)?.optString("name")?.takeIf(String::isNotBlank)?.let(::add)
+                    val file = files.optJSONObject(index) ?: continue
+                    if (file.optString("id").isNotBlank()) result += CloudFile(file.getString("id"), file.optString("name"))
                 }
-            }
+            pageToken = json.optString("nextPageToken")
+            check(pageToken.isBlank() || seen.add(pageToken)) { "Drive lặp page token; hãy thử lại." }
         }
+        } while (pageToken.isNotBlank())
+        return result
     }
 
     suspend fun downloadBlob(
@@ -415,7 +455,7 @@ class GoogleDriveCloudSync(
             val wire = response.body?.string().orEmpty()
             val plain = encryptionStore?.decryptIfEncrypted(wire) ?: wire
             val payload = ClipboardPayload.fromJson(JSONObject(plain))
-            check(payload.isWithinLimit() && payload.fingerprint() == blobId) {
+            check(payload.isWithinLimit() && payload.matchesFingerprint(blobId)) {
                 "Blob Drive không qua được kiểm tra toàn vẹn"
             }
             payload
@@ -436,11 +476,12 @@ class GoogleDriveCloudSync(
         return URLEncoder.encode(value, "UTF-8").replace("+", "%20")
     }
 
-    private data class CloudFile(val id: String)
+    private data class CloudFile(val id: String, val name: String = "")
 
     private data class DownloadResult(
         val entries: List<CloudEntry>,
-        val encrypted: Boolean
+        val encrypted: Boolean,
+        val blobEncodingVerified: Boolean = false
     )
 
     private data class CloudEntry(

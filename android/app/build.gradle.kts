@@ -32,8 +32,8 @@ android {
         applicationId = "com.fastpaste.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 227
-        versionName = "2.2.7"
+        versionCode = 229
+        versionName = "2.2.9"
     }
 
     signingConfigs {
