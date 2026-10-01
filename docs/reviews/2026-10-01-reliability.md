@@ -19,7 +19,7 @@ Regression tests cover failed-save retry state, actual Windows file locking/atom
 
 Build and release results are recorded in the task response and GitHub Actions. No phone is connected to ADB, so real-device notification lifecycle, two-way copy/paste across applications and OEM background restrictions still need device testing. OAuth and encryption migration are not exercised against a real Drive account locally.
 
-Local verification before release: 57 Rust tests and 17 Android tests pass; Android debug assembly and lint complete (0 errors, 44 warnings). JavaScript syntax and Git diff whitespace checks pass. Clippy completes with the two pre-existing constant-size `chunks_exact` suggestions.
+Local verification before release: 58 Rust tests and 17 Android tests pass; Android debug assembly and lint complete (0 errors, 44 warnings). JavaScript syntax and Git diff whitespace checks pass. Clippy completes with the two pre-existing constant-size `chunks_exact` suggestions.
 
 ## Further work requiring a separate design
 

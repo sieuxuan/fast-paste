@@ -64,7 +64,7 @@ internal fun ClipboardService.sendHistorySync(client: WebSocketClient) {
                                 val blobId = entry.blobId.ifBlank { entryPayload.fingerprint() }
                                 item.put("blobId", blobId)
                                     .put("blobSize", entryPayload.encodedSize())
-                                    .put("blobReady", false)
+                                    .put("blobReady", entryPayload.kind == ClipboardPayload.KIND_HTML && entryPayload.hasBody())
                                     .put("payload", entryPayload.metadataJson())
                             }
                         }
@@ -101,7 +101,7 @@ internal fun ClipboardService.sendHistorySync(client: WebSocketClient) {
                                 if (client.isSecure) {
                                     item.put("blobId", currentPayload.fingerprint())
                                         .put("blobSize", currentPayload.encodedSize())
-                                        .put("blobReady", false)
+                                        .put("blobReady", currentPayload.kind == ClipboardPayload.KIND_HTML && currentPayload.hasBody())
                                         .put("payload", currentPayload.metadataJson())
                                 } else {
                                     item.put("payload", currentPayload.toJson())
@@ -164,7 +164,8 @@ internal suspend fun ClipboardService.mergeHistorySync(entries: JSONArray, curso
             val folder = ClipboardRepository.cleanFolderName(item.optString("folder", ""))
             val blobId = item.optString("blobId")
             val blobSize = item.optLong("blobSize", 0L)
-            val blobReady = item.optBoolean("blobReady", true)
+            val blobReady = item.optBoolean("blobReady", true) ||
+                (incomingPayload.kind == ClipboardPayload.KIND_HTML && incomingPayload.hasBody())
             if (timestamp > newestIncomingTimestamp) {
                 newestIncomingTimestamp = timestamp
                 newestIncomingPayload = incomingPayload

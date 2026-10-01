@@ -982,7 +982,12 @@ pub(crate) fn make_history_delta_payload(
                 }),
                 blob_id: item.blob_id.clone(),
                 blob_size: item.blob_size,
-                blob_ready: !is_blob,
+                blob_ready: !is_blob
+                    || item
+                        .payload
+                        .as_ref()
+                        .map(|payload| payload.kind == "html" && !payload.html.is_empty())
+                        .unwrap_or(false),
             }
         })
         .collect();
@@ -1230,6 +1235,33 @@ pub(crate) fn history_revision(
 #[cfg(test)]
 mod revision_tests {
     use super::*;
+
+    #[test]
+    fn reconnect_delta_keeps_inline_html_ready_but_defers_image_body() {
+        let mut data = crate::state::empty_state();
+        let mut html = make_history_item("html", "PC");
+        html.payload = Some(ClipboardPayload {
+            kind: "html".into(),
+            text: "html".into(),
+            html: "<b>html</b>".into(),
+            ..Default::default()
+        });
+        let mut image = make_history_item("image", "PC");
+        image.payload = Some(ClipboardPayload {
+            kind: "image".into(),
+            text: "image".into(),
+            data: "AAAA".into(),
+            ..Default::default()
+        });
+        data.history = vec![html, image];
+        let wire = make_history_delta_payload(&mut data, None, 0).unwrap();
+        let message: serde_json::Value = serde_json::from_str(&wire).unwrap();
+        let entries = message["entries"].as_array().unwrap();
+        assert_eq!(entries[0]["blobReady"], true);
+        assert_eq!(entries[0]["payload"]["html"], "<b>html</b>");
+        assert_eq!(entries[1]["blobReady"], false);
+        assert_eq!(entries[1]["payload"]["data"], "");
+    }
 
     #[test]
     fn completed_image_download_keeps_copy_timestamp_and_legacy_identity() {
